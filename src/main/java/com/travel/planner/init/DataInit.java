@@ -33,6 +33,6 @@ public class DataInit {
         placeRepository.save(p4);
         placeRepository.save(p5);
 
-        System.out.println("✅ 시즈오카 테스트 데이터 5건이 DB에 완벽하게 저장되었습니다!");
+        System.out.println("시즈오카 테스트 데이터 5건이 DB에 완벽하게 저장되었습니다!");
     }
 }

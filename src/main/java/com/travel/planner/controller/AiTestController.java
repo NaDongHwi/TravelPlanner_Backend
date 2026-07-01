@@ -30,9 +30,9 @@ public class AiTestController {
         try {
             // 구글 서버에 질문을 던지고 답변을 받아옵니다.
             String response = restTemplate.postForObject(url, requestBody, String.class);
-            return "✅ Gemini 응답 성공: " + response;
+            return "Gemini 응답 성공: " + response;
         } catch (Exception e) {
-            return "❌ 에러 발생: " + e.getMessage();
+            return "에러 발생: " + e.getMessage();
         }
     }
 }

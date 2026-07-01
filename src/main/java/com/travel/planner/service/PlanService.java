@@ -106,7 +106,7 @@ public class PlanService {
         return bestRoute; // 최종적으로 순서가 가장 예쁘게 정렬된 장소 리스트를 반환합니다.
     }
 
-    // 💡 TSP 탐색을 위한 깊이 우선 탐색(DFS) 및 백트래킹(Backtracking) 로직
+    // TSP 탐색을 위한 깊이 우선 탐색(DFS) 및 백트래킹(Backtracking) 로직
     private void dfs(List<Place> places, boolean[] visited, List<Place> currentRoute, List<Place> bestRoute, double[] minDistance, double currentDist) {
         // 모든 장소를 다 방문했을 때 (하나의 루트가 완성되었을 때)
         if (currentRoute.size() == places.size()) {

@@ -71,7 +71,7 @@ public class AiService {
                     .collect(Collectors.toList());
 
             mockResponse.setFinalRouteNames(routeNames);
-            mockResponse.setReason("💡 [임시 응답] 아직 제미나이 API 키가 주입되지 않아 AI 가중치 가공 단계는 보류 중이며, 현재 자체 K-Means 및 TSP 알고리즘이 계산한 최적 경로(총 " + routeNames.size() + "곳)가 정상 작동하여 출력되고 있습니다.");
+            mockResponse.setReason("[임시 응답] 아직 제미나이 API 키가 주입되지 않아 AI 가중치 가공 단계는 보류 중이며, 현재 자체 K-Means 및 TSP 알고리즘이 계산한 최적 경로(총 " + routeNames.size() + "곳)가 정상 작동하여 출력되고 있습니다.");
 
             return mockResponse;
 

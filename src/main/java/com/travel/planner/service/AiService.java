@@ -38,7 +38,7 @@ public class AiService {
                 "[임시 동선]: " + draftRouteStr + "\n\n" +
                 "【 엄격한 제약 조건 】\n" +
                 "1. 고객의 나이, 성별, 테마를 반영하여 장소를 1~2곳 교체해도 좋아.\n" +
-                "2. 단, '임시 동선'의 물리적인 이동 거리와 지리적 범위(클러스터)를 절대 벗어나지 마. " +
+                "2. 단, '임시 동선'의 물리적인 이동 거리และ 지리적 범위(클러스터)를 절대 벗어나지 마. " +
                 "이동이 불가능한 엉뚱한 지역의 장소를 추천하면 안 돼.\n" +
                 "3. 가중치나 테마에 너무 치우쳐서 밥 먹을 시간도 없이 빡빡하게 짜지 마.\n\n" +
                 "응답은 반드시 아래의 JSON 형식으로만 출력해. 마크다운(```json)이나 다른 설명은 절대 넣지 마.\n" +
@@ -49,7 +49,9 @@ public class AiService {
 
         // 3. 구글 제미나이에 보낼 JSON 양식 만들기
         String requestBody = "{ \"contents\": [{ \"parts\":[{\"text\": \"" + prompt + "\"}] }] }";
-        String url = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=)" + geminiApiKey;
+
+        // 이 한 줄만 2.5로 변경하시면 완벽합니다!
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=" + geminiApiKey;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -61,10 +63,16 @@ public class AiService {
             // String responseJson = restTemplate.postForObject(url, request, String.class);
             // return parseGeminiResponse(responseJson);
 
-            // 임시 테스트용 리턴 객체 (프론트엔드 테스트용)
             AiRouteResponse mockResponse = new AiRouteResponse();
-            mockResponse.setFinalRouteNames(List.of("시즈오카역", "슨푸성 공원", "아오바 요코초"));
-            mockResponse.setReason("20대 여성의 감성 카페 테마를 반영하여 동선을 일부 수정하였으며, 도보 이동이 가능한 거리로만 재구성했습니다.");
+
+            // draftRoute(Place 객체 리스트)에서 장소 이름만 동적으로 추출합니다.
+            List<String> routeNames = draftRoute.stream()
+                    .map(Place::getName)
+                    .collect(Collectors.toList());
+
+            mockResponse.setFinalRouteNames(routeNames);
+            mockResponse.setReason("💡 [임시 응답] 아직 제미나이 API 키가 주입되지 않아 AI 가중치 가공 단계는 보류 중이며, 현재 자체 K-Means 및 TSP 알고리즘이 계산한 최적 경로(총 " + routeNames.size() + "곳)가 정상 작동하여 출력되고 있습니다.");
+
             return mockResponse;
 
         } catch (Exception e) {

@@ -1,18 +1,40 @@
 package com.travel.planner.controller;
 
+import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.entity.Place;
+import com.travel.planner.service.AiService;
+import com.travel.planner.service.PlanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/plans")
+@RequiredArgsConstructor
 @Tag(name = "1. 여행 일정 API", description = "일정 기획 및 동선 최적화 관련 API (담당: 나동휘)")
 public class PlanController {
 
+    private final PlanService planService;
+    private final AiService aiService;
+    private final com.travel.planner.repository.PlaceRepository placeRepository;
+
     @PostMapping
-    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 K-Means 및 TSP 연산을 시작합니다.")
-    public String createPlan() {
-        return "✅ AI 최적화 연산이 시작되었습니다.";
+    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환합니다.")
+    public AiRouteResponse createPlan() {
+        String userContext = "성별: 20대 여성, 동행: 친구, 테마: 시즈오카 후지산 뷰와 인스타 감성";
+
+        // 1. DB에 저장된 시즈오카 명소 5곳을 전부 가져옵니다.
+        List<Place> realPlaces = placeRepository.findAll();
+
+        // 2. TSP(최단 거리) 알고리즘을 돌려서 5곳의 방문 순서를 정렬합니다.
+        List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
+
+        // 3. 수학적으로 최적화된 동선을 AI에게 넘겨서 이유를 붙여달라고 합니다.
+        return aiService.evaluateAndModifyRoute(userContext, optimizedRoute);
     }
 
     @GetMapping("/{planId}/timeline")

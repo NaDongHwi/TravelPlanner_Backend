@@ -8,4 +8,6 @@ import org.springframework.stereotype.Repository;
 public interface UserRepository extends JpaRepository<User, Long> {
     // 이메일이 DB에 이미 존재하는지(중복 가입인지) 스프링이 알아서 검사해 줍니다.
     boolean existsByEmail(String email);
+
+    java.util.Optional<User> findByEmail(String email);
 }

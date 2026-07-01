@@ -17,7 +17,7 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    // 보고서 DAR-001 요구사항 반영: 성별과 나이는 필수(nullable = false)
+    // DAR-001 요구사항 반영: 성별과 나이는 필수(nullable = false)
     @Column(nullable = false)
     private String gender;
 

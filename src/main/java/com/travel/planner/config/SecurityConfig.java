@@ -1,30 +1,41 @@
 package com.travel.planner.config;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
+@RequiredArgsConstructor // JwtFilter를 주입받기 위해 필요합니다.
 public class SecurityConfig {
 
-    // 1. 비밀번호를 복호화 불가능한 해시로 뭉개버리는 도구를 준비합니다.
+    private final JwtFilter jwtFilter;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
-    // 2. 시큐리티가 스웨거나 회원가입 API를 막지 않도록 임시로 문을 열어줍니다.
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable()) // REST API 환경에서는 보통 CSRF를 끕니다.
+                .csrf(csrf -> csrf.disable())
+                // JWT를 쓰므로 스프링 시큐리티의 기본 세션(메모리) 방식을 끕니다.
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 지금은 개발 중이니 모든 API 주소("/**")를 일단 통과시켜 줍니다.
-                        .requestMatchers("/**").permitAll()
-                );
+                        // 회원가입, 로그인, 그리고 스웨거 화면은 토큰 없이 통과
+                        .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        // 그 외의 모든 기능(여행 일정 생성 등)은 반드시 토큰이 있어야만 통과
+                        .anyRequest().authenticated()
+                )
+                // 기본 문지기보다 만든 JwtFilter 문지기를 먼저 앞에 세웁니다.
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
 }

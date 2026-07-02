@@ -16,7 +16,7 @@ import org.springframework.context.annotation.Configuration;
         name = "bearerAuth",
         type = SecuritySchemeType.HTTP,
         bearerFormat = "JWT",
-        scheme = "bearer" // 💡 프론트엔드가 토큰 앞에 "Bearer "를 붙여 보내는 표준 규격입니다.
+        scheme = "bearer" // 프론트엔드가 토큰 앞에 "Bearer "를 붙여 보내는 표준 규격입니다.
 )
 public class SwaggerConfig {
 }

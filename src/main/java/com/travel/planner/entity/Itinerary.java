@@ -29,6 +29,9 @@ public class Itinerary {
     @Column(nullable = false)
     private Integer sequence; // 그 날의 방문 순서 (1, 2, 3...)
 
+    @Column(nullable = false)
+    private String time;
+
     // AI가 생성해 준 동선 배치 사유
     @Column(columnDefinition = "TEXT")
     private String aiComment;

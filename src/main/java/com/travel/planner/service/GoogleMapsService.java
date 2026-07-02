@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 @Service
 public class GoogleMapsService {
@@ -60,5 +62,36 @@ public class GoogleMapsService {
         } catch (Exception e) {
             return "구글 맵스 연동 오류로 실제 시간 측정 불가 (직선거리로 시간 배분 요망)";
         }
+    }
+
+    // 'Places API (Text Search)'를 사용합니다.
+    // 이중 인코딩을 방지
+    public double[] getCoordinates(String city, String placeName) {
+        try {
+            // 1. 직접 인코딩하지 않고, 검색어만 만듭니다.
+            String exactSearchQuery = placeName + " " + city;
+
+            // 2. URL에 직접 글자를 더하지 않고, 중괄호 {query}, {key} 를 뚫어놓습니다.
+            String url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+
+            // 3. getForObject의 뒤쪽 파라미터로 변수들을 순서대로 넘겨주면, 스프링이 안전하게 1번만 조립해 줍니다.
+            String response = restTemplate.getForObject(url, String.class, exactSearchQuery, googleMapsApiKey);
+
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response);
+            String status = root.path("status").asText();
+
+            if ("OK".equals(status)) {
+                com.fasterxml.jackson.databind.JsonNode location = root.path("results").get(0).path("geometry").path("location");
+                double lat = location.path("lat").asDouble();
+                double lng = location.path("lng").asDouble();
+                return new double[]{lat, lng};
+            } else {
+                System.out.println("장소 검색 실패 (" + exactSearchQuery + ") - 원인: " + status);
+            }
+        } catch (Exception e) {
+            System.out.println("네트워크 에러 (" + placeName + "): " + e.getMessage());
+        }
+
+        return new double[]{0.0, 0.0};
     }
 }

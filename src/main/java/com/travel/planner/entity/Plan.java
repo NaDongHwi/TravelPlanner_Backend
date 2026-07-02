@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.ArrayList;
 
 @Entity
 @Getter
@@ -30,4 +32,15 @@ public class Plan {
 
     // 테마 (힐링, 액티비티 등)
     private String theme;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiReason;
+
+    @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Itinerary> itineraries = new ArrayList<>();
+
+    public void addItinerary(Itinerary itinerary) {
+        itineraries.add(itinerary);
+        itinerary.setPlan(this);
+    }
 }

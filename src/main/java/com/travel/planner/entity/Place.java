@@ -16,6 +16,9 @@ public class Place {
     @Column(nullable = false)
     private String name;
 
+    @Column
+    private String city;
+
     // K-Means 및 TSP 연산을 위한 핵심 위도/경도 데이터
     @Column(nullable = false)
     private Double latitude;

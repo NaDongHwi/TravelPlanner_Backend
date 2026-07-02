@@ -3,13 +3,13 @@ package com.travel.planner.controller;
 import com.travel.planner.dto.AiRouteResponse;
 import com.travel.planner.entity.Place;
 import com.travel.planner.service.AiService;
+import com.travel.planner.service.GoogleMapsService;
 import com.travel.planner.service.PlanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -22,6 +22,7 @@ public class PlanController {
     private final AiService aiService;
     private final com.travel.planner.repository.PlaceRepository placeRepository;
     private final com.travel.planner.repository.UserRepository userRepository;
+    private final GoogleMapsService googleMapsService;
 
     @PostMapping
     @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환합니다.")
@@ -37,26 +38,38 @@ public class PlanController {
         com.travel.planner.entity.User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("회원을 찾을 수 없습니다."));
 
-        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO)을 합쳐서 완벽한 AI 조건을 조립합니다.
-        String userContext = String.format(
-                "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s",
+        // 프론트엔드에서 받은 고정 일정을 콤마(,)로 연결합니다. 없으면 "없음"으로 처리
+        String fixed = request.getFixedSchedules() != null && !request.getFixedSchedules().isEmpty()
+                ? String.join(", ", request.getFixedSchedules())
+                : "없음";
+
+        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO) + 고정일정까지 합쳐서 조립합니다.
+        String baseContext = String.format(
+                "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s, 고정일정(필수방문): %s",
                 user.getAgeGroup(),
                 user.getGender(),
-                request.getCity(), // (도쿄, 오사카 등)
-                request.getCompanion(), // (혼자, 친구 등)
-                String.join(", ", request.getThemes()), // (["맛집", "쇼핑"] -> "맛집, 쇼핑"으로 변환)
-                request.getTransportation() // (렌터카, 대중교통 등)
+                request.getCity(),
+                request.getCompanion(),
+                String.join(", ", request.getThemes()),
+                request.getTransportation(),
+                fixed // AI에게 넘길 고정 일정 추가
         );
 
         // [추후 수정 포인트] 지금은 findAll()로 무조건 다 가져오지만, 나중에는
         // placeRepository.findByCity(request.getCity()) 처럼 지역별로 필터링
         List<Place> realPlaces = placeRepository.findAll();
 
-        // TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다.
+        // 4. TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다. (물리적 뼈대 생성)
         List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
 
-        // 수학적으로 최적화된 동선과, 방금 조립한 완벽한 userContext를 AI에게 넘깁니다.
-        return aiService.evaluateAndModifyRoute(userContext, optimizedRoute);
+        // 5. 구글 맵스 API 단 1회 호출 (뼈대의 진짜 이동 시간 가져오기)
+        String travelTimes = googleMapsService.getRealTravelTimes(optimizedRoute);
+
+        // 6. 제미나이에게 줄 최종 프롬프트에 이동 시간을 합쳐서 전달
+        String finalContext = baseContext + "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes;
+
+        // 7. 제미나이가 최종 가중치를 판단하여 완벽한 타임라인을 생성
+        return aiService.evaluateAndModifyRoute(finalContext, optimizedRoute);
     }
 
     @GetMapping("/{planId}/timeline")

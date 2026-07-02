@@ -25,25 +25,37 @@ public class PlanController {
 
     @PostMapping
     @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환합니다.")
-    public AiRouteResponse createPlan(org.springframework.security.core.Authentication authentication) { // 괄호 안에 인증 객체 추가
+    public AiRouteResponse createPlan(
+            org.springframework.security.core.Authentication authentication,
+            @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.PlanRequest request
+    ) {
 
-        // JwtFilter가 토큰에서 꺼내둔 로그인한 회원의 이메일을 가져옵니다.
+        // 1. JwtFilter가 토큰에서 꺼내둔 로그인한 회원의 이메일을 가져옵니다.
         String email = authentication.getName();
 
-        // DB에서 해당 회원의 진짜 정보(나이, 성별)를 뽑아옵니다.
+        // 2. DB에서 해당 회원의 진짜 정보(나이, 성별)를 뽑아옵니다.
         com.travel.planner.entity.User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("❌ 회원을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("회원을 찾을 수 없습니다."));
 
-        // 회원 정보로 AI에게 줄 조건을 동적으로 조립합니다
-        String userContext = "연령대: " + user.getAgeGroup() + ", 성별: " + user.getGender() + ", 동행: 친구, 테마: 시즈오카 후지산 뷰와 인스타 감성";
+        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO)을 합쳐서 완벽한 AI 조건을 조립합니다.
+        String userContext = String.format(
+                "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s",
+                user.getAgeGroup(),
+                user.getGender(),
+                request.getCity(), // (도쿄, 오사카 등)
+                request.getCompanion(), // (혼자, 친구 등)
+                String.join(", ", request.getThemes()), // (["맛집", "쇼핑"] -> "맛집, 쇼핑"으로 변환)
+                request.getTransportation() // (렌터카, 대중교통 등)
+        );
 
-        // DB에 저장된 시즈오카 명소 5곳을 전부 가져옵니다.
+        // [추후 수정 포인트] 지금은 findAll()로 무조건 다 가져오지만, 나중에는
+        // placeRepository.findByCity(request.getCity()) 처럼 지역별로 필터링
         List<Place> realPlaces = placeRepository.findAll();
 
-        // TSP(최단 거리) 알고리즘을 돌려서 5곳의 방문 순서를 정렬합니다.
+        // TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다.
         List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
 
-        // 수학적으로 최적화된 동선을 AI에게 넘겨서 이유를 붙여달라고 합니다.
+        // 수학적으로 최적화된 동선과, 방금 조립한 완벽한 userContext를 AI에게 넘깁니다.
         return aiService.evaluateAndModifyRoute(userContext, optimizedRoute);
     }
 

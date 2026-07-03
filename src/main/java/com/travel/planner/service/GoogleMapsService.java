@@ -3,6 +3,8 @@ package com.travel.planner.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.planner.entity.Place;
+import com.travel.planner.entity.Region;
+import com.travel.planner.util.PrefectureMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -227,14 +229,20 @@ public class GoogleMapsService {
             JsonNode root = objectMapper.readTree(response);
 
             if ("OK".equals(root.path("status").asText())) {
-                return root.path("results").get(0).path("formatted_address").asText();
+                String formattedAddress = root.path("results").get(0).path("formatted_address").asText();
+
+                // [9대 지방 필터링 스캔 구동]
+                // 분석 주소가 바르지 않거나 47개 도도부현을 찾지 못하면 IllegalArgumentException이 터지며 상위 프로세스 정지
+                Region recognizedRegion = PrefectureMapper.getRegionFromAddress(formattedAddress);
+
+                System.out.println("🔍 [지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
+                return formattedAddress;
             } else {
-                // 구글이 지명을 아예 못 찾은 경우 (예: "ㅋㅋㅋ" 같은 이상한 입력)
-                throw new RuntimeException("구글 맵스에서 해당 지명을 찾을 수 없습니다.");
+                throw new RuntimeException("구글 맵스에서 해당 지명을 식별하지 못했습니다.");
             }
         } catch (Exception e) {
-            // 억지로 기본값을 리턴하지 않고, 에러를 과감하게 발생시킵니다(쓰레기 데이터 DB 적재 방지)
-            throw new RuntimeException("지명 검증 실패: " + e.getMessage());
+            // 가짜 데이터 적재 방지를 위해 예외 메시지를 그대로 감싸서 컨트롤러 단으로 밀어 올립니다.
+            throw new RuntimeException("지명 정밀 검증 실패: " + e.getMessage());
         }
     }
 }

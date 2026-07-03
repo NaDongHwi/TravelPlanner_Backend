@@ -36,6 +36,18 @@ public class Plan {
     @Column(columnDefinition = "TEXT")
     private String aiReason;
 
+    @Column
+    private String inCity;
+
+    @Column
+    private String outCity;
+
+    @Column
+    private String inTime; // 입국 시간 (오전/오후/저녁/미정)
+
+    @Column
+    private String outTime; // 출국 시간 (오전/오후/저녁/미정)
+
     @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Itinerary> itineraries = new ArrayList<>();
 

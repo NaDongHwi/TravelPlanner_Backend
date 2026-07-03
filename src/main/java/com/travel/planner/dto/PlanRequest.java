@@ -31,4 +31,12 @@ public class PlanRequest {
 
     @Schema(description = "고정 일정 리스트 (Step 6)", example = "[\"아키하바라 애니메이트\"]")
     private List<String> fixedSchedules;
+
+    // 입출국 도시
+    private String inCity;
+    private String outCity;
+
+    // 입출국 시간 (예: "오전", "오후", "저녁", "미정")
+    private String inTime;
+    private String outTime;
 }

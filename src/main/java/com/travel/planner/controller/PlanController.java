@@ -9,6 +9,7 @@ import com.travel.planner.service.AiService;
 import com.travel.planner.service.GoogleMapsService;
 import com.travel.planner.service.PlanService;
 import com.travel.planner.service.WeatherService;
+import com.travel.planner.service.PlanValidationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -28,11 +29,21 @@ public class PlanController {
     private final com.travel.planner.repository.PlaceRepository placeRepository;
     private final com.travel.planner.repository.UserRepository userRepository;
     private final GoogleMapsService googleMapsService;
-
-    // DB 저장을 위한 PlanRepository 추가
     private final com.travel.planner.repository.PlanRepository planRepository;
-
     private final WeatherService weatherService;
+    private final PlanValidationService planValidationService;
+
+    @GetMapping("/validate")
+    @Operation(summary = "다중 도시 일정 검증 (Soft Warning)",
+            description = "입/출국 도시와 선택한 도시들, 숙박 일수를 바탕으로 피로도 점수를 계산하여 무리한 일정인지 경고 메시지를 반환합니다.")
+    public PlanValidationService.ValidationResult validatePlan(
+            @RequestParam List<String> selectedCities,
+            @RequestParam String inCity,
+            @RequestParam String outCity,
+            @RequestParam int nights
+    ) {
+        return planValidationService.validateMultiCityPlan(selectedCities, inCity, outCity, nights);
+    }
 
     @PostMapping
     @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
@@ -53,16 +64,22 @@ public class PlanController {
                 ? String.join(", ", request.getFixedSchedules())
                 : "없음";
 
-        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO) + 고정일정까지 합쳐서 조립합니다.
+        // 프론트엔드에서 시간이 안 넘어왔을 경우(null) "미정"으로 처리하는 방어 로직
+        String arrivalTime = (request.getInTime() != null) ? request.getInTime() : "미정";
+        String departureTime = (request.getOutTime() != null) ? request.getOutTime() : "미정";
+
+        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO) + 비행시간 합쳐서 조립
         String baseContext = String.format(
-                "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s, 고정일정(필수방문): %s",
+                "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s, 고정일정: %s, [입국 시간: %s], [출국 시간: %s]",
                 user.getAgeGroup(),
                 user.getGender(),
                 request.getCity(),
                 request.getCompanion(),
                 String.join(", ", request.getThemes()),
                 request.getTransportation(),
-                fixed // AI에게 넘길 고정 일정 추가
+                fixed,
+                arrivalTime,
+                departureTime
         );
 
         List<Place> realPlaces = placeRepository.findByCity(request.getCity());
@@ -105,6 +122,10 @@ public class PlanController {
         plan.setTitle(request.getCity() + " 여행"); // 예: "시즈오카 여행"
         plan.setStartDate(request.getStartDate());
         plan.setEndDate(request.getEndDate());
+        plan.setInCity(request.getInCity());
+        plan.setOutCity(request.getOutCity());
+        plan.setInTime(arrivalTime);
+        plan.setOutTime(departureTime);
 
         // 테마 값이 null이 아닐 때만 콤마로 연결
         if (request.getThemes() != null) {

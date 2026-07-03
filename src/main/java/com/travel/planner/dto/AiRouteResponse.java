@@ -18,10 +18,14 @@ public class AiRouteResponse {
     @Getter
     @Setter
     public static class TimelineItem {
-        private int day;            // 예: 1 (1일차)
+        private int day;            // 예: 1
         private String time;        // 예: "09:00"
         private String placeName;   // 예: "아사쿠사"
-        private String category;    // 예: "관광", "문화", "맛집" 등
-        private String description; // 예: "현지인들에게 인기 있는 전통 거리입니다."
+        private String category;    // 예: "관광"
+        private String description; // 예: "1줄 설명"
+
+        // 프론트엔드 지도 렌더링을 위한 좌표 데이터
+        private Double latitude;
+        private Double longitude;
     }
 }

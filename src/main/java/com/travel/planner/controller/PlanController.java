@@ -67,11 +67,24 @@ public class PlanController {
         // 4. TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다. (물리적 뼈대 생성)
         List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
 
-        // 5. 구글 맵스 API 단 1회 호출 (뼈대의 진짜 이동 시간 가져오기) - 파라미터 수정
+        // 5. 구글 맵스 API 단 1회 호출 (뼈대의 진짜 이동 시간 가져오기)
         String travelTimes = googleMapsService.getRealTravelTimes(optimizedRoute);
 
-        // 6. 제미나이에게 줄 최종 프롬프트에 이동 시간을 합쳐서 전달
-        String finalContext = baseContext + "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes;
+        // 5.5 [데이터 인리치먼트 핵심] DB에서 장소별 진짜 영업시간을 뽑아 동적 제약 조건 만들기
+        StringBuilder dynamicConstraints = new StringBuilder();
+        dynamicConstraints.append("\n\n[장소별 실제 영업시간 및 절대 제약 조건]\n");
+        dynamicConstraints.append("AI는 아래 나열된 각 장소의 실제 영업시간을 반드시 분석하고, 문이 닫혀있는 시간에는 절대 방문 일정을 짜지 마세요.\n");
+
+        for (Place p : optimizedRoute) {
+            String opHours = (p.getOpeningHours() != null && !p.getOpeningHours().equals("영업시간 정보 없음"))
+                    ? p.getOpeningHours()
+                    : "24시간 상시 개방 또는 정보 없음 (상식적인 주간 시간대에 유연하게 배정하세요)";
+
+            dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append("\n");
+        }
+
+        // 6. 제미나이에게 줄 최종 프롬프트에 이동 시간과 영업시간 제약 조건을 모두 합쳐서 줍니다.
+        String finalContext = baseContext + "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes + dynamicConstraints.toString();
 
         // 7. 제미나이가 최종 가중치를 판단하여 완벽한 타임라인을 생성
         AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(finalContext, optimizedRoute);
@@ -107,19 +120,18 @@ public class PlanController {
 
                 // [구글 API 동적 수집 파이프라인] DB에 장소가 없으면 진짜 구글에서 가져옵니다
                 if (matchedPlace == null) {
-                    System.out.println("⚠️ DB에 장소 없음! 구글 맵스 API 동적 수집 발동: " + item.getPlaceName());
+                    System.out.println("DB에 장소 없음! 구글 맵스 API 동적 수집 발동: " + item.getPlaceName());
 
-                    Place newDynamicPlace = new Place();
-                    newDynamicPlace.setName(item.getPlaceName());
-                    newDynamicPlace.setCity(request.getCity());
+                    // 좌표(double[]) 대신, 좌표+영업시간이 있는 Place 객체를 통째로 받아옵니다
+                    Place fetchedPlace = googleMapsService.getPlaceDetails(request.getCity(), item.getPlaceName());
 
-                    // 구글 API 서비스로 진짜 좌표를 받아옵니다
-                    double[] coords = googleMapsService.getCoordinates(request.getCity(), item.getPlaceName());
-                    newDynamicPlace.setLatitude(coords[0]);
-                    newDynamicPlace.setLongitude(coords[1]);
+                    // 이름과 도시는 프론트엔드/AI가 준 데이터로 세팅
+                    fetchedPlace.setName(item.getPlaceName());
+                    fetchedPlace.setCity(request.getCity());
+                    fetchedPlace.setLastUpdated(java.time.LocalDateTime.now()); // 업데이트 시간 기록
 
-                    // 진짜 좌표가 들어간 신규 장소를 즉각 DB에 저장
-                    matchedPlace = placeRepository.save(newDynamicPlace);
+                    // 진짜 좌표와 진짜 영업시간이 모두 들어간 신규 장소를 즉각 DB에 저장
+                    matchedPlace = placeRepository.save(fetchedPlace);
                 }
 
                 if (matchedPlace != null) {
@@ -151,9 +163,14 @@ public class PlanController {
             AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
             item.setDay(iti.getDayNumber());
             item.setTime(iti.getTime());
-            item.setPlaceName(iti.getPlace().getName()); // Place 객체에서 이름 꺼내기
-            item.setCategory("분류 정보"); // 카테고리
+            item.setPlaceName(iti.getPlace().getName());
+            item.setCategory("분류 정보");
             item.setDescription(iti.getAiComment());
+
+            // DB에 저장된 진짜 위/경도를 꺼내서 담아줍니다.
+            item.setLatitude(iti.getPlace().getLatitude());
+            item.setLongitude(iti.getPlace().getLongitude());
+
             return item;
         }).collect(Collectors.toList());
 

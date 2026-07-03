@@ -28,4 +28,16 @@ public class Place {
 
     // 무장애 설비 여부 등 (기획서 제약 조건 반영)
     private Boolean isWheelchairAccessible;
+
+    // AI 데이터 파이프라인으로 채워 넣을 테마 (예: "맛집, 사진")
+    @Column(length = 100)
+    private String theme;
+
+    // 구글 API로 미리 긁어올 영업시간 (예: "09:00-21:00")
+    @Column(length = 255)
+    private String openingHours;
+
+    // 30일마다 갱신하기 위한 마지막 업데이트 시간 기록
+    @Column
+    private java.time.LocalDateTime lastUpdated;
 }

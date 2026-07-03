@@ -81,66 +81,43 @@ public class PlanService {
         return clusters; // 최종적으로 묶인 그룹(일자별 장소 리스트)을 반환합니다.
     }
 
-    // 2. TSP(Traveling Salesman Problem) 최단 거리 동선 계산 로직
-    // K-Means로 묶인 하루치 장소들(dayPlaces)의 방문 순서를 최적화합니다.
+    // DFS 대신 Nearest Neighbor(그리디) 방식 적용
     public List<Place> calculateShortestPath(List<Place> dayPlaces) {
         if (dayPlaces == null || dayPlaces.size() <= 1) return dayPlaces;
 
-        List<Place> bestRoute = new ArrayList<>();
-        double[] minDistance = {Double.MAX_VALUE};
-        boolean[] visited = new boolean[dayPlaces.size()];
-        List<Place> currentRoute = new ArrayList<>();
+        List<Place> route = new ArrayList<>();
+        // 아직 방문하지 않은 장소 리스트를 복사해서 만듭니다.
+        List<Place> unvisited = new ArrayList<>(dayPlaces);
 
-        // 모든 장소를 한 번씩 시작점으로 삼아 모든 경우의 수를 탐색(DFS)하여 완벽한 최단 거리를 찾습니다.
-        for (int i = 0; i < dayPlaces.size(); i++) {
-            visited[i] = true;
-            currentRoute.add(dayPlaces.get(i));
+        // 1. 첫 번째 장소를 시작점으로 잡습니다.
+        Place current = unvisited.remove(0);
+        route.add(current);
 
-            // 재귀 함수(DFS) 호출 시작
-            dfs(dayPlaces, visited, currentRoute, bestRoute, minDistance, 0.0);
+        // 2. 남은 장소가 없을 때까지, 현재 위치에서 '가장 가까운 장소'를 찾아 다음 목적지로 이어붙입니다.
+        while (!unvisited.isEmpty()) {
+            Place nearest = null;
+            double minDistance = Double.MAX_VALUE;
 
-            currentRoute.remove(currentRoute.size() - 1);
-            visited[i] = false;
-        }
-
-        return bestRoute; // 최종적으로 순서가 가장 예쁘게 정렬된 장소 리스트를 반환합니다.
-    }
-
-    // TSP 탐색을 위한 깊이 우선 탐색(DFS) 및 백트래킹(Backtracking) 로직
-    private void dfs(List<Place> places, boolean[] visited, List<Place> currentRoute, List<Place> bestRoute, double[] minDistance, double currentDist) {
-        // 모든 장소를 다 방문했을 때 (하나의 루트가 완성되었을 때)
-        if (currentRoute.size() == places.size()) {
-            if (currentDist < minDistance[0]) {
-                minDistance[0] = currentDist; // 최소 거리 갱신
-                bestRoute.clear();
-                bestRoute.addAll(currentRoute); // 가장 짧은 루트 저장
-            }
-            return;
-        }
-
-        Place lastPlace = currentRoute.get(currentRoute.size() - 1);
-
-        for (int i = 0; i < places.size(); i++) {
-            if (!visited[i]) {
-                visited[i] = true;
-                Place nextPlace = places.get(i);
-
-                // 하버사인 거리 계산기 꺼내 쓰기
+            for (Place candidate : unvisited) {
+                // 하버사인 공식으로 거리 계산
                 double dist = DistanceUtil.calculateDistance(
-                        lastPlace.getLatitude(), lastPlace.getLongitude(),
-                        nextPlace.getLatitude(), nextPlace.getLongitude()
+                        current.getLatitude(), current.getLongitude(),
+                        candidate.getLatitude(), candidate.getLongitude()
                 );
 
-                currentRoute.add(nextPlace);
-
-                // 현재까지의 거리가 이미 알려진 최소 거리보다 짧을 때만 계속 탐색 (연산 속도 최적화)
-                if (currentDist + dist < minDistance[0]) {
-                    dfs(places, visited, currentRoute, bestRoute, minDistance, currentDist + dist);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    nearest = candidate;
                 }
-
-                currentRoute.remove(currentRoute.size() - 1);
-                visited[i] = false;
             }
+
+            // 가장 가까운 장소를 경로에 추가하고, 미방문 리스트에서 제거
+            route.add(nearest);
+            unvisited.remove(nearest);
+            // 현재 위치를 방금 찾은 장소로 이동
+            current = nearest;
         }
+
+        return route; // 0.01초 만에 정렬된 임시 동선 뼈대 반환
     }
 }

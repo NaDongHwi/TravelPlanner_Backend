@@ -7,14 +7,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 
 @Service
 public class GoogleMapsService {
 
-    // yml 파일의 경로에 맞게 값을 가져옵니다.
     @Value("${google.maps.api-key}")
     private String googleMapsApiKey;
 
@@ -25,18 +23,15 @@ public class GoogleMapsService {
         if (route == null || route.size() < 2) return "이동 시간 정보 없음";
 
         try {
-            // 1. 출발지, 도착지 지정
             String origin = route.get(0).getLatitude() + "," + route.get(0).getLongitude();
             String destination = route.get(route.size() - 1).getLatitude() + "," + route.get(route.size() - 1).getLongitude();
 
-            // 2. 중간 경유지(Waypoints)들을 파이프(|) 기호로 연결
             StringBuilder waypoints = new StringBuilder();
             for (int i = 1; i < route.size() - 1; i++) {
                 waypoints.append(route.get(i).getLatitude()).append(",").append(route.get(i).getLongitude());
                 if (i < route.size() - 2) waypoints.append("|");
             }
 
-            // 3. 구글 맵스 Directions API 호출 (한국어로 응답받기)
             String url = String.format(
                     "https://maps.googleapis.com/maps/api/directions/json?origin=%s&destination=%s&waypoints=%s&key=%s&language=ko",
                     origin, destination, waypoints.toString(), googleMapsApiKey
@@ -45,7 +40,6 @@ public class GoogleMapsService {
             String response = restTemplate.getForObject(url, String.class);
             JsonNode rootNode = objectMapper.readTree(response);
 
-            // 4. 응답에서 구간별 이동 시간만  뽑아내기
             JsonNode legs = rootNode.path("routes").get(0).path("legs");
             StringBuilder timeInfo = new StringBuilder();
 
@@ -64,34 +58,56 @@ public class GoogleMapsService {
         }
     }
 
-    // 'Places API (Text Search)'를 사용합니다.
-    // 이중 인코딩을 방지
-    public double[] getCoordinates(String city, String placeName) {
+    // 'Place Details API'를 찔러서 영업시간을 가져옵니다
+    public Place getPlaceDetails(String city, String placeName) {
+        Place resultPlace = new Place();
+        resultPlace.setLatitude(0.0);
+        resultPlace.setLongitude(0.0);
+        resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
+
         try {
-            // 1. 직접 인코딩하지 않고, 검색어만 만듭니다.
+            // 1차 검색: Text Search API로 위도, 경도, 그리고 고유 'place_id' 획득
             String exactSearchQuery = placeName + " " + city;
+            String searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
 
-            // 2. URL에 직접 글자를 더하지 않고, 중괄호 {query}, {key} 를 뚫어놓습니다.
-            String url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+            String searchResponse = restTemplate.getForObject(searchUrl, String.class, exactSearchQuery, googleMapsApiKey);
+            JsonNode searchRoot = objectMapper.readTree(searchResponse);
 
-            // 3. getForObject의 뒤쪽 파라미터로 변수들을 순서대로 넘겨주면, 스프링이 안전하게 1번만 조립해 줍니다.
-            String response = restTemplate.getForObject(url, String.class, exactSearchQuery, googleMapsApiKey);
+            if ("OK".equals(searchRoot.path("status").asText())) {
+                JsonNode firstResult = searchRoot.path("results").get(0);
 
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response);
-            String status = root.path("status").asText();
+                // 좌표(lat, lng) 셋팅
+                JsonNode location = firstResult.path("geometry").path("location");
+                resultPlace.setLatitude(location.path("lat").asDouble());
+                resultPlace.setLongitude(location.path("lng").asDouble());
 
-            if ("OK".equals(status)) {
-                com.fasterxml.jackson.databind.JsonNode location = root.path("results").get(0).path("geometry").path("location");
-                double lat = location.path("lat").asDouble();
-                double lng = location.path("lng").asDouble();
-                return new double[]{lat, lng};
+                // 2차 검색: 얻어낸 place_id로 Place Details API를 찔러서 영업시간(opening_hours)만 빼오기
+                String placeId = firstResult.path("place_id").asText();
+                String detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id={placeId}&fields=opening_hours&key={key}&language=ko";
+
+                String detailsResponse = restTemplate.getForObject(detailsUrl, String.class, placeId, googleMapsApiKey);
+                JsonNode detailsRoot = objectMapper.readTree(detailsResponse);
+
+                if ("OK".equals(detailsRoot.path("status").asText())) {
+                    JsonNode weekdayText = detailsRoot.path("result").path("opening_hours").path("weekday_text");
+
+                    // 영업시간 배열 ["월요일: 09:00...", "화요일: 09:00..."] 을 하나의 텍스트로 합치기
+                    if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
+                        List<String> hoursList = new ArrayList<>();
+                        for (JsonNode node : weekdayText) {
+                            hoursList.add(node.asText());
+                        }
+                        // " | " 기호로 요일별 시간을 묶어서 저장합니다.
+                        resultPlace.setOpeningHours(String.join(" | ", hoursList));
+                    }
+                }
             } else {
-                System.out.println("장소 검색 실패 (" + exactSearchQuery + ") - 원인: " + status);
+                System.out.println("장소 검색 실패 (" + exactSearchQuery + ") - 원인: " + searchRoot.path("status").asText());
             }
         } catch (Exception e) {
             System.out.println("네트워크 에러 (" + placeName + "): " + e.getMessage());
         }
 
-        return new double[]{0.0, 0.0};
+        return resultPlace; // 좌표와 영업시간이 꽉 찬 Place 객체를 반환!
     }
 }

@@ -110,4 +110,131 @@ public class GoogleMapsService {
 
         return resultPlace; // 좌표와 영업시간이 꽉 찬 Place 객체를 반환!
     }
+
+    // AI 데이터 인리치먼트 전용: 장소의 실제 구글 리뷰 5개를 결합하여 텍스트로 반환
+    public String getPlaceReviews(String city, String placeName) {
+        try {
+            String exactSearchQuery = placeName + " " + city;
+            String searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+            String searchResponse = restTemplate.getForObject(searchUrl, String.class, exactSearchQuery, googleMapsApiKey);
+            JsonNode searchRoot = objectMapper.readTree(searchResponse);
+
+            if ("OK".equals(searchRoot.path("status").asText())) {
+                String placeId = searchRoot.path("results").get(0).path("place_id").asText();
+
+                // reviews 필드를 명시하여 Place Details API 호출
+                String detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id={placeId}&fields=reviews&key={key}&language=ko";
+                String detailsResponse = restTemplate.getForObject(detailsUrl, String.class, placeId, googleMapsApiKey);
+                JsonNode detailsRoot = objectMapper.readTree(detailsResponse);
+
+                if ("OK".equals(detailsRoot.path("status").asText())) {
+                    JsonNode reviews = detailsRoot.path("result").path("reviews");
+                    StringBuilder reviewText = new StringBuilder();
+
+                    if (!reviews.isMissingNode() && reviews.isArray()) {
+                        for (JsonNode review : reviews) {
+                            reviewText.append(review.path("text").asText()).append("\n");
+                        }
+                        return reviewText.toString();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[" + placeName + "] 리뷰 수집 실패: " + e.getMessage());
+        }
+        return "리뷰 정보 없음";
+    }
+
+    // [자동 페이지네이션 업그레이드] next_page_token을 추적하여 한 키워드당 최대 60개 명소를 싹 긁어옵니다.
+    public List<Place> searchNewPlacesFromGoogle(String city, String keyword) {
+        List<Place> fetchedPlaces = new ArrayList<>();
+        String baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+        String pageTokenUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?pagetoken={pagetoken}&key={key}&language=ko";
+
+        try {
+            String searchQuery = city + " " + keyword;
+            // 1. 첫 번째 페이지(1~20등) 호출
+            String response = restTemplate.getForObject(baseUrl, String.class, searchQuery, googleMapsApiKey);
+            JsonNode root = objectMapper.readTree(response);
+
+            // 1페이지 데이터 리스트에 적재
+            parsePlacesFromNode(root, fetchedPlaces, city);
+
+            // 2. 다음 페이지 토큰(next_page_token)이 있는지 확인 후 루프 가동
+            String nextToken = root.path("next_page_token").asText();
+            int pageCount = 1;
+
+            while (nextToken != null && !nextToken.isEmpty() && pageCount < 3) {
+                // [구글 필수 제약사항] next_page_token은 발급 후 구글 서버에서 활성화되기까지 약 1.5초~2초의 시간이 걸립니다.
+                // 슬립 없이 바로 쏘면 구글이 INVALID_REQUEST 에러를 뱉으므로 2초 숨을 고르게 합니다.
+                Thread.sleep(2000);
+
+                System.out.println("➡️ [" + keyword + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 연속 수집 중...");
+                String nextResponse = restTemplate.getForObject(pageTokenUrl, String.class, nextToken, googleMapsApiKey);
+                JsonNode nextRoot = objectMapper.readTree(nextResponse);
+
+                parsePlacesFromNode(nextRoot, fetchedPlaces, city);
+                nextToken = nextRoot.path("next_page_token").asText(); // 다음 3페이지 토큰 갱신
+                pageCount++;
+            }
+
+        } catch (Exception e) {
+            System.out.println("구글 장소 크롤링 실패: " + e.getMessage());
+        }
+        return fetchedPlaces;
+    }
+
+    // [수질 관리] 다단 필터링 적용
+    private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city) {
+        if ("OK".equals(root.path("status").asText())) {
+            JsonNode results = root.path("results");
+            for (JsonNode node : results) {
+                double rating = node.path("rating").asDouble(0.0);
+                int reviewCount = node.path("user_ratings_total").asInt(0);
+                String placeName = node.path("name").asText();
+
+                // [필터 1] 일반적인 고품질 장소 (평점 4.0 이상 & 리뷰 300개 이상)
+                boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
+
+                // [필터 2] 호불호가 갈리지만 무조건 가봐야 하는 랜드마크
+                // (평점 3.6 이상 ~ 4.0 미만이더라도, 리뷰가 1,500개가 넘어가면 압도적 인지도로 판단)
+                boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 1500);
+
+                // 둘 중 하나라도 만족하면 DB에 적재
+                if (isHighQuality || isSuperLandmark) {
+                    Place place = new Place();
+                    place.setPlaceId(node.path("place_id").asText());
+                    place.setName(placeName);
+                    place.setCity(city);
+                    place.setLatitude(node.path("geometry").path("location").path("lat").asDouble());
+                    place.setLongitude(node.path("geometry").path("location").path("lng").asDouble());
+
+                    fetchedPlaces.add(place);
+                } else {
+                    // 평점 3.5 이하이거나, 평점은 4.5인데 리뷰가 10개밖에 안 되는 '조작 의심/무명' 장소는 탈락
+                    // 필터에 걸리는 데이터 확인용, 주석 해제 후 데이터 확인합니다.
+                    // System.out.println("[필터 탈락] " + placeName + " (평점: " + rating + ", 리뷰: " + reviewCount + "개)");
+                }
+            }
+        }
+    }
+
+    // [자체 지명 정제 엔진] 입력된 텍스트를 구글 맵스를 통해 일본 내 정식 행정구역명으로 변환합니다.
+    public String getFormalizedJapanCity(String cityInput) {
+        try {
+            String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
+            String response = restTemplate.getForObject(url, String.class, cityInput, googleMapsApiKey);
+            JsonNode root = objectMapper.readTree(response);
+
+            if ("OK".equals(root.path("status").asText())) {
+                return root.path("results").get(0).path("formatted_address").asText();
+            } else {
+                // 구글이 지명을 아예 못 찾은 경우 (예: "ㅋㅋㅋ" 같은 이상한 입력)
+                throw new RuntimeException("구글 맵스에서 해당 지명을 찾을 수 없습니다.");
+            }
+        } catch (Exception e) {
+            // 억지로 기본값을 리턴하지 않고, 에러를 과감하게 발생시킵니다(쓰레기 데이터 DB 적재 방지)
+            throw new RuntimeException("지명 검증 실패: " + e.getMessage());
+        }
+    }
 }

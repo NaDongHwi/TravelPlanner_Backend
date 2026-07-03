@@ -8,6 +8,7 @@ import com.travel.planner.entity.User;
 import com.travel.planner.service.AiService;
 import com.travel.planner.service.GoogleMapsService;
 import com.travel.planner.service.PlanService;
+import com.travel.planner.service.WeatherService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,8 @@ public class PlanController {
 
     // DB 저장을 위한 PlanRepository 추가
     private final com.travel.planner.repository.PlanRepository planRepository;
+
+    private final WeatherService weatherService;
 
     @PostMapping
     @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
@@ -77,14 +80,21 @@ public class PlanController {
 
         for (Place p : optimizedRoute) {
             String opHours = (p.getOpeningHours() != null && !p.getOpeningHours().equals("영업시간 정보 없음"))
-                    ? p.getOpeningHours()
-                    : "24시간 상시 개방 또는 정보 없음 (상식적인 주간 시간대에 유연하게 배정하세요)";
+                    ? p.getOpeningHours() : "24시간 상시 개방";
 
-            dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append("\n");
+            // 실내/외 속성까지 AI에게 함께 전달
+            String type = (p.getPlaceType() != null) ? p.getPlaceType() : "복합";
+
+            dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append(" (환경: ").append(type).append(")\n");
         }
+        // [날씨 API 호출] 실시간 기상 데이터 인리치먼트
+        String currentWeather = weatherService.getCurrentWeather(request.getCity());
 
-        // 6. 제미나이에게 줄 최종 프롬프트에 이동 시간과 영업시간 제약 조건을 모두 합쳐서 줍니다.
-        String finalContext = baseContext + "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes + dynamicConstraints.toString();
+        // 6. 제미나이에게 줄 최종 프롬프트에 이동시간, 영업시간, 실시간 날씨까지 3중 가중치 융합
+        String finalContext = baseContext +
+                "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes +
+                dynamicConstraints.toString() +
+                "\n\n[🌦️ 목적지 실시간 기상 정보]\n- 상태: " + currentWeather;
 
         // 7. 제미나이가 최종 가중치를 판단하여 완벽한 타임라인을 생성
         AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(finalContext, optimizedRoute);

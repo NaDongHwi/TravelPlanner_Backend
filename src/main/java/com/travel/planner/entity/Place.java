@@ -33,6 +33,9 @@ public class Place {
     @Column(length = 100)
     private String theme;
 
+    @Column(length = 20)
+    private String placeType; // 예: "실내", "실외", "복합"
+
     // 구글 API로 미리 긁어올 영업시간 (예: "09:00-21:00")
     @Column(length = 255)
     private String openingHours;
@@ -40,4 +43,8 @@ public class Place {
     // 30일마다 갱신하기 위한 마지막 업데이트 시간 기록
     @Column
     private java.time.LocalDateTime lastUpdated;
+
+    // [중복 방어 핵심] 구글 고유 place_id (Unique 제약 조건 설정)
+    @Column(unique = true, nullable = false)
+    private String placeId;
 }

@@ -7,12 +7,15 @@ import com.travel.planner.service.GoogleMapsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -135,5 +138,38 @@ public class AdminController {
 
         return String.format("[%s] 대량 자동 수집 완료! -> 신규 명소 등록: %d건 / 기존 중복 패스: %d건",
                 city, totalInserted, totalSkipped);
+    }
+
+    @PostMapping("/api/v1/admin/cleanse-categories")
+    @Operation(summary = "기존 데이터 AI 카테고리 자동 분류 (50건씩 처리)")
+    public ResponseEntity<String> cleanseCategories() {
+        // 1. 카테고리가 없는(null) 데이터 중 50개만 가져옵니다. (JPA Repository에 메서드 추가 필요)
+        // List<Place> targetPlaces = placeRepository.findTop50ByCategoryIsNull();
+        // Repository에 위 메서드가 없다면 아래 스트림 방식으로 처리 (임시)
+        List<Place> allPlaces = placeRepository.findAll();
+        List<Place> targetPlaces = allPlaces.stream()
+                .filter(p -> p.getCategory() == null)
+                .limit(50)
+                .collect(Collectors.toList());
+
+        if (targetPlaces.isEmpty()) {
+            return ResponseEntity.ok("정제할 데이터가 없습니다. 카테고리 분류가 100% 완료되었습니다!");
+        }
+
+        // 2. AI에게 분류를 맡깁니다.
+        Map<String, String> categorizedMap = aiService.cleansePlaceCategories(targetPlaces);
+
+        // 3. AI가 준 결과대로 DB를 업데이트합니다.
+        int updateCount = 0;
+        for (Place place : targetPlaces) {
+            String newCategory = categorizedMap.get(place.getPlaceId());
+            if (newCategory != null) {
+                place.setCategory(newCategory);
+                placeRepository.save(place);
+                updateCount++;
+            }
+        }
+
+        return ResponseEntity.ok(targetPlaces.size() + "건 요청 중, " + updateCount + "건의 AI 카테고리 자동 정제가 완료되었습니다. (잔여 데이터가 있으면 계속 호출하세요)");
     }
 }

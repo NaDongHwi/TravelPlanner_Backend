@@ -61,18 +61,23 @@ public class GoogleMapsService {
     }
 
     // 'Place Details API'를 찔러서 영업시간을 가져옵니다
-    public Place getPlaceDetails(String city, String placeName) {
+    public Place getPlaceDetails(String city, String placeName, String lang) {
         Place resultPlace = new Place();
         resultPlace.setLatitude(0.0);
         resultPlace.setLongitude(0.0);
         resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
 
+        // 언어 값이 비어있을 경우를 대비한 기본값 설정 방어 로직
+        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
+
         try {
             // 1차 검색: Text Search API로 위도, 경도, 그리고 고유 'place_id' 획득
             String exactSearchQuery = placeName + " " + city;
-            String searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+            // language={lang} 파라미터로 동적 변경
+            String searchUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language={lang}&region=jp";
 
-            String searchResponse = restTemplate.getForObject(searchUrl, String.class, exactSearchQuery, googleMapsApiKey);
+            // 매핑 인자 맨 마지막에 targetLang 추가 투입
+            String searchResponse = restTemplate.getForObject(searchUrl, String.class, exactSearchQuery, googleMapsApiKey, targetLang);
             JsonNode searchRoot = objectMapper.readTree(searchResponse);
 
             if ("OK".equals(searchRoot.path("status").asText())) {
@@ -85,9 +90,11 @@ public class GoogleMapsService {
 
                 // 2차 검색: 얻어낸 place_id로 Place Details API를 찔러서 영업시간(opening_hours)만 빼오기
                 String placeId = firstResult.path("place_id").asText();
-                String detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id={placeId}&fields=opening_hours&key={key}&language=ko";
+                // language={lang} 파라미터로 동적 변경
+                String detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id={placeId}&fields=opening_hours&key={key}&language={lang}";
 
-                String detailsResponse = restTemplate.getForObject(detailsUrl, String.class, placeId, googleMapsApiKey);
+                // 매핑 인자 맨 마지막에 targetLang 추가 투입
+                String detailsResponse = restTemplate.getForObject(detailsUrl, String.class, placeId, googleMapsApiKey, targetLang);
                 JsonNode detailsRoot = objectMapper.readTree(detailsResponse);
 
                 if ("OK".equals(detailsRoot.path("status").asText())) {
@@ -110,7 +117,7 @@ public class GoogleMapsService {
             System.out.println("네트워크 에러 (" + placeName + "): " + e.getMessage());
         }
 
-        return resultPlace; // 좌표와 영업시간이 꽉 찬 Place 객체를 반환!
+        return resultPlace; // 좌표와 영업시간이 찬 Place 객체를 반환
     }
 
     // AI 데이터 인리치먼트 전용: 장소의 실제 구글 리뷰 5개를 결합하여 텍스트로 반환
@@ -195,6 +202,21 @@ public class GoogleMapsService {
                 int reviewCount = node.path("user_ratings_total").asInt(0);
                 String placeName = node.path("name").asText();
 
+                // 구글이 내려준 정식 주소 텍스트를 뽑아냅니다.
+                String address = node.path("formatted_address").asText();
+                if (address == null) continue;
+
+                // [필터 0]
+
+                String lowerAddr = address.toLowerCase();
+
+                // 1. 한국 주소 1순위로 쳐내기 (명백한 타국가 데이터 차단)
+                if (lowerAddr.contains("대한민국") || lowerAddr.contains("한국") ||
+                        lowerAddr.contains("korea") || lowerAddr.contains("seoul") || lowerAddr.contains("서울")) {
+                    // System.out.println("[한국 식당 차단됨] " + placeName + " -> 주소: " + address);
+                    continue;
+                }
+
                 // [필터 1] 일반적인 고품질 장소 (평점 4.0 이상 & 리뷰 300개 이상)
                 boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
 
@@ -210,6 +232,7 @@ public class GoogleMapsService {
                     place.setCity(city);
                     place.setLatitude(node.path("geometry").path("location").path("lat").asDouble());
                     place.setLongitude(node.path("geometry").path("location").path("lng").asDouble());
+                    place.setCategory(determineCategoryFromTypes(node.path("types")));
 
                     fetchedPlaces.add(place);
                 } else {
@@ -235,7 +258,7 @@ public class GoogleMapsService {
                 // 분석 주소가 바르지 않거나 47개 도도부현을 찾지 못하면 IllegalArgumentException이 터지며 상위 프로세스 정지
                 Region recognizedRegion = PrefectureMapper.getRegionFromAddress(formattedAddress);
 
-                System.out.println("🔍 [지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
+                System.out.println("[지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
                 return formattedAddress;
             } else {
                 throw new RuntimeException("구글 맵스에서 해당 지명을 식별하지 못했습니다.");
@@ -244,5 +267,23 @@ public class GoogleMapsService {
             // 가짜 데이터 적재 방지를 위해 예외 메시지를 그대로 감싸서 컨트롤러 단으로 밀어 올립니다.
             throw new RuntimeException("지명 정밀 검증 실패: " + e.getMessage());
         }
+    }
+
+    // [자동 분류 엔진] 구글의 types 배열을 분석하여 5대 카테고리로 매핑합니다.
+    private String determineCategoryFromTypes(JsonNode typesNode) {
+        if (typesNode == null || !typesNode.isArray()) return "관광지"; // 기본값
+
+        for (JsonNode typeNode : typesNode) {
+            String type = typeNode.asText().toLowerCase();
+            // 1. 숙소
+            if (type.equals("lodging")) return "숙소";
+            // 2. 교통
+            if (type.equals("train_station") || type.equals("transit_station") || type.equals("airport") || type.equals("subway_station") || type.equals("bus_station")) return "교통";
+            // 3. 식음
+            if (type.equals("restaurant") || type.equals("cafe") || type.equals("food") || type.equals("bakery") || type.equals("bar") || type.equals("meal_takeaway")) return "식음";
+            // 4. 쇼핑
+            if (type.equals("shopping_mall") || type.equals("department_store") || type.equals("supermarket") || type.equals("clothing_store") || type.equals("store")) return "쇼핑";
+        }
+        return "관광지"; // 위 조건에 걸리지 않는 모든 명소(공원, 신사, 박물관 등)는 관광지로 통일
     }
 }

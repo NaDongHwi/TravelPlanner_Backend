@@ -17,8 +17,8 @@ public class PlanRequest {
     @Schema(description = "여행 종료일 (Step 1)", example = "2026-07-05")
     private LocalDate endDate;
 
-    @Schema(description = "여행 도시 (Step 2)", example = "도쿄")
-    private String city;
+    @Schema(description = "여행 도시 목록 (Step 2)", example = "[\"오사카\", \"교토\"]")
+    private List<String> cities;
 
     @Schema(description = "동행자 유형 (Step 3)", example = "친구")
     private String companion;
@@ -39,4 +39,7 @@ public class PlanRequest {
     // 입출국 시간 (예: "오전", "오후", "저녁", "미정")
     private String inTime;
     private String outTime;
+
+    @Schema(description = "사용자 앱/단말기 언어 설정", example = "ko")
+    private String language;
 }

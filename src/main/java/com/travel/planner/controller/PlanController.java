@@ -46,7 +46,7 @@ public class PlanController {
     }
 
     @PostMapping
-    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
+    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
     public AiRouteResponse createPlan(
             org.springframework.security.core.Authentication authentication,
             @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.PlanRequest request
@@ -68,12 +68,19 @@ public class PlanController {
         String arrivalTime = (request.getInTime() != null) ? request.getInTime() : "미정";
         String departureTime = (request.getOutTime() != null) ? request.getOutTime() : "미정";
 
+        // 다중 도시 리스트를 콤마로 연결 ("도쿄, 오사카")
+        String joinedCities = request.getCities() != null ? String.join(", ", request.getCities()) : "미정";
+
+        // 여러 도시 중 첫 번째 도시를 '메인 도시(대표 도시)'로 지정합니다. (날씨 검색 등)
+        String mainCity = (request.getCities() != null && !request.getCities().isEmpty())
+                ? request.getCities().get(0) : "미정";
+
         // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO) + 비행시간 합쳐서 조립
         String baseContext = String.format(
                 "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s, 고정일정: %s, [입국 시간: %s], [출국 시간: %s]",
                 user.getAgeGroup(),
                 user.getGender(),
-                request.getCity(),
+                joinedCities,
                 request.getCompanion(),
                 String.join(", ", request.getThemes()),
                 request.getTransportation(),
@@ -82,7 +89,8 @@ public class PlanController {
                 departureTime
         );
 
-        List<Place> realPlaces = placeRepository.findByCity(request.getCity());
+        // 다중 도시 리스트에 포함된 모든 장소를 DB에서 한 번에 긁어옵니다.
+        List<Place> realPlaces = placeRepository.findByCityIn(request.getCities());
 
         // 4. TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다. (물리적 뼈대 생성)
         List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
@@ -104,22 +112,23 @@ public class PlanController {
 
             dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append(" (환경: ").append(type).append(")\n");
         }
-        // [날씨 API 호출] 실시간 기상 데이터 인리치먼트
-        String currentWeather = weatherService.getCurrentWeather(request.getCity());
+
+        // 대표 도시(mainCity)의 날씨를 가져옵니다.
+        String currentWeather = weatherService.getCurrentWeather(mainCity);
 
         // 6. 제미나이에게 줄 최종 프롬프트에 이동시간, 영업시간, 실시간 날씨까지 3중 가중치 융합
         String finalContext = baseContext +
                 "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes +
                 dynamicConstraints.toString() +
-                "\n\n[🌦️ 목적지 실시간 기상 정보]\n- 상태: " + currentWeather;
+                "\n\n[목적지 실시간 기상 정보]\n- 상태: " + currentWeather;
 
         // 7. 제미나이가 최종 가중치를 판단하여 완벽한 타임라인을 생성
-        AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(finalContext, optimizedRoute);
+        AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(finalContext, optimizedRoute, request.getLanguage());
 
         // 8. Plan 엔티티 양식에 맞춰서 저장 상자 만들기
         Plan plan = new Plan();
         plan.setUser(user);
-        plan.setTitle(request.getCity() + " 여행"); // 예: "시즈오카 여행"
+        plan.setTitle(joinedCities + " 여행"); // 예: "도쿄, 오사카 여행"
         plan.setStartDate(request.getStartDate());
         plan.setEndDate(request.getEndDate());
         plan.setInCity(request.getInCity());
@@ -143,7 +152,7 @@ public class PlanController {
                 itinerary.setTime(item.getTime());
                 itinerary.setAiComment(item.getDescription());
 
-                // 핵심 로직: AI가 말한 '장소 이름'으로 실제 DB의 Place 객체를 찾아서 연결합니다
+                // AI가 말한 '장소 이름'으로 실제 DB의 Place 객체를 찾아서 연결합니다
                 Place matchedPlace = realPlaces.stream()
                         .filter(p -> p.getName().equals(item.getPlaceName()))
                         .findFirst()
@@ -153,12 +162,12 @@ public class PlanController {
                 if (matchedPlace == null) {
                     System.out.println("DB에 장소 없음! 구글 맵스 API 동적 수집 발동: " + item.getPlaceName());
 
-                    // 좌표(double[]) 대신, 좌표+영업시간이 있는 Place 객체를 통째로 받아옵니다
-                    Place fetchedPlace = googleMapsService.getPlaceDetails(request.getCity(), item.getPlaceName());
+                    // 동적 수집 시 대표 도시(mainCity)와 request.getLanguage()를 기반으로 검색합니다.
+                    Place fetchedPlace = googleMapsService.getPlaceDetails(mainCity, item.getPlaceName(), request.getLanguage());
 
                     // 이름과 도시는 프론트엔드/AI가 준 데이터로 세팅
                     fetchedPlace.setName(item.getPlaceName());
-                    fetchedPlace.setCity(request.getCity());
+                    fetchedPlace.setCity(mainCity); // 대표 도시 세팅
                     fetchedPlace.setLastUpdated(java.time.LocalDateTime.now()); // 업데이트 시간 기록
 
                     // 진짜 좌표와 진짜 영업시간이 모두 들어간 신규 장소를 즉각 DB에 저장

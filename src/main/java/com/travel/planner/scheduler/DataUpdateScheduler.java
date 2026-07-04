@@ -38,7 +38,7 @@ public class DataUpdateScheduler {
                 System.out.println("[데이터 갱신] 30일이 경과된 명소 정보 최신화 발동: " + place.getName());
 
                 // 구글 Places API 재호출로 실시간 위경도 및 최신 변경된 영업시간 획득
-                Place updatedDetails = googleMapsService.getPlaceDetails(place.getCity(), place.getName());
+                Place updatedDetails = googleMapsService.getPlaceDetails(place.getCity(), place.getName(), "ko");
 
                 if (updatedDetails.getLatitude() != 0.0) {
                     place.setLatitude(updatedDetails.getLatitude());

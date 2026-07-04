@@ -24,13 +24,13 @@ public class PrefectureMapper {
         map.put("후쿠시마현", Region.TOHOKU);
 
         // 3. KANTO (7개 도도부현)
-        map.put("도쿄도", Region.KANTO);
-        map.put("가나가와현", Region.KANTO);
-        map.put("치바현", Region.KANTO);
-        map.put("사이타마현", Region.KANTO);
         map.put("이바라키현", Region.KANTO);
         map.put("도치기현", Region.KANTO);
         map.put("군마현", Region.KANTO);
+        map.put("사이타마현", Region.KANTO);
+        map.put("치바현", Region.KANTO);
+        map.put("도쿄도", Region.KANTO);
+        map.put("가나가와현", Region.KANTO);
 
         // 4. CHUBU (9개 도도부현)
         map.put("니가타현", Region.CHUBU);
@@ -44,13 +44,13 @@ public class PrefectureMapper {
         map.put("아이치현", Region.CHUBU);
 
         // 5. KANSAI (7개 도도부현)
-        map.put("오사카부", Region.KANSAI);
+        map.put("미에현", Region.KANSAI);
+        map.put("시가현", Region.KANSAI);
         map.put("교토부", Region.KANSAI);
+        map.put("오사카부", Region.KANSAI);
         map.put("효고현", Region.KANSAI);
         map.put("나라현", Region.KANSAI);
-        map.put("시가현", Region.KANSAI);
         map.put("와카야마현", Region.KANSAI);
-        map.put("미에현", Region.KANSAI);
 
         // 6. CHUGOKU (5개 도도부현)
         map.put("돗토리현", Region.CHUGOKU);
@@ -61,7 +61,7 @@ public class PrefectureMapper {
 
         // 7. SHIKOKU (4개 도도부현)
         map.put("도쿠시마현", Region.SHIKOKU);
-        map.put("카가와현", Region.SHIKOKU);
+        map.put("가가와현", Region.SHIKOKU);
         map.put("에히메현", Region.SHIKOKU);
         map.put("고치현", Region.SHIKOKU);
 

@@ -47,4 +47,15 @@ public class Place {
     // [중복 방어 핵심] 구글 고유 place_id (Unique 제약 조건 설정)
     @Column(unique = true, nullable = false)
     private String placeId;
+
+    @Column(name = "category")
+    private String category; // 역할 분류: 관광지, 식음, 쇼핑, 숙소, 교통
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
+    }
 }

@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PlanValidationService {
 
-    private final GoogleMapsService googleMapsService; // 🚀 완벽하게 주입 완료
+    private final GoogleMapsService googleMapsService;
 
     public static class ValidationResult {
         public boolean isWarning;

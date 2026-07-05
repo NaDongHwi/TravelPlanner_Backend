@@ -27,7 +27,10 @@ public class AiService {
 
     private final ObjectMapper objectMapper = new ObjectMapper(); // JSON 변환 도구
 
-    public AiRouteResponse evaluateAndModifyRoute(String userContext, List<Place> draftRoute, String lang) {
+    public AiRouteResponse evaluateAndModifyRoute(String userContext, List<Place> draftRoute, String lang,
+                                                  List<com.travel.planner.dto.PlanRequest.AccommodationInput> accommodations,
+                                                  boolean suggestHotel, String hotelCandidates,
+                                                  java.time.LocalDate startDate, int totalDays) {
 
         // 기본 언어 방어 로직 (null 일 경우 한국어 기본값)
         String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
@@ -36,6 +39,54 @@ public class AiService {
         String draftRouteStr = draftRoute.stream()
                 .map(Place::getName)
                 .collect(Collectors.joining(" -> "));
+
+        // 숙소 앵커링 및 역제안 텍스트 생성기
+        StringBuilder hotelConstraints = new StringBuilder();
+        hotelConstraints.append("\n\n[일자별 숙소 출발/도착 절대 규칙]\n");
+
+        if (accommodations != null && !accommodations.isEmpty()) {
+            hotelConstraints.append("사용자가 이미 예약한 숙소가 있습니다. 타임라인 생성 시 아래의 일자별 시작/종료 숙소 규칙을 100% 무조건 지키세요.\n");
+
+            for (int i = 0; i < totalDays; i++) {
+                java.time.LocalDate currentDate = startDate.plusDays(i);
+                String startHotel = null;
+                String endHotel = null;
+
+                for (com.travel.planner.dto.PlanRequest.AccommodationInput acc : accommodations) {
+                    // 어제 묵고 오늘 체크아웃 하는 날 -> 시작점이 됨
+                    if (acc.getCheckOut().isEqual(currentDate)) {
+                        startHotel = acc.getName();
+                    }
+                    // 오늘 새로 체크인 하는 날 -> 도착점이 됨
+                    if (acc.getCheckIn().isEqual(currentDate)) {
+                        endHotel = acc.getName();
+                    }
+                    // 체크인과 체크아웃 사이의 온전한 숙박일 -> 시작과 끝이 모두 이 숙소
+                    if (currentDate.isAfter(acc.getCheckIn()) && currentDate.isBefore(acc.getCheckOut())) {
+                        startHotel = acc.getName();
+                        endHotel = acc.getName();
+                    }
+                }
+
+                int dayNum = i + 1;
+                hotelConstraints.append("- ").append(dayNum).append("일차(").append(currentDate).append("): ");
+                if (startHotel != null && endHotel != null) {
+                    hotelConstraints.append("일정의 시작은 [").append(startHotel).append("](체크아웃/출발), 끝은 [").append(endHotel).append("](체크인/도착) 이어야 함.\n");
+                } else if (startHotel != null) {
+                    hotelConstraints.append("일정의 시작은 [").append(startHotel).append("]에서 출발해야 함.\n");
+                } else if (endHotel != null) {
+                    hotelConstraints.append("일정의 마지막은 무조건 [").append(endHotel).append("] 체크인으로 끝나야 함.\n");
+                } else {
+                    hotelConstraints.append("지정된 숙소 없음.\n");
+                }
+            }
+        } else if (suggestHotel) {
+            hotelConstraints.append("사용자가 숙소를 예약하지 않아, AI가 직접 숙소를 추천해야 합니다.\n");
+            hotelConstraints.append("아래 [추천 숙소 후보군] 중 동선 상 가장 효율적인 곳을 1~2개 선택하여 타임라인의 시작과 끝점(체크인/체크아웃)으로 배치하세요.\n");
+            hotelConstraints.append("[추천 숙소 후보군]: ").append(hotelCandidates).append("\n");
+        } else {
+            hotelConstraints.append("사용자가 숙소 예약을 원하지 않습니다. 시작점과 끝점에 숙소를 포함하지 말고 오직 명소 위주로만 동선을 구성하세요.\n");
+        }
 
         String prompt = "너는 10년 차 전문 일본 여행 플래너야. " +
                 "아래 [고객 정보]와 거리 기반으로 1차 계산된 [임시 동선(뼈대)], [구글 이동 시간], [장소별 영업시간 및 테마], 그리고 [실시간 날씨]를 정밀하게 분석해. \n\n" +
@@ -61,7 +112,8 @@ public class AiService {
                 "    - [교통] 카테고리(역, 공항)는 관광 일정으로 쓰지 말고, 지역 간 이동 동선의 기준점으로만 활용해.\n" +
                 "    - [숙소] 카테고리(호텔, 료칸)는 일정표 중간에 끼워 넣지 말고, 무조건 체크인 / 체크아웃 목적지로만 배치해.\n" +
                 "    - [식음], [쇼핑], [관광지] 카테고리 위주로만 실제 타임라인을 채워.\n\n" +
-                "응답은 반드시 아래의 JSON 형식으로만 출력해. 마크다운 기호는 절대 넣지 마.\n" +
+                hotelConstraints.toString() +
+                "\n\n응답은 반드시 아래의 JSON 형식으로만 출력해. 마크다운 기호는 절대 넣지 마.\n" +
                 "{\n" +
                 "  \"timeline\": [\n" +
                 "    { \"day\": 1, \"time\": \"09:00\", \"placeName\": \"장소명1\", \"category\": \"관광/맛집/문화 등\", \"description\": \"이 장소에 대한 설명\" }\n" +

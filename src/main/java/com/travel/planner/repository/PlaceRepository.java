@@ -11,5 +11,8 @@ public interface PlaceRepository extends JpaRepository<Place, Long> {
 
     List<Place> findByCityIn(List<String> cities);
 
+    // 특정 도시의 특정 카테고리(숙소)를 가져오는 메서드
+    List<Place> findTop10ByCityAndCategory(String city, String category);
+
     boolean existsByPlaceId(String placeId);
 }

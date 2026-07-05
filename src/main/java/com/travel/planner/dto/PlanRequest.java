@@ -42,4 +42,20 @@ public class PlanRequest {
 
     @Schema(description = "사용자 앱/단말기 언어 설정", example = "ko")
     private String language;
+
+    @Schema(description = "사용자가 확정한 숙소 리스트 (없으면 빈 배열)")
+    private List<AccommodationInput> accommodations;
+
+    @Schema(description = "숙소 역제안 받기 여부 (true: 추천해줘, false: 숙소 없이 동선 짜줘)", example = "true")
+    private boolean suggestHotel;
+
+    // 내부 클래스로 숙소 정보 규격 정의
+    @Getter
+    @Setter
+    public static class AccommodationInput {
+        private String name;
+        private String address; // 혹은 구글 placeId
+        private LocalDate checkIn;
+        private LocalDate checkOut;
+    }
 }

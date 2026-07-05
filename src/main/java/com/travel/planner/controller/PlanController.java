@@ -46,11 +46,21 @@ public class PlanController {
     }
 
     @PostMapping
-    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
+    @Operation(summary = "일정 기획 및 최적화 연산 요청", description = "프론트엔드에서 파라미터를 받아 알고리즘 연산 후 AI 최종 결과를 반환 및 저장합니다.")
     public AiRouteResponse createPlan(
             org.springframework.security.core.Authentication authentication,
             @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.PlanRequest request
     ) {
+
+        if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
+            PlanValidationService.ValidationResult accValidation = planValidationService.validateAccommodations(
+                    request.getAccommodations(), request.getStartDate(), request.getEndDate()
+            );
+            if (accValidation.isWarning) {
+                // 숙소 일정이 겹치거나 여행 기간을 벗어나면 즉시 차단 (프론트엔드에 에러 메시지 반환)
+                throw new IllegalArgumentException(accValidation.warningMessage);
+            }
+        }
 
         // 1. JwtFilter가 토큰에서 꺼내둔 로그인한 회원의 이메일을 가져옵니다.
         String email = authentication.getName();
@@ -122,8 +132,40 @@ public class PlanController {
                 dynamicConstraints.toString() +
                 "\n\n[목적지 실시간 기상 정보]\n- 상태: " + currentWeather;
 
-        // 7. 제미나이가 최종 가중치를 판단하여 완벽한 타임라인을 생성
-        AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(finalContext, optimizedRoute, request.getLanguage());
+
+        // 숙소 역제안 하이브리드 로직 (DB 클렌징 데이터 + 구글 맵스 실시간)
+        String hotelCandidates = "";
+        boolean hasNoAccommodations = (request.getAccommodations() == null || request.getAccommodations().isEmpty());
+
+        if (hasNoAccommodations && request.isSuggestHotel()) {
+            System.out.println("숙소 역제안 모드 가동! DB 및 구글 탐색 중...");
+
+            // 1순위: 우리 DB 클렌징 데이터에서 우수 숙소 꺼내오기
+            List<Place> dbHotels = placeRepository.findTop10ByCityAndCategory(mainCity, "숙소");
+            List<Place> combinedHotels = new java.util.ArrayList<>(dbHotels);
+
+            // 2순위: DB에 숙소가 5개 이하라면 구글 맵스 API 호출로 즉각 수혈
+            if (combinedHotels.size() < 5) {
+                List<Place> googleHotels = googleMapsService.searchRecommendedHotels(mainCity);
+                combinedHotels.addAll(googleHotels);
+            }
+
+            // 최대 6개까지만 이름 콤마로 묶어서 AI한테 던질 준비 완료
+            hotelCandidates = combinedHotels.stream().limit(6)
+                    .map(p -> p.getName() + " (평점/리뷰 우수)")
+                    .collect(Collectors.joining(", "));
+        }
+
+        // 총 여행 일수 계산 (예: 21일~23일 = 3일)
+        int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
+
+        // 7. 제미나이가 최종 가중치를 판단하여 타임라인을 생성
+        AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(
+                finalContext, optimizedRoute, request.getLanguage(),
+                request.getAccommodations(), request.isSuggestHotel(), hotelCandidates,
+                request.getStartDate(), totalDays
+        );
+
 
         // 8. Plan 엔티티 양식에 맞춰서 저장 상자 만들기
         Plan plan = new Plan();
@@ -141,6 +183,24 @@ public class PlanController {
             plan.setTheme(String.join(", ", request.getThemes()));
         }
         plan.setAiReason(aiResponse.getReason());
+
+        // 사용자가 입력한 캘린더 숙소 정보 DB 영구 저장
+        if (!hasNoAccommodations) {
+            for (com.travel.planner.dto.PlanRequest.AccommodationInput accInput : request.getAccommodations()) {
+                com.travel.planner.entity.Accommodation acc = new com.travel.planner.entity.Accommodation();
+                acc.setName(accInput.getName());
+                acc.setCheckIn(accInput.getCheckIn());
+                acc.setCheckOut(accInput.getCheckOut());
+
+                // 프론트에서 주소(address)도 보내주면 주석 해제해서 사용
+                if (accInput.getAddress() != null) {
+                    acc.setAddress(accInput.getAddress());
+                }
+
+                plan.addAccommodation(acc); // Plan 객체에 쏙 담아서 나중에 한 번에 저장되도록 세팅
+            }
+        }
+
 
         // 9. AI가 짜준 타임라인을 Itinerary 객체로 변환
         if (aiResponse.getTimeline() != null) {
@@ -181,7 +241,7 @@ public class PlanController {
             }
         }
 
-        // 10. 한 번에 영구 저장
+        // 10. 한 번에 영구 저장 (숙소 정보도 CASCADE 설정에 의해 같이 예쁘게 저장됩니다!)
         planRepository.save(plan);
 
         return aiResponse;

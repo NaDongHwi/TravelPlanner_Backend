@@ -55,4 +55,13 @@ public class Plan {
         itineraries.add(itinerary);
         itinerary.setPlan(this);
     }
+
+    @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Accommodation> accommodations = new ArrayList<>();
+
+    // 숙소를 여행 계획에 담아주는 편의 메서드
+    public void addAccommodation(Accommodation accommodation) {
+        accommodations.add(accommodation);
+        accommodation.setPlan(this);
+    }
 }

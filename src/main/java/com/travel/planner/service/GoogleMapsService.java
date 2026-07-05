@@ -286,4 +286,37 @@ public class GoogleMapsService {
         }
         return "관광지"; // 위 조건에 걸리지 않는 모든 명소(공원, 신사, 박물관 등)는 관광지로 통일
     }
+
+    // [숙소 역제안용] 구글 맵스 숙소 검색기
+    public List<Place> searchRecommendedHotels(String city) {
+        List<Place> recommendedHotels = new ArrayList<>();
+        // 키워드를 "호텔"로 강제 고정
+        String url = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
+
+        try {
+            String response = restTemplate.getForObject(url, String.class, city + " 호텔", googleMapsApiKey);
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response);
+
+            if ("OK".equals(root.path("status").asText())) {
+                for (com.fasterxml.jackson.databind.JsonNode node : root.path("results")) {
+                    double rating = node.path("rating").asDouble(0.0);
+                    int reviewCount = node.path("user_ratings_total").asInt(0);
+
+                    // 조건: 리뷰 3.5 이상, 100개 이상!
+                    if (rating >= 3.5 && reviewCount >= 100) {
+                        Place hotel = new Place();
+                        hotel.setName(node.path("name").asText());
+                        hotel.setCity(city);
+                        hotel.setLatitude(node.path("geometry").path("location").path("lat").asDouble());
+                        hotel.setLongitude(node.path("geometry").path("location").path("lng").asDouble());
+                        recommendedHotels.add(hotel);
+                    }
+                    if (recommendedHotels.size() >= 5) break; // 최대 5개까지만 수집
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("구글 숙소 추천 검색 실패: " + e.getMessage());
+        }
+        return recommendedHotels;
+    }
 }

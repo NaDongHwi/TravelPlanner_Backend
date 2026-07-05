@@ -1,10 +1,13 @@
 package com.travel.planner.service;
 
+import com.travel.planner.dto.PlanRequest;
 import com.travel.planner.entity.Region;
 import com.travel.planner.util.PrefectureMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -92,5 +95,31 @@ public class PlanValidationService {
             // 구글에서 못 찾거나 일본 외의 지역인 경우 수집 및 검증을 즉시 전면 차단
             throw new IllegalArgumentException("유효한 일본 내 권역을 확인할 수 없는 도시가 포함되어 있습니다: " + cityName);
         }
+    }
+
+    public ValidationResult validateAccommodations(List<PlanRequest.AccommodationInput> accommodations, LocalDate tripStart, LocalDate tripEnd) {
+        if (accommodations == null || accommodations.isEmpty()) return new ValidationResult(false, "OK");
+
+        // 1. 체크인 날짜순으로 정렬
+        accommodations.sort(Comparator.comparing(PlanRequest.AccommodationInput::getCheckIn));
+
+        for (int i = 0; i < accommodations.size(); i++) {
+            PlanRequest.AccommodationInput current = accommodations.get(i);
+
+            // [검증 1] 숙소 날짜가 전체 여행 기간을 벗어나는지 확인
+            if (current.getCheckIn().isBefore(tripStart) || current.getCheckOut().isAfter(tripEnd)) {
+                return new ValidationResult(true, "[" + current.getName() + "] 숙소의 일정이 전체 여행 기간을 벗어납니다.");
+            }
+
+            // [검증 2] 다음 숙소와 날짜가 겹치는지 확인 (가장 중요!)
+            if (i < accommodations.size() - 1) {
+                PlanRequest.AccommodationInput next = accommodations.get(i + 1);
+                // 현재 숙소의 체크아웃 날짜가 다음 숙소의 체크인 날짜보다 늦다면? (오버랩 발생)
+                if (current.getCheckOut().isAfter(next.getCheckIn())) {
+                    return new ValidationResult(true, "숙소 일정이 겹칩니다! [" + current.getName() + "]와 [" + next.getName() + "]의 날짜를 다시 확인해주세요.");
+                }
+            }
+        }
+        return new ValidationResult(false, "OK");
     }
 }

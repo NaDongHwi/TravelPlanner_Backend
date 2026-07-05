@@ -140,36 +140,91 @@ public class AdminController {
                 city, totalInserted, totalSkipped);
     }
 
+    // 글로벌 스레드 제어용 플래그
+    private volatile boolean isCleansing = false;
+
     @PostMapping("/api/v1/admin/cleanse-categories")
-    @Operation(summary = "기존 데이터 AI 카테고리 자동 분류 (50건씩 처리)")
+    @Operation(summary = "기존 데이터 AI 카테고리 완전 자동 분류 (30건씩 백그라운드 처리)")
     public ResponseEntity<String> cleanseCategories() {
-        // 1. 카테고리가 없는(null) 데이터 중 50개만 가져옵니다. (JPA Repository에 메서드 추가 필요)
-        // List<Place> targetPlaces = placeRepository.findTop50ByCategoryIsNull();
-        // Repository에 위 메서드가 없다면 아래 스트림 방식으로 처리 (임시)
-        List<Place> allPlaces = placeRepository.findAll();
-        List<Place> targetPlaces = allPlaces.stream()
-                .filter(p -> p.getCategory() == null)
-                .limit(50)
-                .collect(Collectors.toList());
-
-        if (targetPlaces.isEmpty()) {
-            return ResponseEntity.ok("정제할 데이터가 없습니다. 카테고리 분류가 100% 완료되었습니다!");
+        if (isCleansing) {
+            return ResponseEntity.badRequest().body("이미 자동 정제 작업이 실행 중입니다.");
         }
 
-        // 2. AI에게 분류를 맡깁니다.
-        Map<String, String> categorizedMap = aiService.cleansePlaceCategories(targetPlaces);
+        isCleansing = true;
 
-        // 3. AI가 준 결과대로 DB를 업데이트합니다.
-        int updateCount = 0;
-        for (Place place : targetPlaces) {
-            String newCategory = categorizedMap.get(place.getPlaceId());
-            if (newCategory != null) {
-                place.setCategory(newCategory);
-                placeRepository.save(place);
-                updateCount++;
+        // 스레드 분리 실행
+        new Thread(() -> {
+            System.out.println("[자동 정제 시작] AI 카테고리 자동 분류를 시작합니다...");
+
+            while (isCleansing) {
+                // 1. 카테고리가 비어있는(null) 데이터 30개를 조회
+                List<Place> allPlaces = placeRepository.findAll();
+                List<Place> targetPlaces = allPlaces.stream()
+                        .filter(p -> p.getCategory() == null)
+                        .limit(30)
+                        .collect(Collectors.toList());
+
+                // 남은 데이터가 없으면 자동 종료
+                if (targetPlaces.isEmpty()) {
+                    System.out.println("[자동 정제 완료] 모든 데이터의 카테고리 분류가 100% 완료되었습니다!");
+                    isCleansing = false;
+                    break;
+                }
+
+                System.out.println("남은 데이터 정제 중... (현재 30건 처리 시도)");
+
+                // 2. AI에게 분류 요청
+                Map<String, String> categorizedMap = aiService.cleansePlaceCategories(targetPlaces);
+
+                // 3. AI 요청 제한(429) 감지 시 대책 (1분 대기)
+                if (categorizedMap == null || categorizedMap.isEmpty()) {
+                    System.out.println("[경고] AI API 요청 제한(429) 감지!");
+                    System.out.println("구글 API 한도 초기화를 위해 1분(60s) 동안 대기합니다...");
+
+                    try {
+                        Thread.sleep(60000); // 1분(60초) 대기
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    continue; // 1분 동안 쉬고 락이 풀린 상태에서 방금 실패한 30건 재시도
+                }
+
+                // 4. 성공 시 DB 저장
+                int updateCount = 0;
+                for (Place place : targetPlaces) {
+                    String newCategory = categorizedMap.get(place.getPlaceId());
+                    if (newCategory != null) {
+                        place.setCategory(newCategory);
+                        placeRepository.save(place);
+                        updateCount++;
+                    }
+                }
+                System.out.println("30건 중 " + updateCount + "건 업데이트 완료.");
+
+                // 5. 성공 후 예방적 휴식 시간 30초
+                try {
+                    System.out.println("API 한도 누적을 방지하기 위해 30초간 안전 휴식을 취합니다...");
+                    Thread.sleep(30000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
+            System.out.println("[자동 정제 종료] 백그라운드 정제 스레드가 안전하게 정지되었습니다.");
+        }).start();
+
+        return ResponseEntity.ok("자동 정제 백그라운드 작업이 시작되었습니다. 429 에러 발생 시 1분간 자동 휴식 루틴이 가동됩니다.");
+    }
+
+    @PostMapping("/api/v1/admin/cleanse-categories/stop")
+    @Operation(summary = "실행 중인 AI 카테고리 자동 분류 작업 강제 중지")
+    public ResponseEntity<String> stopCleansing() {
+        if (!isCleansing) {
+            return ResponseEntity.ok("현재 실행 중인 자동 정제 작업이 없습니다.");
         }
 
-        return ResponseEntity.ok(targetPlaces.size() + "건 요청 중, " + updateCount + "건의 AI 카테고리 자동 정제가 완료되었습니다. (잔여 데이터가 있으면 계속 호출하세요)");
+        isCleansing = false; // 플래그를 false로 부러뜨려 루프 탈출
+        return ResponseEntity.ok("정제 작업 중지 명령을 전송했습니다. 현재 사이클이 마무리되거나 대기 시간이 끝나면 안전하게 중지됩니다.");
     }
 }

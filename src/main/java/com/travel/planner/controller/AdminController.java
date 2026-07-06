@@ -27,64 +27,111 @@ public class AdminController {
     private final GoogleMapsService googleMapsService;
     private final AiService aiService;
 
+    // 글로벌 스레드 제어용 플래그
+    private volatile boolean isEnriching = false;
+
     @PostMapping("/enrich-themes")
-    @Operation(summary = "오프라인 AI 테마 자동 분류 및 인리치먼트 구동",
-            description = "DB 내부 명소 중 테마 정보(theme)가 비어있는 모든 장소들을 수집하고, 실제 구글 리뷰를 분석하여 AI가 테마를 자동 분류 및 적재합니다.")
-    public String enrichMissingThemes() {
-        System.out.println("[어드민 엔진] 오프라인 AI 데이터 인리치먼트 전처리 파이프라인 가동...");
-
-        // 1. 테마가 비어있거나(OR), 실내/외 속성이 비어있는 순수 장소 원석 데이터들만 긁어오기
-        List<Place> targetPlaces = placeRepository.findAll().stream()
-                .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
-                        || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty())
-                .toList();
-
-        if (targetPlaces.isEmpty()) {
-            return "모든 장소의 테마 데이터가 100% 가공 완료되어 있어 전처리할 대상이 없습니다.";
+    @Operation(summary = "오프라인 AI 테마 자동 분류 및 인리치먼트 구동 (백그라운드 자동화)",
+            description = "DB 내부 명소 중 테마 정보가 비어있는 장소들을 30건씩 백그라운드에서 가져와 리뷰 분석 후 테마를 적재합니다.")
+    public ResponseEntity<String> enrichMissingThemes() {
+        if (isEnriching) {
+            return ResponseEntity.badRequest().body("이미 테마 인리치먼트 작업이 실행 중입니다.");
         }
 
-        int successCount = 0;
-        for (Place place : targetPlaces) {
-            String reviewsText = googleMapsService.getPlaceReviews(place.getCity(), place.getName());
+        isEnriching = true;
 
-            // 1. AI 연동 (에러 시 내부에서 null을 반환하도록 AiService가 수정된 상태)
-            String extractedData = aiService.classifyPlaceAttributes(place.getName(), reviewsText);
+        new Thread(() -> {
+            System.out.println("[어드민 엔진] 오프라인 AI 데이터 인리치먼트 백그라운드 파이프라인 가동...");
 
-            // [방어 1] AI 서버가 뻗어서 null이 온 경우 (과감히 스킵)
-            if (extractedData == null) {
-                System.out.println("[서버 지연 스킵] AI 응답 없음. [" + place.getName() + "] 정제를 다음으로 미룹니다.");
+            // 이번 실행에서 형식이 깨져서 실패한 장소들의 ID를 기억하는 블랙리스트 (메모리에만 존재)
+            java.util.Set<Long> skippedPlaceIds = new java.util.HashSet<>();
 
-                try { Thread.sleep(5000); } // 뻗었을 땐 5초 숨 고르기
-                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            while (isEnriching) {
+                // 1. 테마나 실내/외 속성이 비어있는 데이터 30건씩 조회
+                List<Place> allPlaces = placeRepository.findAll();
+                List<Place> targetPlaces = allPlaces.stream()
+                        .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
+                                || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty())
+                        .filter(p -> !skippedPlaceIds.contains(p.getId())) // 블랙리스트에 있는(실패했던) 장소는 제외하고 가져옴
+                        .limit(30)
+                        .collect(Collectors.toList());
 
-                continue; // 아래 저장 로직을 무시하고 다음 장소로 넘어감
+                if (targetPlaces.isEmpty()) {
+                    System.out.println("[인리치먼트 완료 또는 잔여 스킵] 처리할 데이터가 없습니다!");
+                    isEnriching = false;
+                    break;
+                }
+
+                System.out.println("남은 테마 데이터 정제 중... (현재 " + targetPlaces.size() + "건 처리 시도)");
+
+                int successCount = 0;
+                boolean hit429 = false;
+
+                for (Place place : targetPlaces) {
+                    if (!isEnriching) break;
+
+                    String reviewsText = googleMapsService.getPlaceReviews(place.getCity(), place.getName());
+                    String extractedData = aiService.classifyPlaceAttributes(place.getName(), reviewsText);
+
+                    // [방어 1] 429 에러 등으로 AI가 뻗었을 때 (null 반환)
+                    if (extractedData == null || extractedData.trim().isEmpty()) {
+                        System.out.println("[경고] AI 응답 없음 (429 제한 등). [" + place.getName() + "]에서 일시 정지합니다.");
+                        hit429 = true;
+                        break;
+                    }
+
+                    String[] parts = extractedData.split("\\|");
+
+                    // [방어 2] 완벽한 양식일 때만 DB에 영구 저장
+                    if (parts.length >= 2) {
+                        place.setTheme(parts[0].trim());
+                        place.setPlaceType(parts[1].trim());
+                        placeRepository.save(place);
+                        successCount++;
+                        System.out.println("[인리치먼트 성공] " + place.getName() + " -> 테마:[" + place.getTheme() + "], 속성:[" + place.getPlaceType() + "]");
+                    } else {
+                        // 쓰레기 값을 DB에 넣는 대신, 메모리 블랙리스트에만 ID를 추가하고 넘어감
+                        System.out.println("[형식 오류 스킵] AI 양식 위반: " + extractedData + " (DB 보존, 다음 턴에서 제외)");
+                        skippedPlaceIds.add(place.getId());
+                    }
+
+                    try { Thread.sleep(3000); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                }
+
+                if (hit429) {
+                    System.out.println("구글 API 한도 초기화를 위해 1분(60s) 동안 대기합니다...");
+                    try {
+                        Thread.sleep(60000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else {
+                    System.out.println("사이클 완료. 한도 누적 방지를 위해 10초간 안전 휴식을 취합니다...");
+                    try {
+                        Thread.sleep(10000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
             }
+            System.out.println("[테마 인리치먼트 종료] 백그라운드 스레드가 안전하게 정지되었습니다.");
+        }).start();
 
-            // 2. '|' 기준으로 앞(테마)과 뒤(실내/외) 쪼개기
-            String[] parts = extractedData.split("\\|");
+        return ResponseEntity.ok("자동 테마 인리치먼트 백그라운드 작업이 시작되었습니다. 429 에러 발생 시 1분간 자동 휴식 후 재시도합니다.");
+    }
 
-            // [방어 2] 완벽한 양식일 때만 저장하고, 아니면 스킵
-            if (parts.length >= 2) {
-                place.setTheme(parts[0].trim());
-                place.setPlaceType(parts[1].trim());
-            } else {
-                // AI가 대답은 했으나 양식(|)을 지키지 않은 경우 쓰레기 데이터 방지
-                System.out.println("[형식 오류 스킵] AI 양식 위반으로 다음으로 미룸: " + extractedData);
-                continue; // 스킵 처리
-            }
-
-            // 3. 검증된 무결성 데이터만 DB에 저장
-            placeRepository.save(place);
-            successCount++;
-
-            System.out.println("[인리치먼트 성공] " + place.getName() + " -> 테마:[" + place.getTheme() + "], 속성:[" + place.getPlaceType() + "]");
-
-            // 정상 처리 시 구글 API 쿨타임 3초 대기
-            try { Thread.sleep(3000); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    @PostMapping("/enrich-themes/stop")
+    @Operation(summary = "실행 중인 테마 자동 분류 작업 강제 중지")
+    public ResponseEntity<String> stopEnriching() {
+        if (!isEnriching) {
+            return ResponseEntity.ok("현재 실행 중인 테마 정제 작업이 없습니다.");
         }
 
-        return String.format("오프라인 데이터 전처리 완료! 총 %d개의 명소 테마를 AI가 완벽히 증강 및 적재했습니다.", successCount);
+        isEnriching = false; // 플래그를 false로 부러뜨려 루프 탈출
+        return ResponseEntity.ok("테마 정제 작업 중지 명령을 전송했습니다. 대기 시간이 끝나면 안전하게 중지됩니다.");
     }
 
     @PostMapping("/collect-places")
@@ -143,7 +190,7 @@ public class AdminController {
     // 글로벌 스레드 제어용 플래그
     private volatile boolean isCleansing = false;
 
-    @PostMapping("/api/v1/admin/cleanse-categories")
+    @PostMapping("/cleanse-categories")
     @Operation(summary = "기존 데이터 AI 카테고리 완전 자동 분류 (30건씩 백그라운드 처리)")
     public ResponseEntity<String> cleanseCategories() {
         if (isCleansing) {
@@ -217,7 +264,7 @@ public class AdminController {
         return ResponseEntity.ok("자동 정제 백그라운드 작업이 시작되었습니다. 429 에러 발생 시 1분간 자동 휴식 루틴이 가동됩니다.");
     }
 
-    @PostMapping("/api/v1/admin/cleanse-categories/stop")
+    @PostMapping("/cleanse-categories/stop")
     @Operation(summary = "실행 중인 AI 카테고리 자동 분류 작업 강제 중지")
     public ResponseEntity<String> stopCleansing() {
         if (!isCleansing) {

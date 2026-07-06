@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.entity.Log;
 import com.travel.planner.entity.Place;
+import com.travel.planner.repository.LogRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -17,6 +20,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor // 스프링이 LogRepository를 자동으로 연결해줍니다.
 public class AiService {
 
     @Value("${ai.gemini.api-key}")
@@ -30,6 +34,7 @@ public class AiService {
     private String openAiApiKey;
 
     private final ObjectMapper objectMapper = new ObjectMapper(); // JSON 변환 도구
+    private final LogRepository logRepository; // DB 로그 저장소 연결
 
     public AiRouteResponse evaluateAndModifyRoute(String userContext, List<Place> draftRoute, String lang,
                                                   List<com.travel.planner.dto.PlanRequest.AccommodationInput> accommodations,
@@ -148,6 +153,12 @@ public class AiService {
                 retryCount++;
                 System.out.println("Gemini 호출 에러 (" + retryCount + "/3): " + e.getMessage());
 
+                // [로그 기록] Gemini API 호출 실패 시 DB 적재
+                Log errorLog = new Log();
+                errorLog.setErrorType("AI_GEMINI_FAIL_" + retryCount);
+                errorLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "알 수 없는 Gemini 호출 에러");
+                logRepository.save(errorLog);
+
                 if (retryCount >= maxRetries) {
                     System.out.println("Gemini 최종 3회 실패! [OpenAI gpt-5.4] 백업 모델로 즉각 전환합니다.");
                     return callFallbackGpt4o(prompt, draftRoute); // Failover 발동!
@@ -214,6 +225,13 @@ public class AiService {
 
         } catch (Exception e) {
             System.out.println("백업 모델 gpt-5.4 실패했습니다: " + e.getMessage());
+
+            // [로그 기록] 백업 GPT마저 실패하는 최악의 사태 시 DB 적재
+            Log fatalLog = new Log();
+            fatalLog.setErrorType("AI_FATAL_GPT_FAIL");
+            fatalLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "알 수 없는 GPT 호출 에러");
+            logRepository.save(fatalLog);
+
             return createEmergencyFallbackResponse(draftRoute, "메인 및 백업 AI 모델 동시 장애 (" + e.getMessage() + ")");
         }
     }
@@ -271,6 +289,13 @@ public class AiService {
             return aiResult.replace("```", "").trim();
         } catch (Exception e) {
             System.out.println("AI 테마/속성 분석 에러: " + e.getMessage());
+
+            // [로그 기록] 관리자 테마 인리치먼트 백그라운드 작업 중 에러 시 DB 적재
+            Log enrichmentLog = new Log();
+            enrichmentLog.setErrorType("AI_ENRICHMENT_FAIL");
+            enrichmentLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "테마 분류 AI 에러");
+            logRepository.save(enrichmentLog);
+
             return null;
         }
     }
@@ -311,6 +336,13 @@ public class AiService {
             return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
         } catch (Exception e) {
             System.out.println("AI 카테고리 클렌징 실패: " + e.getMessage());
+
+            // [로그 기록] 관리자 카테고리 분류 백그라운드 작업 중 에러 시 DB 적재
+            Log cleansingLog = new Log();
+            cleansingLog.setErrorType("AI_CLEANSING_FAIL");
+            cleansingLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "카테고리 정제 AI 에러");
+            logRepository.save(cleansingLog);
+
             return new HashMap<>();
         }
     }

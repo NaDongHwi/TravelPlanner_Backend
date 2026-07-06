@@ -54,4 +54,12 @@ public class UserService {
 
         return token;
     }
+
+    @org.springframework.transaction.annotation.Transactional
+    public String deleteAccount(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        userRepository.delete(user);
+        return "회원 탈퇴 및 개인정보 파기가 완료되었습니다.";
+    }
 }

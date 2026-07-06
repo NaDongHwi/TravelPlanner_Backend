@@ -31,4 +31,10 @@ public class AuthController {
     public String login(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.LoginRequest request) {
         return userService.login(request);
     }
+
+    @PostMapping("/withdraw")
+    @Operation(summary = "회원 탈퇴", description = "토큰을 확인 후 회원의 모든 DB 정보를 파기합니다.")
+    public String withdraw(org.springframework.security.core.Authentication authentication) {
+        return userService.deleteAccount(authentication.getName());
+    }
 }

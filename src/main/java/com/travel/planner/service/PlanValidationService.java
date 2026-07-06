@@ -122,4 +122,22 @@ public class PlanValidationService {
         }
         return new ValidationResult(false, "OK");
     }
+
+    public ValidationResult validateFixedSchedules(List<PlanRequest.FixedScheduleInput> fixedSchedules) {
+        if (fixedSchedules == null || fixedSchedules.size() < 2) return new ValidationResult(false, "OK");
+
+        fixedSchedules.sort(java.util.Comparator.comparing(PlanRequest.FixedScheduleInput::getStartTime));
+
+        for (int i = 0; i < fixedSchedules.size() - 1; i++) {
+            PlanRequest.FixedScheduleInput current = fixedSchedules.get(i);
+            PlanRequest.FixedScheduleInput next = fixedSchedules.get(i + 1);
+
+            // 현재 고정 일정의 끝나는 시간이 다음 일정의 시작 시간보다 늦다면 충돌
+            if (current.getEndTime().isAfter(next.getStartTime())) {
+                return new ValidationResult(true,
+                        String.format("고정 일정 충돌: [%s]와 [%s]의 시간이 겹칩니다.", current.getName(), next.getName()));
+            }
+        }
+        return new ValidationResult(false, "OK");
+    }
 }

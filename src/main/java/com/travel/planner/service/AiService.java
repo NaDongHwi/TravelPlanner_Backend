@@ -25,6 +25,10 @@ public class AiService {
     @Value("${ai.gemini.model}") // yml 파일에서 모델 이름을 동적으로 읽어옵니다.
     private String geminiModel;
 
+    // OpenAI(gpt-5.4) 비상 전환용 API 키 (application.properties에 추가 필요)
+    @Value("${ai.openai.api-key:}")
+    private String openAiApiKey;
+
     private final ObjectMapper objectMapper = new ObjectMapper(); // JSON 변환 도구
 
     public AiRouteResponse evaluateAndModifyRoute(String userContext, List<Place> draftRoute, String lang,
@@ -53,15 +57,12 @@ public class AiService {
                 String endHotel = null;
 
                 for (com.travel.planner.dto.PlanRequest.AccommodationInput acc : accommodations) {
-                    // 어제 묵고 오늘 체크아웃 하는 날 -> 시작점이 됨
                     if (acc.getCheckOut().isEqual(currentDate)) {
                         startHotel = acc.getName();
                     }
-                    // 오늘 새로 체크인 하는 날 -> 도착점이 됨
                     if (acc.getCheckIn().isEqual(currentDate)) {
                         endHotel = acc.getName();
                     }
-                    // 체크인과 체크아웃 사이의 온전한 숙박일 -> 시작과 끝이 모두 이 숙소
                     if (currentDate.isAfter(acc.getCheckIn()) && currentDate.isBefore(acc.getCheckOut())) {
                         startHotel = acc.getName();
                         endHotel = acc.getName();
@@ -121,7 +122,6 @@ public class AiService {
                 "  \"reason\": \"최종 결과물 완성 상세 설명\"\n" +
                 "}";
 
-        // 2. 프롬프트에 줄바꿈이나 특수기호가 많으므로, Map을 써서 안전하게 JSON으로 포장합니다.
         Map<String, Object> requestBody = new HashMap<>();
         Map<String, Object> contents = new HashMap<>();
         Map<String, Object> parts = new HashMap<>();
@@ -129,7 +129,6 @@ public class AiService {
         contents.put("parts", Collections.singletonList(parts));
         requestBody.put("contents", Collections.singletonList(contents));
 
-        // 3. 동적 모델명이 들어간 구글 제미나이 API 주소
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
 
         HttpHeaders headers = new HttpHeaders();
@@ -137,48 +136,109 @@ public class AiService {
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
         RestTemplate restTemplate = new RestTemplate();
 
-        try {
-            // 4. 제미나이 서버로 요청
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            return parseGeminiResponse(response.getBody());
+        // 제미나이 서버 3회 요청 및 gpt-5.4 비상 전환(Failover) 로직
+        int maxRetries = 3;
+        int retryCount = 0;
 
-        } catch (Exception e) {
-            // [장애 발생 시 백업 로직] AI가 뻗으면 1차 초안(임시 동선)을 새로운 타임라인 규격에 맞춰서 리턴합니다.
-            AiRouteResponse failoverResponse = new AiRouteResponse();
-            List<AiRouteResponse.TimelineItem> fallbackTimeline = new ArrayList<>();
+        while (retryCount < maxRetries) {
+            try {
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                return parseGeminiResponse(response.getBody());
+            } catch (Exception e) {
+                retryCount++;
+                System.out.println("Gemini 호출 에러 (" + retryCount + "/3): " + e.getMessage());
 
-            for (int i = 0; i < draftRoute.size(); i++) {
-                AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
-                item.setDay(1); // 우선 임시로 모두 1일 차로 배정
-                item.setTime("시간 미정");
-                item.setPlaceName(draftRoute.get(i).getName());
-                item.setCategory("분류 미정");
-                item.setDescription("AI 연동 지연으로 인한 기본 알고리즘 경로입니다.");
-                fallbackTimeline.add(item);
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 최종 3회 실패! [OpenAI gpt-5.4] 백업 모델로 즉각 전환합니다.");
+                    return callFallbackGpt4o(prompt, draftRoute); // Failover 발동!
+                }
+
+                // 재시도 전 1초 대기 (API Rate Limit 방어)
+                try { Thread.sleep(1000); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             }
-
-            failoverResponse.setTimeline(fallbackTimeline);
-            failoverResponse.setReason("AI 연동 지연으로 기본 알고리즘 최적화 동선이 적용되었습니다. (" + e.getMessage() + ")");
-            return failoverResponse;
         }
+
+        return createEmergencyFallbackResponse(draftRoute, "예기치 않은 오류가 발생했습니다.");
     }
 
     // 제미나이가 뱉은 복잡한 JSON에서 원하는 값만 빼내는 파싱 도구
     private AiRouteResponse parseGeminiResponse(String responseBody) throws Exception {
         JsonNode rootNode = objectMapper.readTree(responseBody);
-
-        // 구글 제미나이 응답 구조 안에서 실제 텍스트 빼오기
         String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-
-        // AI가 지시를 무시하고 ```json ... ``` 같은 마크다운 기호를 붙일 경우를 대비해 찌꺼기를 잘라냅니다.
         aiText = aiText.replace("```json", "").replace("```", "").trim();
-
-        // 텍스트를 다시 Java 객체(AiRouteResponse)로 변환
         return objectMapper.readValue(aiText, AiRouteResponse.class);
     }
 
+    // gpt-5.4 비상 전환 메서드
+    private AiRouteResponse callFallbackGpt4o(String prompt, List<Place> draftRoute) {
+        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
+            System.out.println("OpenAI API 키가 설정되지 않아 기본 알고리즘 경로를 반환합니다.");
+            return createEmergencyFallbackResponse(draftRoute, "Gemini 장애 발생 및 GPT 백업 키 미설정");
+        }
+
+        try {
+            String gptUrl = "https://api.openai.com/v1/chat/completions";
+
+            // gpt-5.4 API 규격에 맞춘 JSON 바디 생성
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", "gpt-5.4");
+
+            Map<String, String> message = new HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            requestBody.put("messages", Collections.singletonList(message));
+
+            // JSON 출력 강제 설정
+            Map<String, Object> responseFormat = new HashMap<>();
+            responseFormat.put("type", "json_object");
+            requestBody.put("response_format", responseFormat);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(openAiApiKey); // OpenAI는 Bearer 토큰 방식 사용
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            RestTemplate restTemplate = new RestTemplate();
+
+            ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+            // OpenAI 응답에서 실제 JSON 텍스트 추출
+            String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
+
+            AiRouteResponse fallbackResponse = objectMapper.readValue(gptText, AiRouteResponse.class);
+            fallbackResponse.setReason("[시스템 메시지] 메인 AI 서버 장애로 인해 gpt-5.4 모델을 통해 비상 생성된 일정입니다. \n\n" + fallbackResponse.getReason());
+
+            return fallbackResponse;
+
+        } catch (Exception e) {
+            System.out.println("백업 모델 gpt-5.4 실패했습니다: " + e.getMessage());
+            return createEmergencyFallbackResponse(draftRoute, "메인 및 백업 AI 모델 동시 장애 (" + e.getMessage() + ")");
+        }
+    }
+
+    // Gemini, GPT 모두 죽었을 때 최후의 보루 (하드코딩 동선)
+    private AiRouteResponse createEmergencyFallbackResponse(List<Place> draftRoute, String errorMessage) {
+        AiRouteResponse failoverResponse = new AiRouteResponse();
+        List<AiRouteResponse.TimelineItem> fallbackTimeline = new ArrayList<>();
+
+        for (int i = 0; i < draftRoute.size(); i++) {
+            AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
+            item.setDay(1);
+            item.setTime("시간 미정");
+            item.setPlaceName(draftRoute.get(i).getName());
+            item.setCategory("분류 미정");
+            item.setDescription("AI 연동 지연으로 인한 기본 알고리즘 경로입니다.");
+            fallbackTimeline.add(item);
+        }
+
+        failoverResponse.setTimeline(fallbackTimeline);
+        failoverResponse.setReason("AI 시스템 장애로 기본 알고리즘 최적화 동선이 적용되었습니다. (" + errorMessage + ")");
+        return failoverResponse;
+    }
+
     // 오프라인 전처리 전용: 리뷰를 기반으로 장소의 테마 카테고리 자동 분류
-    // 테마와 실내/외 여부를 한 번에 분류
     public String classifyPlaceAttributes(String placeName, String reviewsText) {
         String prompt = "너는 여행 데이터 정제 전문가야. 장소: [" + placeName + "]와 구글 리뷰를 분석해.\n\n" +
                 "【 분류 절대 규칙 】\n" +
@@ -211,7 +271,6 @@ public class AiService {
             return aiResult.replace("```", "").trim();
         } catch (Exception e) {
             System.out.println("AI 테마/속성 분석 에러: " + e.getMessage());
-            // 쓰레기 데이터 적재를 막기 위해 억지 기본값 대신 null을 반환
             return null;
         }
     }
@@ -247,10 +306,8 @@ public class AiService {
             JsonNode rootNode = objectMapper.readTree(response.getBody());
             String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
-            // 마크다운 제거 방어 로직
             textResponse = textResponse.replace("```json", "").replace("```", "").trim();
 
-            // JSON String을 Map으로 변환
             return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
         } catch (Exception e) {
             System.out.println("AI 카테고리 클렌징 실패: " + e.getMessage());

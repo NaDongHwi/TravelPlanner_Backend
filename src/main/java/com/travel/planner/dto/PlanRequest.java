@@ -29,8 +29,15 @@ public class PlanRequest {
     @Schema(description = "주요 이동수단 (Step 5)", example = "도보 및 대중교통")
     private String transportation;
 
-    @Schema(description = "고정 일정 리스트 (Step 6)", example = "[\"아키하바라 애니메이트\"]")
-    private List<String> fixedSchedules;
+    @Schema(description = "고정 일정 리스트 (Step 6)")
+    private List<FixedScheduleInput> fixedSchedules;
+
+    @Getter @Setter
+    public static class FixedScheduleInput {
+        private String name;
+        private java.time.LocalTime startTime;
+        private java.time.LocalTime endTime;
+    }
 
     // 입출국 도시
     private String inCity;

@@ -15,7 +15,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -57,120 +59,160 @@ public class PlanController {
                     request.getAccommodations(), request.getStartDate(), request.getEndDate()
             );
             if (accValidation.isWarning) {
-                // 숙소 일정이 겹치거나 여행 기간을 벗어나면 즉시 차단 (프론트엔드에 에러 메시지 반환)
                 throw new IllegalArgumentException(accValidation.warningMessage);
             }
         }
 
-        // 1. JwtFilter가 토큰에서 꺼내둔 로그인한 회원의 이메일을 가져옵니다.
         String email = authentication.getName();
-
-        // 2. DB에서 해당 회원의 진짜 정보(나이, 성별)를 뽑아옵니다.
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("회원을 찾을 수 없습니다."));
 
-        // 프론트엔드에서 받은 고정 일정을 콤마(,)로 연결합니다. 없으면 "없음"으로 처리
+        // 프론트엔드에서 받은 고정 일정 객체 리스트에서 '이름(name)'만 추출하여 콤마(,)로 연결합니다.
         String fixed = request.getFixedSchedules() != null && !request.getFixedSchedules().isEmpty()
-                ? String.join(", ", request.getFixedSchedules())
+                ? request.getFixedSchedules().stream()
+                .map(com.travel.planner.dto.PlanRequest.FixedScheduleInput::getName)
+                .collect(Collectors.joining(", "))
                 : "없음";
 
-        // 프론트엔드에서 시간이 안 넘어왔을 경우(null) "미정"으로 처리하는 방어 로직
         String arrivalTime = (request.getInTime() != null) ? request.getInTime() : "미정";
         String departureTime = (request.getOutTime() != null) ? request.getOutTime() : "미정";
-
-        // 다중 도시 리스트를 콤마로 연결 ("도쿄, 오사카")
         String joinedCities = request.getCities() != null ? String.join(", ", request.getCities()) : "미정";
-
-        // 여러 도시 중 첫 번째 도시를 '메인 도시(대표 도시)'로 지정합니다. (날씨 검색 등)
         String mainCity = (request.getCities() != null && !request.getCities().isEmpty())
                 ? request.getCities().get(0) : "미정";
 
-        // 3. 회원 정보(DB) + 프론트엔드 선택 값(DTO) + 비행시간 합쳐서 조립
+        int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
+
         String baseContext = String.format(
                 "연령대: %s, 성별: %s, 목적지: %s, 동행자: %s, 테마: %s, 이동수단: %s, 고정일정: %s, [입국 시간: %s], [출국 시간: %s]",
-                user.getAgeGroup(),
-                user.getGender(),
-                joinedCities,
-                request.getCompanion(),
-                String.join(", ", request.getThemes()),
-                request.getTransportation(),
-                fixed,
-                arrivalTime,
-                departureTime
+                user.getAgeGroup(), user.getGender(), joinedCities, request.getCompanion(),
+                String.join(", ", request.getThemes()), request.getTransportation(), fixed, arrivalTime, departureTime
         );
 
-        // 다중 도시 리스트에 포함된 모든 장소를 DB에서 한 번에 긁어옵니다.
-        List<Place> realPlaces = placeRepository.findByCityIn(request.getCities());
+        // 1. 고품질 데이터 풀 확보 (하루당 15개 넉넉하게 산정)
+        int poolSize = totalDays * 15;
+        List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
 
-        // 4. TSP(최단 거리) 알고리즘을 돌려서 방문 순서를 정렬합니다. (물리적 뼈대 생성)
-        List<Place> optimizedRoute = planService.calculateShortestPath(realPlaces);
+        // 콜드 스타트 방어
+        if (allCityPlaces.size() < poolSize && mainCity != null && !mainCity.equals("미정")) {
+            System.out.println("DB에 장소가 부족합니다. 구글 맵스 긴급 수집을 가동합니다!");
+            try {
+                String formalizedCity = googleMapsService.getFormalizedJapanCity(mainCity);
+                String searchKeyword = (request.getThemes() != null && !request.getThemes().isEmpty())
+                        ? request.getThemes().get(0) : "유명 관광지";
+                List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword);
+                for (Place p : emergencyPlaces) {
+                    p.setCity(mainCity);
+                    if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
+                        placeRepository.save(p);
+                        allCityPlaces.add(p);
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println("긴급 수집 실패: " + e.getMessage());
+            }
+        }
 
-        // 5. 구글 맵스 API 단 1회 호출 (뼈대의 진짜 이동 시간 가져오기)
-        String travelTimes = googleMapsService.getRealTravelTimes(optimizedRoute);
+        // 2. 테마 및 필수 랜드마크 필터링 (정렬 유지 및 고품질 보존)
+        boolean isFoodLover = request.getThemes() != null && request.getThemes().stream().anyMatch(t ->
+                t.contains("맛집") || t.contains("카페") || t.contains("미식") || t.contains("식도락"));
 
-        // 5.5 [데이터 인리치먼트 핵심] DB에서 장소별 진짜 영업시간을 뽑아 동적 제약 조건 만들기
+        List<Place> foodPlaces = allCityPlaces.stream()
+                .filter(p -> "식음".equals(p.getCategory()))
+                .limit(isFoodLover ? poolSize / 3 : totalDays * 2) // 맛집 테마면 많이, 아니면 하루 2끼
+                .collect(Collectors.toList());
+
+        List<Place> landmarkPlaces = allCityPlaces.stream()
+                .filter(p -> "관광지".equals(p.getCategory()) || "쇼핑".equals(p.getCategory()))
+                .limit(poolSize / 3)
+                .collect(Collectors.toList());
+
+        List<Place> themedPlaces = new ArrayList<>();
+        if (request.getThemes() != null && !request.getThemes().isEmpty()) {
+            themedPlaces = allCityPlaces.stream()
+                    .filter(p -> {
+                        if (!isFoodLover && "식음".equals(p.getCategory())) return false;
+                        return request.getThemes().stream().anyMatch(theme ->
+                                p.getTheme() != null && p.getTheme().contains(theme));
+                    })
+                    .limit(poolSize / 3)
+                    .collect(Collectors.toList());
+        }
+
+        java.util.Set<Place> hybridPool = new java.util.LinkedHashSet<>();
+        hybridPool.addAll(landmarkPlaces);
+        hybridPool.addAll(foodPlaces);
+        hybridPool.addAll(themedPlaces);
+
+        List<Place> realPlaces = new ArrayList<>(hybridPool);
+        if (realPlaces.size() < totalDays * 5) {
+            realPlaces = new ArrayList<>(allCityPlaces); // 데이터가 너무 적으면 필터 풀고 전체 투입
+        }
+
+        // 3. K-Means + TSP + 일차별 구글 맵스 분할 호출
+
+        // 3-1. K-Means 알고리즘으로 장소들을 일수(totalDays)만큼 지역별 덩어리로 쪼갭니다.
+        Map<Integer, List<Place>> clusters = planService.clusterPlaces(realPlaces, totalDays);
+
+        List<Place> finalOptimizedRoute = new ArrayList<>();
+        StringBuilder dailyTravelTimes = new StringBuilder();
         StringBuilder dynamicConstraints = new StringBuilder();
         dynamicConstraints.append("\n\n[장소별 실제 영업시간 및 절대 제약 조건]\n");
         dynamicConstraints.append("AI는 아래 나열된 각 장소의 실제 영업시간을 반드시 분석하고, 문이 닫혀있는 시간에는 절대 방문 일정을 짜지 마세요.\n");
 
-        for (Place p : optimizedRoute) {
-            String opHours = (p.getOpeningHours() != null && !p.getOpeningHours().equals("영업시간 정보 없음"))
-                    ? p.getOpeningHours() : "24시간 상시 개방";
+        // 3-2. 일차별로 루프를 돌며 TSP 최적화 및 구글 맵스를 호출합니다.
+        for (int i = 0; i < totalDays; i++) {
+            List<Place> dailyPlaces = clusters.get(i);
+            if (dailyPlaces == null || dailyPlaces.isEmpty()) continue;
 
-            // 실내/외 속성까지 AI에게 함께 전달
-            String type = (p.getPlaceType() != null) ? p.getPlaceType() : "복합";
+            // 해당 일차의 구역 내에서 TSP 최단 거리 정렬 수행
+            List<Place> dailyRoute = planService.calculateShortestPath(dailyPlaces);
+            finalOptimizedRoute.addAll(dailyRoute);
 
-            dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append(" (환경: ").append(type).append(")\n");
+            // 하루치 장소(보통 10~15개)만 구글 맵스에 던지므로 25개 한도(MAX_WAYPOINTS) 안 걸림
+            dailyTravelTimes.append("\n[Day ").append(i + 1).append(" 구역 예상 이동 시간]\n");
+            dailyTravelTimes.append(googleMapsService.getRealTravelTimes(dailyRoute)).append("\n");
+
+            for (Place p : dailyRoute) {
+                String opHours = (p.getOpeningHours() != null && !p.getOpeningHours().equals("영업시간 정보 없음"))
+                        ? p.getOpeningHours() : "24시간 상시 개방";
+                String type = (p.getPlaceType() != null) ? p.getPlaceType() : "복합";
+                dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append(" (환경: ").append(type).append(")\n");
+            }
         }
 
-        // 대표 도시(mainCity)의 날씨를 가져옵니다.
         String currentWeather = weatherService.getCurrentWeather(mainCity);
 
-        // 6. 제미나이에게 줄 최종 프롬프트에 이동시간, 영업시간, 실시간 날씨까지 3중 가중치 융합
         String finalContext = baseContext +
-                "\n\n[구글 맵스 기반 실제 이동 시간]\n" + travelTimes +
+                "\n\n[구글 맵스 기반 일차별 실제 이동 시간]\n" + dailyTravelTimes.toString() +
                 dynamicConstraints.toString() +
                 "\n\n[목적지 실시간 기상 정보]\n- 상태: " + currentWeather;
 
-
-        // 숙소 역제안 하이브리드 로직 (DB 클렌징 데이터 + 구글 맵스 실시간)
+        // 숙소 역제안 하이브리드 로직
         String hotelCandidates = "";
         boolean hasNoAccommodations = (request.getAccommodations() == null || request.getAccommodations().isEmpty());
 
         if (hasNoAccommodations && request.isSuggestHotel()) {
-            System.out.println("숙소 역제안 모드 가동! DB 및 구글 탐색 중...");
-
-            // 1순위: 우리 DB 클렌징 데이터에서 우수 숙소 꺼내오기
             List<Place> dbHotels = placeRepository.findTop10ByCityAndCategory(mainCity, "숙소");
             List<Place> combinedHotels = new java.util.ArrayList<>(dbHotels);
-
-            // 2순위: DB에 숙소가 5개 이하라면 구글 맵스 API 호출로 즉각 수혈
             if (combinedHotels.size() < 5) {
-                List<Place> googleHotels = googleMapsService.searchRecommendedHotels(mainCity);
-                combinedHotels.addAll(googleHotels);
+                combinedHotels.addAll(googleMapsService.searchRecommendedHotels(mainCity));
             }
-
-            // 최대 6개까지만 이름 콤마로 묶어서 AI한테 던질 준비 완료
             hotelCandidates = combinedHotels.stream().limit(6)
                     .map(p -> p.getName() + " (평점/리뷰 우수)")
                     .collect(Collectors.joining(", "));
         }
 
-        // 총 여행 일수 계산 (예: 21일~23일 = 3일)
-        int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
-
-        // 7. 제미나이가 최종 가중치를 판단하여 타임라인을 생성
+        // 7. 제미나이 최종 연산
         AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(
-                finalContext, optimizedRoute, request.getLanguage(),
+                finalContext, finalOptimizedRoute, request.getLanguage(),
                 request.getAccommodations(), request.isSuggestHotel(), hotelCandidates,
                 request.getStartDate(), totalDays
         );
 
-
-        // 8. Plan 엔티티 양식에 맞춰서 저장 상자 만들기
+        // 8. DB 영구 저장 로직
         Plan plan = new Plan();
         plan.setUser(user);
-        plan.setTitle(joinedCities + " 여행"); // 예: "도쿄, 오사카 여행"
+        plan.setTitle(joinedCities + " 여행");
         plan.setStartDate(request.getStartDate());
         plan.setEndDate(request.getEndDate());
         plan.setInCity(request.getInCity());
@@ -178,31 +220,22 @@ public class PlanController {
         plan.setInTime(arrivalTime);
         plan.setOutTime(departureTime);
 
-        // 테마 값이 null이 아닐 때만 콤마로 연결
         if (request.getThemes() != null) {
             plan.setTheme(String.join(", ", request.getThemes()));
         }
         plan.setAiReason(aiResponse.getReason());
 
-        // 사용자가 입력한 캘린더 숙소 정보 DB 영구 저장
         if (!hasNoAccommodations) {
             for (com.travel.planner.dto.PlanRequest.AccommodationInput accInput : request.getAccommodations()) {
                 com.travel.planner.entity.Accommodation acc = new com.travel.planner.entity.Accommodation();
                 acc.setName(accInput.getName());
                 acc.setCheckIn(accInput.getCheckIn());
                 acc.setCheckOut(accInput.getCheckOut());
-
-                // 프론트에서 주소(address)도 보내주면 주석 해제해서 사용
-                if (accInput.getAddress() != null) {
-                    acc.setAddress(accInput.getAddress());
-                }
-
-                plan.addAccommodation(acc); // Plan 객체에 쏙 담아서 나중에 한 번에 저장되도록 세팅
+                if (accInput.getAddress() != null) acc.setAddress(accInput.getAddress());
+                plan.addAccommodation(acc);
             }
         }
 
-
-        // 9. AI가 짜준 타임라인을 Itinerary 객체로 변환
         if (aiResponse.getTimeline() != null) {
             int seq = 1;
             for (AiRouteResponse.TimelineItem item : aiResponse.getTimeline()) {
@@ -212,50 +245,36 @@ public class PlanController {
                 itinerary.setTime(item.getTime());
                 itinerary.setAiComment(item.getDescription());
 
-                // AI가 말한 '장소 이름'으로 실제 DB의 Place 객체를 찾아서 연결합니다
                 Place matchedPlace = realPlaces.stream()
                         .filter(p -> p.getName().equals(item.getPlaceName()))
                         .findFirst()
                         .orElse(null);
 
-                // [구글 API 동적 수집 파이프라인] DB에 장소가 없으면 진짜 구글에서 가져옵니다
                 if (matchedPlace == null) {
-                    System.out.println("DB에 장소 없음! 구글 맵스 API 동적 수집 발동: " + item.getPlaceName());
-
-                    // 동적 수집 시 대표 도시(mainCity)와 request.getLanguage()를 기반으로 검색합니다.
                     Place fetchedPlace = googleMapsService.getPlaceDetails(mainCity, item.getPlaceName(), request.getLanguage());
-
-                    // 이름과 도시는 프론트엔드/AI가 준 데이터로 세팅
                     fetchedPlace.setName(item.getPlaceName());
-                    fetchedPlace.setCity(mainCity); // 대표 도시 세팅
-                    fetchedPlace.setLastUpdated(java.time.LocalDateTime.now()); // 업데이트 시간 기록
-
-                    // 진짜 좌표와 진짜 영업시간이 모두 들어간 신규 장소를 즉각 DB에 저장
+                    fetchedPlace.setCity(mainCity);
+                    fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());
                     matchedPlace = placeRepository.save(fetchedPlace);
                 }
 
                 if (matchedPlace != null) {
-                    itinerary.setPlace(matchedPlace); // 실제 객체 매핑
+                    itinerary.setPlace(matchedPlace);
                     plan.addItinerary(itinerary);
                 }
             }
         }
 
-        // 10. 한 번에 영구 저장 (숙소 정보도 CASCADE 설정에 의해 같이 예쁘게 저장됩니다!)
         planRepository.save(plan);
-
         return aiResponse;
     }
 
     @GetMapping("/{planId}/timeline")
     @Operation(summary = "동적 타임라인 조회", description = "DB에 저장된 연산 완료 일정을 반환합니다.")
     public AiRouteResponse getTimeline(@PathVariable Long planId) {
-
-        // 1. DB에서 저장된 Plan을 꺼내옵니다.
         Plan plan = planRepository.findById(planId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 여행 일정을 찾을 수 없습니다."));
 
-        // 2. 꺼내온 DB 데이터를 프론트엔드 규격(AiRouteResponse)으로 포장합니다.
         AiRouteResponse response = new AiRouteResponse();
         response.setReason(plan.getAiReason());
 
@@ -266,11 +285,8 @@ public class PlanController {
             item.setPlaceName(iti.getPlace().getName());
             item.setCategory("분류 정보");
             item.setDescription(iti.getAiComment());
-
-            // DB에 저장된 진짜 위/경도를 꺼내서 담아줍니다.
             item.setLatitude(iti.getPlace().getLatitude());
             item.setLongitude(iti.getPlace().getLongitude());
-
             return item;
         }).collect(Collectors.toList());
 

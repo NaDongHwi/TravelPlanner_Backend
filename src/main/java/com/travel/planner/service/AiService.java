@@ -257,26 +257,36 @@ public class AiService {
     }
 
     // 오프라인 전처리 전용: 리뷰를 기반으로 장소의 테마 카테고리 자동 분류
-    public String classifyPlaceAttributes(String placeName, String reviewsText) {
-        String prompt = "너는 여행 데이터 정제 전문가야. 장소: [" + placeName + "]와 구글 리뷰를 분석해.\n\n" +
-                "【 분류 절대 규칙 】\n" +
-                "1. 테마: [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 중 가장 적합한 1~3개를 선택.\n" +
-                "2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 [실내] 또는 [실외] 중 무조건 하나만 강제로 선택해!\n" +
-                "   - 건물 안에서 쇼핑/식사를 한다면 무조건 [실내] (예: 애니메이트, 스시집, 백화점)\n" +
-                "   - 지붕이 없는 야외 공원, 길거리, 신사라면 무조건 [실외] (예: 센소지, 신주쿠 쿄엔, 하치코 동상)\n" +
-                "   - [복합]이라는 단어는 실내랑, 실외 판단이 완벽히 5:5로 갈리는 대형 테마파크(디즈니랜드 등)가 아니면 절대 쓰지 마.\n" +
-                "3. 반드시 아래의 텍스트 형식으로만 출력해! 다른 설명은 절대 쓰지 마.\n" +
-                "형식: 테마1,테마2|장소속성\n" +
-                "예시: 쇼핑,서브컬쳐|실내";
+    public Map<String, String> classifyPlaceAttributesBulk(List<Place> places, Map<String, String> reviewsMap) {
+        StringBuilder promptBuilder = new StringBuilder();
+
+        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 여러 장소들의 이름과 구글 리뷰를 정밀하게 분석해서, 각각의 테마와 장소 속성을 한 번에 분류해.\n\n");
+        promptBuilder.append("【 분류 절대 규칙 】\n");
+        promptBuilder.append("1. 테마: [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 중 가장 적합한 1~3개를 선택.\n");
+        promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 [실내] 또는 [실외] 중 무조건 하나만 강제로 선택해!\n");
+        promptBuilder.append("   - 건물 안에서 쇼핑/식사를 한다면 무조건 [실내] (예: 애니메이트, 스시집, 백화점)\n");
+        promptBuilder.append("   - 지붕이 없는 야외 공원, 길거리, 신사라면 무조건 [실외] (예: 센소지, 신주쿠 쿄엔, 하치코 동상)\n");
+        promptBuilder.append("   - [복합]이라는 단어는 실내랑, 실외 판단이 완벽히 5:5로 갈리는 대형 테마파크(디즈니랜드 등)가 아니면 절대 쓰지 마.\n");
+        promptBuilder.append("3. 결과는 반드시 아래 예시처럼 장소 ID를 키(key)로, '테마1,테마2|장소속성' 문자열을 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내\", \"ChIJ5678\": \"자연,힐링|실외\"}\n\n[분류 대상 목록]\n");
+
+        for (Place p : places) {
+            String reviews = reviewsMap.get(p.getPlaceId());
+
+            promptBuilder.append("- ID: ").append(p.getPlaceId())
+                    .append(" / 이름: ").append(p.getName())
+                    .append(" / 리뷰: ").append(reviews != null ? reviews : "리뷰 없음").append("\n");
+        }
 
         Map<String, Object> requestBody = new HashMap<>();
         Map<String, Object> contents = new HashMap<>();
         Map<String, Object> parts = new HashMap<>();
-        parts.put("text", prompt);
+        parts.put("text", promptBuilder.toString());
         contents.put("parts", Collections.singletonList(parts));
         requestBody.put("contents", Collections.singletonList(contents));
 
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
@@ -284,19 +294,18 @@ public class AiService {
 
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String aiResult = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText().trim();
-            return aiResult.replace("```", "").trim();
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+
+            textResponse = textResponse.replace("```json", "").replace("```", "").trim();
+            return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
         } catch (Exception e) {
-            System.out.println("AI 테마/속성 분석 에러: " + e.getMessage());
-
-            // [로그 기록] 관리자 테마 인리치먼트 백그라운드 작업 중 에러 시 DB 적재
+            System.out.println("AI 테마 일괄 분류 실패: " + e.getMessage());
             Log enrichmentLog = new Log();
-            enrichmentLog.setErrorType("AI_ENRICHMENT_FAIL");
-            enrichmentLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "테마 분류 AI 에러");
+            enrichmentLog.setErrorType("AI_ENRICHMENT_BULK_FAIL");
+            enrichmentLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "테마 분류 AI 벌크 에러");
             logRepository.save(enrichmentLog);
-
-            return null;
+            return new HashMap<>();
         }
     }
 

@@ -150,8 +150,9 @@ public class GoogleMapsService {
             }
         } catch (Exception e) {
             System.out.println("[" + placeName + "] 리뷰 수집 실패: " + e.getMessage());
+            return null; // 통신 에러 시 'null'을 반환하여 상위 로직에 위험을 알립니다
         }
-        return "리뷰 정보 없음";
+        return "리뷰 정보 없음"; // 정상 통신 완료 + 진짜 리뷰가 1개도 없을 때만 이 문자가 반환됩니다.
     }
 
     // [자동 페이지네이션 업그레이드] next_page_token을 추적하여 한 키워드당 최대 60개 명소를 싹 긁어옵니다.

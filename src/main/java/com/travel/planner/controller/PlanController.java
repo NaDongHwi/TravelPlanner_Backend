@@ -88,8 +88,8 @@ public class PlanController {
                 String.join(", ", request.getThemes()), request.getTransportation(), fixed, arrivalTime, departureTime
         );
 
-        // 1. 고품질 데이터 풀 확보 (하루당 15개 넉넉하게 산정)
-        int poolSize = totalDays * 15;
+        // 1. 데이터 풀 확보
+        int poolSize = totalDays * 8;
         List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
 
         // 콜드 스타트 방어

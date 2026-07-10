@@ -88,8 +88,11 @@ public class GoogleMapsService {
                 resultPlace.setLatitude(location.path("lat").asDouble());
                 resultPlace.setLongitude(location.path("lng").asDouble());
 
-                // 2차 검색: 얻어낸 place_id로 Place Details API를 찔러서 영업시간(opening_hours)만 빼오기
+                // DB 저장을 위해 placeId를 객체에 세팅
                 String placeId = firstResult.path("place_id").asText();
+                resultPlace.setPlaceId(placeId);
+
+                // 2차 검색: 얻어낸 place_id로 Place Details API를 찔러서 영업시간(opening_hours)만 빼오기
                 // language={lang} 파라미터로 동적 변경
                 String detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id={placeId}&fields=opening_hours&key={key}&language={lang}";
 

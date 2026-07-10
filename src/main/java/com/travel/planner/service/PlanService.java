@@ -81,7 +81,7 @@ public class PlanService {
         return clusters; // 최종적으로 묶인 그룹(일자별 장소 리스트)을 반환합니다.
     }
 
-    // DFS 대신 Nearest Neighbor(그리디) 방식 적용
+    // Nearest Neighbor(그리디) + 2-Opt(지그재그 교차 꼬임 보정) 알고리즘 적용
     public List<Place> calculateShortestPath(List<Place> dayPlaces) {
         if (dayPlaces == null || dayPlaces.size() <= 1) return dayPlaces;
 
@@ -89,11 +89,10 @@ public class PlanService {
         // 아직 방문하지 않은 장소 리스트를 복사해서 만듭니다.
         List<Place> unvisited = new ArrayList<>(dayPlaces);
 
-        // 1. 첫 번째 장소를 시작점으로 잡습니다.
+        // 1단계: 초기 경로 생성 (Nearest Neighbor: 가장 가까운 곳 찾아가기)
         Place current = unvisited.remove(0);
         route.add(current);
 
-        // 2. 남은 장소가 없을 때까지, 현재 위치에서 '가장 가까운 장소'를 찾아 다음 목적지로 이어붙입니다.
         while (!unvisited.isEmpty()) {
             Place nearest = null;
             double minDistance = Double.MAX_VALUE;
@@ -118,6 +117,43 @@ public class PlanService {
             current = nearest;
         }
 
-        return route; // 0.01초 만에 정렬된 임시 동선 뼈대 반환
+        // 2단계: 2-Opt 최적화 루프 (X자로 교차하며 지그재그로 꼬인 선분 발견 시 순서 반전으로 펴주기)
+        boolean improved = true;
+        while (improved) {
+            improved = false;
+
+            // 처음과 끝이 고정되지 않은 유연한 선형 동선이므로 모든 유효 구간을 탐색합니다.
+            for (int i = 1; i < route.size() - 2; i++) {
+                for (int k = i + 1; k < route.size() - 1; k++) {
+
+                    // 꼬여있을 때 두 선분의 거리 합 계산
+                    double distBefore = DistanceUtil.calculateDistance(route.get(i - 1).getLatitude(), route.get(i - 1).getLongitude(), route.get(i).getLatitude(), route.get(i).getLongitude())
+                            + DistanceUtil.calculateDistance(route.get(k).getLatitude(), route.get(k).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
+
+                    // 선분을 교차 결합(순서 뒤집기)했을 때의 거리 합 계산
+                    double distAfter = DistanceUtil.calculateDistance(route.get(i - 1).getLatitude(), route.get(i - 1).getLongitude(), route.get(k).getLatitude(), route.get(k).getLongitude())
+                            + DistanceUtil.calculateDistance(route.get(i).getLatitude(), route.get(i).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
+
+                    // 순서를 뒤집는 게 전체 총 거리를 단 0.1km라도 단축시킨다면 교체 수행
+                    if (distAfter < distBefore) {
+                        reverseSubList(route, i, k);
+                        improved = true; // 경로가 개선되었으므로 다음 전체 스캔 유도
+                    }
+                }
+            }
+        }
+
+        return route;
+    }
+
+    // 2-Opt 경로 개선 시 특정 구간(i부터 k까지)의 순서를 역순으로 뒤집어주는 함수
+    private void reverseSubList(List<Place> route, int i, int k) {
+        while (i < k) {
+            Place temp = route.get(i);
+            route.set(i, route.get(k));
+            route.set(k, temp);
+            i++;
+            k--;
+        }
     }
 }

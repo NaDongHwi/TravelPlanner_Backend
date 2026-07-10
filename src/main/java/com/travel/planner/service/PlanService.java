@@ -134,10 +134,10 @@ public class PlanService {
                     double distAfter = DistanceUtil.calculateDistance(route.get(i - 1).getLatitude(), route.get(i - 1).getLongitude(), route.get(k).getLatitude(), route.get(k).getLongitude())
                             + DistanceUtil.calculateDistance(route.get(i).getLatitude(), route.get(i).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
 
-                    // 순서를 뒤집는 게 전체 총 거리를 단 0.1km라도 단축시킨다면 교체 수행
-                    if (distAfter < distBefore) {
+                    // 소수점 오차로 인한 무한루프를 막기 위해, 최소 1미터(0.001km) 이상 확실하게 단축될 때만 경로를 폅니다
+                    if (distBefore - distAfter > 0.001) {
                         reverseSubList(route, i, k);
-                        improved = true; // 경로가 개선되었으므로 다음 전체 스캔 유도
+                        improved = true;
                     }
                 }
             }

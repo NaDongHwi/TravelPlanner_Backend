@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -92,6 +93,14 @@ public class PlanController {
         int poolSize = totalDays * 8;
         List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
 
+        // DB 지연 쓰기 충돌 방지 및 구글 API 호출 최소화를 위한 로컬 캐시 맵
+        Map<String, Place> placeCache = new HashMap<>();
+        for (Place p : allCityPlaces) {
+            if (p.getPlaceId() != null) {
+                placeCache.put(p.getPlaceId(), p);
+            }
+        }
+
         // 콜드 스타트 방어
         if (allCityPlaces.size() < poolSize && mainCity != null && !mainCity.equals("미정")) {
             System.out.println("DB에 장소가 부족합니다. 구글 맵스 긴급 수집을 가동합니다!");
@@ -110,9 +119,10 @@ public class PlanController {
 
                     p.setCity(mainCity);
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
-                        placeRepository.save(p);
-                        allCityPlaces.add(p);
-                        newlyAddedIds.add(p.getPlaceId());
+                        Place savedPlace = placeRepository.save(p);
+                        allCityPlaces.add(savedPlace);
+                        newlyAddedIds.add(savedPlace.getPlaceId());
+                        placeCache.put(savedPlace.getPlaceId(), savedPlace); // 🚀 긴급 수집된 장소도 캐시에 즉시 등록
                     }
                 }
             } catch (Exception e) {
@@ -266,18 +276,26 @@ public class PlanController {
                         continue;
                     }
 
-                    // DB 중복 방어
-                    Place existingPlace = placeRepository.findByPlaceId(fetchedPlace.getPlaceId()).orElse(null);
+                    String pId = fetchedPlace.getPlaceId();
 
-                    if (existingPlace != null) {
-                        // 이미 DB에 있으면 새로 만들지 말고 기존 장소를 유기적으로 재활용
-                        matchedPlace = existingPlace;
+                    // DB 조회 및 구글 API 중복 호출을 방어하는 메모리 캐시 로직 적용
+                    if (placeCache.containsKey(pId)) {
+                        matchedPlace = placeCache.get(pId);
                     } else {
-                        // DB에 없는 새로운 장소일 때만 영구 저장
-                        fetchedPlace.setName(item.getPlaceName());
-                        fetchedPlace.setCity(mainCity);
-                        fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());
-                        matchedPlace = placeRepository.save(fetchedPlace);
+                        // 메모리에 없다면 DB를 한 번 더 확인 (이중 안전장치)
+                        Place existingPlace = placeRepository.findByPlaceId(pId).orElse(null);
+
+                        if (existingPlace != null) {
+                            matchedPlace = existingPlace;
+                            placeCache.put(pId, matchedPlace); // 다음 확인을 위해 캐시에 적재
+                        } else {
+                            // 완전히 새로운 장소일 경우에만 영구 저장
+                            fetchedPlace.setName(item.getPlaceName());
+                            fetchedPlace.setCity(mainCity);
+                            fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());
+                            matchedPlace = placeRepository.save(fetchedPlace);
+                            placeCache.put(pId, matchedPlace);
+                        }
                     }
                 }
 

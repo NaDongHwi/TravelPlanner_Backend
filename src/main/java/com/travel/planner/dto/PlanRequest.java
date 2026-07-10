@@ -11,9 +11,11 @@ import java.util.List;
 @Setter
 public class PlanRequest {
 
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     @Schema(description = "여행 시작일 (Step 1)", example = "2026-07-02")
     private LocalDate startDate;
 
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     @Schema(description = "여행 종료일 (Step 1)", example = "2026-07-05")
     private LocalDate endDate;
 

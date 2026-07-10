@@ -100,12 +100,19 @@ public class PlanController {
                 String searchKeyword = (request.getThemes() != null && !request.getThemes().isEmpty())
                         ? request.getThemes().get(0) : "유명 관광지";
                 List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword);
+
+                // [메모리 중복 방어] 같은 루프 안에서 똑같은 장소가 2번 들어오는 걸 막는 코드
+                java.util.Set<String> newlyAddedIds = new java.util.HashSet<>();
+
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
+                    if (newlyAddedIds.contains(p.getPlaceId())) continue;
+
                     p.setCity(mainCity);
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         placeRepository.save(p);
                         allCityPlaces.add(p);
+                        newlyAddedIds.add(p.getPlaceId());
                     }
                 }
             } catch (Exception e) {
@@ -254,16 +261,24 @@ public class PlanController {
                 if (matchedPlace == null) {
                     Place fetchedPlace = googleMapsService.getPlaceDetails(mainCity, item.getPlaceName(), request.getLanguage());
 
-                    // [최종 방어막] 가짜 명소이거나 구글 수질 검증(평점/리뷰)에서 탈락한 경우
                     if (fetchedPlace.getLatitude() == 0.0 || fetchedPlace.getPlaceId() == null) {
                         System.out.println("[일정 제외] 쓰레기 데이터 유입 방지를 위해 '" + item.getPlaceName() + "' 장소를 이번 플랜에서 제외합니다.");
                         continue;
                     }
 
-                    fetchedPlace.setName(item.getPlaceName());
-                    fetchedPlace.setCity(mainCity);
-                    fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());
-                    matchedPlace = placeRepository.save(fetchedPlace);
+                    // DB 중복 방어
+                    Place existingPlace = placeRepository.findByPlaceId(fetchedPlace.getPlaceId()).orElse(null);
+
+                    if (existingPlace != null) {
+                        // 이미 DB에 있으면 새로 만들지 말고 기존 장소를 유기적으로 재활용
+                        matchedPlace = existingPlace;
+                    } else {
+                        // DB에 없는 새로운 장소일 때만 영구 저장
+                        fetchedPlace.setName(item.getPlaceName());
+                        fetchedPlace.setCity(mainCity);
+                        fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());
+                        matchedPlace = placeRepository.save(fetchedPlace);
+                    }
                 }
 
                 if (matchedPlace != null) {

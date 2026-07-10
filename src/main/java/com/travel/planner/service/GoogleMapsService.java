@@ -83,6 +83,16 @@ public class GoogleMapsService {
             if ("OK".equals(searchRoot.path("status").asText())) {
                 JsonNode firstResult = searchRoot.path("results").get(0);
 
+                // [수질 검증 필터링] 구글이 내려준 실시간 평점과 리뷰 수를 스캔합니다.
+                double rating = firstResult.path("rating").asDouble(0.0);
+                int reviewCount = firstResult.path("user_ratings_total").asInt(0);
+
+                // AI가 지어낸 가짜 장소이거나, 평점 3.5 미만 또는 리뷰 50개 미만의 불량/무명 장소인 경우
+                if (rating < 3.5 || reviewCount < 50) {
+                    System.out.println("[수질 검증 탈락] '" + placeName + "' (평점: " + rating + ", 리뷰: " + reviewCount + "개) -> 고품질 DB 기준 미달로 차단합니다.");
+                    return resultPlace; // 위경도가 0.0인 상태로 리턴하여 컨트롤러에게 위험을 알림
+                }
+
                 // 좌표(lat, lng) 셋팅
                 JsonNode location = firstResult.path("geometry").path("location");
                 resultPlace.setLatitude(location.path("lat").asDouble());

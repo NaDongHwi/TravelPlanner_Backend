@@ -101,6 +101,7 @@ public class PlanController {
                         ? request.getThemes().get(0) : "유명 관광지";
                 List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword);
                 for (Place p : emergencyPlaces) {
+                    if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
                     p.setCity(mainCity);
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         placeRepository.save(p);
@@ -252,6 +253,13 @@ public class PlanController {
 
                 if (matchedPlace == null) {
                     Place fetchedPlace = googleMapsService.getPlaceDetails(mainCity, item.getPlaceName(), request.getLanguage());
+
+                    // [최종 방어막] 가짜 명소이거나 구글 수질 검증(평점/리뷰)에서 탈락한 경우
+                    if (fetchedPlace.getLatitude() == 0.0 || fetchedPlace.getPlaceId() == null) {
+                        System.out.println("[일정 제외] 쓰레기 데이터 유입 방지를 위해 '" + item.getPlaceName() + "' 장소를 이번 플랜에서 제외합니다.");
+                        continue;
+                    }
+
                     fetchedPlace.setName(item.getPlaceName());
                     fetchedPlace.setCity(mainCity);
                     fetchedPlace.setLastUpdated(java.time.LocalDateTime.now());

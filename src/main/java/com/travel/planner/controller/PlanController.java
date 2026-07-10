@@ -284,6 +284,8 @@ public class PlanController {
                 if (matchedPlace != null) {
                     itinerary.setPlace(matchedPlace);
                     plan.addItinerary(itinerary);
+                    item.setLatitude(matchedPlace.getLatitude());
+                    item.setLongitude(matchedPlace.getLongitude());
                 }
             }
         }

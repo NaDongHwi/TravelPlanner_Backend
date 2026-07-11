@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.LocalDate;
+
 @Service
 public class WeatherService {
 
@@ -31,6 +33,29 @@ public class WeatherService {
             return String.format("%s (현재 기온: %.1f°C)", weatherDescription, temp);
         } catch (Exception e) {
             return "맑음 (기상 API 연동 일시 지연으로 기본 동선 연산 요망)";
+        }
+    }
+
+    public String getForecastWeatherByCoords(double lat, double lon, LocalDate startDate) {
+        try {
+            // 공식 문서 권장 방식: lat, lon 사용 (하드코딩 및 Deprecated 완벽 해결)
+            String url = "https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={key}&lang=kr&units=metric";
+
+            // 파라미터 바인딩 순서: lat, lon, apiKey
+            String response = restTemplate.getForObject(url, String.class, lat, lon, weatherApiKey);
+            JsonNode root = objectMapper.readTree(response);
+
+            JsonNode list = root.path("list");
+            for (JsonNode node : list) {
+                String dtTxt = node.path("dt_txt").asText();
+                if (dtTxt.startsWith(startDate.toString())) {
+                    return node.path("weather").get(0).path("description").asText();
+                }
+            }
+            return "맑음 (예보 데이터 없음)";
+        } catch (Exception e) {
+            System.err.println("오픈웨더 API 호출 실패: " + e.getMessage());
+            return "맑음 (기상 API 연동 지연)";
         }
     }
 }

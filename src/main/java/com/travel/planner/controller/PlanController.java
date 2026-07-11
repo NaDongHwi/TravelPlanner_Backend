@@ -122,7 +122,7 @@ public class PlanController {
                         Place savedPlace = placeRepository.save(p);
                         allCityPlaces.add(savedPlace);
                         newlyAddedIds.add(savedPlace.getPlaceId());
-                        placeCache.put(savedPlace.getPlaceId(), savedPlace); // 🚀 긴급 수집된 장소도 캐시에 즉시 등록
+                        placeCache.put(savedPlace.getPlaceId(), savedPlace); // 긴급 수집된 장소도 캐시에 즉시 등록
                     }
                 }
             } catch (Exception e) {
@@ -192,7 +192,7 @@ public class PlanController {
 
             for (Place p : dailyRoute) {
                 String opHours = (p.getOpeningHours() != null && !p.getOpeningHours().equals("영업시간 정보 없음"))
-                        ? p.getOpeningHours() : "24시간 상시 개방";
+                        ? p.getOpeningHours() : "영업시간 확인 필요";
                 String type = (p.getPlaceType() != null) ? p.getPlaceType() : "복합";
                 dynamicConstraints.append("- ").append(p.getName()).append(": ").append(opHours).append(" (환경: ").append(type).append(")\n");
             }

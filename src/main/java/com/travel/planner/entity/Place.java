@@ -37,7 +37,7 @@ public class Place {
     private String placeType; // 예: "실내", "실외", "복합"
 
     // 구글 API로 미리 긁어올 영업시간 (예: "09:00-21:00")
-    @Column(length = 255)
+    @Column(columnDefinition = "TEXT")
     private String openingHours;
 
     // 30일마다 갱신하기 위한 마지막 업데이트 시간 기록

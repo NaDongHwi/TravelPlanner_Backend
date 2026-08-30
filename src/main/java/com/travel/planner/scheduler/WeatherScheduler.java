@@ -1,9 +1,12 @@
 package com.travel.planner.scheduler;
 
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.Message;
+import com.google.firebase.messaging.Notification;
+import com.travel.planner.entity.Itinerary;
 import com.travel.planner.entity.Plan;
 import com.travel.planner.repository.PlanRepository;
 import com.travel.planner.service.WeatherService;
-import com.travel.planner.entity.Itinerary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,19 +33,15 @@ public class WeatherScheduler {
         for (Plan plan : activePlans) {
             List<Itinerary> itineraries = plan.getItineraries();
 
-            // 방어 로직: 일정이 비어있거나 장소(Place) 정보가 없으면 스킵
             if (itineraries == null || itineraries.isEmpty() || itineraries.get(0).getPlace() == null) {
                 continue;
             }
 
-            // 사용자의 실제 첫 번째 방문 장소의 좌표를 추출
             double targetLat = itineraries.get(0).getPlace().getLatitude();
             double targetLon = itineraries.get(0).getPlace().getLongitude();
 
-            // 위경도를 기반으로 미래 예보 조회
             String weather = weatherService.getForecastWeatherByCoords(targetLat, targetLon, plan.getStartDate());
 
-            // 악천후 감지 로직 유지
             if (weather.contains("비") || weather.contains("눈") || weather.contains("폭우")) {
                 if (plan.getUser().getFcmToken() != null) {
                     sendFcmPushAlert(plan.getUser().getFcmToken(),
@@ -52,7 +51,22 @@ public class WeatherScheduler {
         }
     }
 
+    // 실제 구글 파이어베이스(FCM) 서버로 푸시 알림을 발송하는 로직
     private void sendFcmPushAlert(String targetToken, String title, String body) {
-        System.out.println("[FCM 푸시 발송 성공] 대상: " + targetToken + " | 내용: " + body);
+        try {
+            Message message = Message.builder()
+                    .setToken(targetToken)
+                    .setNotification(Notification.builder()
+                            .setTitle(title)
+                            .setBody(body)
+                            .build())
+                    .build();
+
+            // FirebaseMessaging 인스턴스를 통해 전송
+            String response = FirebaseMessaging.getInstance().send(message);
+            System.out.println("[FCM 푸시 발송 성공] 구글 서버 응답: " + response);
+        } catch (Exception e) {
+            System.err.println("[FCM 푸시 발송 실패]: " + e.getMessage());
+        }
     }
 }

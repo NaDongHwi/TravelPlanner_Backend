@@ -4,12 +4,15 @@ import com.travel.planner.dto.AiRouteResponse;
 import com.travel.planner.entity.Itinerary;
 import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Plan;
+import com.travel.planner.entity.Traffic;
 import com.travel.planner.entity.User;
+import com.travel.planner.repository.TrafficRepository;
 import com.travel.planner.service.AiService;
 import com.travel.planner.service.GoogleMapsService;
 import com.travel.planner.service.PlanService;
 import com.travel.planner.service.WeatherService;
 import com.travel.planner.service.PlanValidationService;
+import com.travel.planner.util.DistanceUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +38,7 @@ public class PlanController {
     private final com.travel.planner.repository.PlanRepository planRepository;
     private final WeatherService weatherService;
     private final PlanValidationService planValidationService;
+    private final TrafficRepository trafficRepository;
 
     @GetMapping("/validate")
     @Operation(summary = "다중 도시 일정 검증 (Soft Warning)",
@@ -309,6 +313,40 @@ public class PlanController {
         }
 
         planRepository.save(plan);
+
+        // 9. Traffic(이동 정보) 데이터 후처리 적재 로직 추가
+        Place prevPlace = null;
+        for (Itinerary iti : plan.getItineraries()) {
+            Traffic traffic = new Traffic();
+            traffic.setItinerary(iti);
+            traffic.setTransportType(request.getTransportation() != null ? request.getTransportation() : "도보 및 대중교통");
+            traffic.setEstimatedCost(0); // 임시 요금 0원 처리
+
+            if (prevPlace != null && prevPlace.getLatitude() != null && iti.getPlace().getLatitude() != null) {
+                // 이전 장소와 현재 방문 장소 사이의 직선거리를 기반으로 대략적인 소요 시간(분) 계산 (도심 평균 시속 20km 가정)
+                double distKm = DistanceUtil.calculateDistance(
+                        prevPlace.getLatitude(), prevPlace.getLongitude(),
+                        iti.getPlace().getLatitude(), iti.getPlace().getLongitude()
+                );
+
+                // (거리(km) / 20km/h) * 60분
+                int estimatedMinutes = (int) Math.round((distKm / 20.0) * 60.0);
+                traffic.setDurationMinutes(Math.max(estimatedMinutes, 5)); // 아무리 가까워도 최소 5분 배정
+            } else {
+                traffic.setDurationMinutes(0); // 그날의 첫 시작점은 이동 시간이 없음
+            }
+
+            trafficRepository.save(traffic);
+            prevPlace = iti.getPlace();
+
+            // 일자가 바뀌면 (다음 날이 되면) prevPlace를 초기화하여 아침 첫 일정의 이동 시간을 0으로 만듦
+            if (iti.getSequence() == plan.getItineraries().stream()
+                    .filter(i -> i.getDayNumber().equals(iti.getDayNumber()))
+                    .mapToInt(Itinerary::getSequence).max().orElse(0)) {
+                prevPlace = null;
+            }
+        }
+
         return aiResponse;
     }
 

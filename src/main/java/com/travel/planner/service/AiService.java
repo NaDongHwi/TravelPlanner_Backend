@@ -33,6 +33,9 @@ public class AiService {
     @Value("${ai.openai.api-key:}")
     private String openAiApiKey;
 
+    @Value("${ai.openai.model:gpt-5.6-terra}")
+    private String openAiModel;
+
     private final ObjectMapper objectMapper = new ObjectMapper(); // JSON 변환 도구
     private final LogRepository logRepository; // DB 로그 저장소 연결
 
@@ -165,7 +168,7 @@ public class AiService {
 
                 if (retryCount >= maxRetries) {
                     System.out.println("Gemini 최종 3회 실패! [OpenAI gpt-5.4] 백업 모델로 즉각 전환합니다.");
-                    return callFallbackGpt4o(prompt, draftRoute); // Failover 발동!
+                    return callFallbackOpenAi(prompt, draftRoute); // Failover 발동!
                 }
 
                 // 재시도 전 1초 대기 (API Rate Limit 방어)
@@ -185,8 +188,8 @@ public class AiService {
         return objectMapper.readValue(aiText, AiRouteResponse.class);
     }
 
-    // gpt-5.4 비상 전환 메서드
-    private AiRouteResponse callFallbackGpt4o(String prompt, List<Place> draftRoute) {
+    // gpt 비상 전환 메서드
+    private AiRouteResponse callFallbackOpenAi(String prompt, List<Place> draftRoute) {
         if (openAiApiKey == null || openAiApiKey.isEmpty()) {
             System.out.println("OpenAI API 키가 설정되지 않아 기본 알고리즘 경로를 반환합니다.");
             return createEmergencyFallbackResponse(draftRoute, "Gemini 장애 발생 및 GPT 백업 키 미설정");
@@ -197,7 +200,7 @@ public class AiService {
 
             // gpt-5.4 API 규격에 맞춘 JSON 바디 생성
             Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", "gpt-5.4");
+            requestBody.put("model", openAiModel);
 
             Map<String, String> message = new HashMap<>();
             message.put("role", "user");
@@ -211,7 +214,7 @@ public class AiService {
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(openAiApiKey); // OpenAI는 Bearer 토큰 방식 사용
+            headers.setBearerAuth(openAiApiKey);
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             RestTemplate restTemplate = new RestTemplate();
@@ -223,12 +226,13 @@ public class AiService {
             String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
 
             AiRouteResponse fallbackResponse = objectMapper.readValue(gptText, AiRouteResponse.class);
-            fallbackResponse.setReason("[시스템 메시지] 메인 AI 서버 장애로 인해 gpt-5.4 모델을 통해 비상 생성된 일정입니다. \n\n" + fallbackResponse.getReason());
+            fallbackResponse.setReason(String.format("[시스템 메시지] 메인 AI 서버 장애로 인해 %s 모델을 통해 비상 생성된 일정입니다. \n\n%s",
+                    openAiModel, fallbackResponse.getReason()));
 
             return fallbackResponse;
 
         } catch (Exception e) {
-            System.out.println("백업 모델 gpt-5.4 실패했습니다: " + e.getMessage());
+            System.out.println("백업 모델(" + openAiModel + ") 실패했습니다: " + e.getMessage());
 
             // [로그 기록] 백업 GPT마저 실패하는 최악의 사태 시 DB 적재
             Log fatalLog = new Log();

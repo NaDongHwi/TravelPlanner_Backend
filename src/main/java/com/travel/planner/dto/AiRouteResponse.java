@@ -15,6 +15,8 @@ public class AiRouteResponse {
     // 전체 동선에 대한 AI의 추천 사유
     private String reason;
 
+    private RouteInfoDto transportOptimization;
+
     @Getter
     @Setter
     public static class TimelineItem {

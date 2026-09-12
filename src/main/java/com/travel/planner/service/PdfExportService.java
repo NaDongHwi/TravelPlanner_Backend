@@ -3,6 +3,9 @@ package com.travel.planner.service;
 import com.itextpdf.kernel.colors.ColorConstants;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
+import com.itextpdf.io.font.PdfEncodings;
 import com.itextpdf.layout.Document;
 import com.itextpdf.layout.element.Cell;
 import com.itextpdf.layout.element.Paragraph;
@@ -31,6 +34,9 @@ public class PdfExportService {
             PdfWriter writer = new PdfWriter(baos);
             PdfDocument pdf = new PdfDocument(writer);
             Document document = new Document(pdf);
+
+            PdfFont koreanFont = PdfFontFactory.createFont("src/main/resources/fonts/NanumGothic.ttf", PdfEncodings.IDENTITY_H);
+            document.setFont(koreanFont);
 
             // 2. 타이틀
             Text titleText = new Text(plan.getTitle() + " 일정표").simulateBold();

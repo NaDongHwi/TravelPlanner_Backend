@@ -1,17 +1,14 @@
 package com.travel.planner.controller;
 
 import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.dto.RouteInfoDto;
 import com.travel.planner.entity.Itinerary;
 import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Plan;
 import com.travel.planner.entity.Traffic;
 import com.travel.planner.entity.User;
 import com.travel.planner.repository.TrafficRepository;
-import com.travel.planner.service.AiService;
-import com.travel.planner.service.GoogleMapsService;
-import com.travel.planner.service.PlanService;
-import com.travel.planner.service.WeatherService;
-import com.travel.planner.service.PlanValidationService;
+import com.travel.planner.service.*;
 import com.travel.planner.util.DistanceUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,6 +36,7 @@ public class PlanController {
     private final WeatherService weatherService;
     private final PlanValidationService planValidationService;
     private final TrafficRepository trafficRepository;
+    private final RouteOptimizationService routeOptimizationService;
 
     @GetMapping("/validate")
     @Operation(summary = "다중 도시 일정 검증 (Soft Warning)",
@@ -323,17 +321,30 @@ public class PlanController {
             traffic.setEstimatedCost(0); // 임시 요금 0원 처리
 
             if (prevPlace != null && prevPlace.getLatitude() != null && iti.getPlace().getLatitude() != null) {
-                // 이전 장소와 현재 방문 장소 사이의 직선거리를 기반으로 대략적인 소요 시간(분) 계산 (도심 평균 시속 20km 가정)
-                double distKm = DistanceUtil.calculateDistance(
-                        prevPlace.getLatitude(), prevPlace.getLongitude(),
-                        iti.getPlace().getLatitude(), iti.getPlace().getLongitude()
-                );
 
-                // (거리(km) / 20km/h) * 60분
-                int estimatedMinutes = (int) Math.round((distKm / 20.0) * 60.0);
-                traffic.setDurationMinutes(Math.max(estimatedMinutes, 5)); // 아무리 가까워도 최소 5분 배정
+                // 만약 이동 수단이 대중교통이면 준희 님의 Navitime 호출!
+                if ("대중교통".equals(request.getTransportation()) || "도보 및 대중교통".equals(request.getTransportation())) {
+                    RouteInfoDto naviInfo = routeOptimizationService.getOptimizedRoute(
+                            prevPlace.getLatitude(), prevPlace.getLongitude(),
+                            iti.getPlace().getLatitude(), iti.getPlace().getLongitude(),
+                            mainCity
+                    );
+
+                    if (naviInfo != null) {
+                        traffic.setDurationMinutes(naviInfo.getTotalTime()); // 찐 대중교통 이동 시간 기록
+                        traffic.setEstimatedCost(naviInfo.getOptimalFare()); // 찐 요금 기록
+                    } else {
+                        // API가 실패하거나 노선이 없으면 동휘 님 기존 하버사인 로직으로 폴백(방어막)
+                        double distKm = DistanceUtil.calculateDistance(prevPlace.getLatitude(), prevPlace.getLongitude(), iti.getPlace().getLatitude(), iti.getPlace().getLongitude());
+                        traffic.setDurationMinutes((int) Math.round((distKm / 20.0) * 60.0));
+                    }
+                } else {
+                    // 도보나 렌트카면 동휘 님 기존 하버사인 로직 그대로 유지
+                    double distKm = DistanceUtil.calculateDistance(prevPlace.getLatitude(), prevPlace.getLongitude(), iti.getPlace().getLatitude(), iti.getPlace().getLongitude());
+                    traffic.setDurationMinutes((int) Math.round((distKm / 20.0) * 60.0));
+                }
             } else {
-                traffic.setDurationMinutes(0); // 그날의 첫 시작점은 이동 시간이 없음
+                traffic.setDurationMinutes(0);
             }
 
             trafficRepository.save(traffic);

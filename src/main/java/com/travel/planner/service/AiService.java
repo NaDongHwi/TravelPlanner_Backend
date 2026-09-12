@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.dto.RouteInfoDto;
 import com.travel.planner.entity.Log;
 import com.travel.planner.entity.Place;
 import com.travel.planner.repository.LogRepository;
@@ -38,6 +39,7 @@ public class AiService {
 
     private final ObjectMapper objectMapper = new ObjectMapper(); // JSON 변환 도구
     private final LogRepository logRepository; // DB 로그 저장소 연결
+    private final RouteOptimizationService routeOptimizationService;
 
     public AiRouteResponse evaluateAndModifyRoute(String userContext, List<Place> draftRoute, String lang,
                                                   List<com.travel.planner.dto.PlanRequest.AccommodationInput> accommodations,
@@ -229,6 +231,8 @@ public class AiService {
             fallbackResponse.setReason(String.format("[시스템 메시지] 메인 AI 서버 장애로 인해 %s 모델을 통해 비상 생성된 일정입니다. \n\n%s",
                     openAiModel, fallbackResponse.getReason()));
 
+            enrichWithRouteOptimization(fallbackResponse, draftRoute.get(0).getCity());
+
             return fallbackResponse;
 
         } catch (Exception e) {
@@ -361,6 +365,24 @@ public class AiService {
             logRepository.save(cleansingLog);
 
             return new HashMap<>();
+        }
+    }
+
+    private void enrichWithRouteOptimization(AiRouteResponse responseDto, String cityName) {
+        if (responseDto.getTimeline() == null || responseDto.getTimeline().size() < 2) return;
+
+        // AI가 짜준 일정의 '첫 번째 장소'와 '마지막 장소' 좌표를 기준으로 하루 총 교통비를 산출
+        AiRouteResponse.TimelineItem firstItem = responseDto.getTimeline().get(0);
+        AiRouteResponse.TimelineItem lastItem = responseDto.getTimeline().get(responseDto.getTimeline().size() - 1);
+
+        if (firstItem.getLatitude() != null && lastItem.getLatitude() != null) {
+            RouteInfoDto routeInfo = routeOptimizationService.getOptimizedRoute(
+                    firstItem.getLatitude(), firstItem.getLongitude(),
+                    lastItem.getLatitude(), lastItem.getLongitude(),
+                    cityName
+            );
+            // 계산된 교통비 + 추천 패스권 정보를 프론트엔드 응답(AiRouteResponse)에 쏙 담아줌!
+            responseDto.setTransportOptimization(routeInfo);
         }
     }
 }

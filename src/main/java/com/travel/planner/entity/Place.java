@@ -58,4 +58,10 @@ public class Place {
     public void setCategory(String category) {
         this.category = category;
     }
+
+    @Column
+    private Integer recommendedDuration; // 평균 체류 시간 (분 단위)
+
+    public Integer getRecommendedDuration() { return recommendedDuration; }
+    public void setRecommendedDuration(Integer recommendedDuration) { this.recommendedDuration = recommendedDuration; }
 }

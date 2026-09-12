@@ -174,8 +174,17 @@ public class AiService {
                 logRepository.save(errorLog);
 
                 if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 최종 3회 실패! [OpenAI gpt-5.4] 백업 모델로 즉각 전환합니다.");
-                    return callFallbackOpenAi(prompt, draftRoute); // Failover 발동!
+                    System.out.println("Gemini 최종 3회 실패! OpenAI 백업 모델로 즉각 전환합니다.");
+
+                    // 1. 제미나이에게 주었던 빡빡한 제약 조건(prompt)을 GPT에게도 동일하게 전달
+                    AiRouteResponse fallbackResponse = callFallbackOpenAi(prompt, draftRoute);
+
+                    // 2. GPT가 응답을 가져와도 Navitime 교통 최적화 로직을 태움
+                    if (draftRoute != null && !draftRoute.isEmpty()) {
+                        enrichWithRouteOptimization(fallbackResponse, draftRoute.get(0).getCity());
+                    }
+
+                    return fallbackResponse;
                 }
 
                 // 재시도 전 1초 대기 (API Rate Limit 방어)
@@ -284,8 +293,9 @@ public class AiService {
         promptBuilder.append("   - 건물 안에서 쇼핑/식사를 한다면 무조건 [실내] (예: 애니메이트, 스시집, 백화점)\n");
         promptBuilder.append("   - 지붕이 없는 야외 공원, 길거리, 신사라면 무조건 [실외] (예: 센소지, 신주쿠 쿄엔, 하치코 동상)\n");
         promptBuilder.append("   - [복합]이라는 단어는 실내랑, 실외 판단이 완벽히 5:5로 갈리는 대형 테마파크(디즈니랜드 등)가 아니면 절대 쓰지 마.\n");
-        promptBuilder.append("3. 결과는 반드시 아래 예시처럼 장소 ID를 키(key)로, '테마1,테마2|장소속성' 문자열을 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
-        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내\", \"ChIJ5678\": \"자연,힐링|실외\"}\n\n[분류 대상 목록]\n");
+        promptBuilder.append("3. 평균 체류 시간: 해당 장소의 특성과 리뷰를 종합하여 일반적인 관광객이 머무는 시간을 '분(Minute)' 단위 숫자(예: 30, 60, 90, 120, 180, 240)로 도출해.\n");
+        promptBuilder.append("4. 결과는 반드시 아래 예시처럼 장소 ID를 키(key)로, '테마|장소속성|체류시간' 문자열을 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내|120\", \"ChIJ5678\": \"자연,힐링|실외|45\"}\n\n[분류 대상 목록]\n");
 
         for (Place p : places) {
             String reviews = reviewsMap.get(p.getPlaceId());

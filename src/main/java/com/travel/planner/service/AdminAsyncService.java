@@ -40,7 +40,8 @@ public class AdminAsyncService {
             List<Place> allPlaces = placeRepository.findAll();
             List<Place> targetPlaces = allPlaces.stream()
                     .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
-                            || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty())
+                            || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty()
+                            || p.getRecommendedDuration() == null)
                     .limit(30)
                     .collect(Collectors.toList());
 
@@ -93,9 +94,16 @@ public class AdminAsyncService {
                 String aiResult = enrichedDataMap.get(place.getPlaceId());
                 if (aiResult != null && aiResult.contains("|")) {
                     String[] parts = aiResult.split("\\|");
-                    if (parts.length >= 2) {
+                    if (parts.length >= 3) {
                         place.setTheme(parts[0].trim());
                         place.setPlaceType(parts[1].trim());
+
+                        try {
+                            place.setRecommendedDuration(Integer.parseInt(parts[2].trim()));
+                        } catch (NumberFormatException e) {
+                            place.setRecommendedDuration(90); // 파싱 실패 시 안전하게 기본값 90분
+                        }
+
                         placeRepository.save(place);
                         successCount++;
                     }

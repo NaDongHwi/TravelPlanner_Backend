@@ -313,17 +313,28 @@ public class PlanController {
 
         planRepository.save(plan);
 
-        // 9. Traffic(이동 정보) 데이터 후처리 적재 로직 추가
+        // 9. Traffic(이동 정보) 적재 및 [백엔드 체류/이동 시간 정밀 연산 로직]
         Place prevPlace = null;
+        java.time.LocalTime currentTime = java.time.LocalTime.of(9, 0); // 매일 09:00 일정 시작
+        int currentDay = -1;
+
         for (Itinerary iti : plan.getItineraries()) {
+            // 일자가 바뀌면 시작 시간을 다시 09:00으로 초기화
+            if (currentDay != iti.getDayNumber()) {
+                currentDay = iti.getDayNumber();
+                currentTime = java.time.LocalTime.of(9, 0);
+                prevPlace = null;
+            }
+
             Traffic traffic = new Traffic();
             traffic.setItinerary(iti);
             traffic.setTransportType(request.getTransportation() != null ? request.getTransportation() : "도보 및 대중교통");
-            traffic.setEstimatedCost(0); // 임시 요금 0원 처리
+            traffic.setEstimatedCost(0);
+
+            int transitMinutes = 0; // 현재 장소까지 이동하는 데 걸린 시간
 
             if (prevPlace != null && prevPlace.getLatitude() != null && iti.getPlace().getLatitude() != null) {
-
-                // 만약 이동 수단이 대중교통이면 준희 님의 Navitime 호출!
+                // 대중교통 이동 시간 산출 (Navitime API 연동)
                 if ("대중교통".equals(request.getTransportation()) || "도보 및 대중교통".equals(request.getTransportation())) {
                     RouteInfoDto naviInfo = routeOptimizationService.getOptimizedRoute(
                             prevPlace.getLatitude(), prevPlace.getLongitude(),
@@ -332,39 +343,68 @@ public class PlanController {
                     );
 
                     if (naviInfo != null) {
-                        traffic.setDurationMinutes(naviInfo.getTotalTime()); // 찐 대중교통 이동 시간 기록
-                        traffic.setEstimatedCost(naviInfo.getOptimalFare()); // 찐 요금 기록
+                        transitMinutes = naviInfo.getTotalTime();
+                        traffic.setEstimatedCost(naviInfo.getOptimalFare());
                         try {
                             ObjectMapper objectMapper = new ObjectMapper();
-                            String pathDetailsJson = objectMapper.writeValueAsString(naviInfo.getSegments());
-                            traffic.setPathDetails(pathDetailsJson);
+                            traffic.setPathDetails(objectMapper.writeValueAsString(naviInfo.getSegments()));
                         } catch (Exception e) {
                             traffic.setPathDetails("[]");
                         }
                     } else {
-                        // API가 실패하거나 노선이 없으면 동휘 님 기존 하버사인 로직으로 폴백(방어막)
+                        // API 실패 시 하버사인 거리 기반 폴백 (1km당 3분 산정)
                         double distKm = DistanceUtil.calculateDistance(prevPlace.getLatitude(), prevPlace.getLongitude(), iti.getPlace().getLatitude(), iti.getPlace().getLongitude());
-                        traffic.setDurationMinutes((int) Math.round((distKm / 20.0) * 60.0));
+                        transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
                     }
                 } else {
-                    // 도보나 렌트카면 동휘 님 기존 하버사인 로직 그대로 유지
                     double distKm = DistanceUtil.calculateDistance(prevPlace.getLatitude(), prevPlace.getLongitude(), iti.getPlace().getLatitude(), iti.getPlace().getLongitude());
-                    traffic.setDurationMinutes((int) Math.round((distKm / 20.0) * 60.0));
+                    transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
                 }
-            } else {
-                traffic.setDurationMinutes(0);
             }
 
+            traffic.setDurationMinutes(transitMinutes);
             trafficRepository.save(traffic);
-            prevPlace = iti.getPlace();
 
-            // 일자가 바뀌면 (다음 날이 되면) prevPlace를 초기화하여 아침 첫 일정의 이동 시간을 0으로 만듦
-            if (iti.getSequence() == plan.getItineraries().stream()
-                    .filter(i -> i.getDayNumber().equals(iti.getDayNumber()))
-                    .mapToInt(Itinerary::getSequence).max().orElse(0)) {
-                prevPlace = null;
+            // 백엔드 기반 물리적 시간 누적 연산
+            if (prevPlace != null) {
+                int dwellTime = 90; // 콜드 스타트용 최후 기본값
+
+                // 1순위: 오프라인 AI 파이프라인이 정제해 둔 장소 고유의 체류 시간이 있다면 최우선 적용
+                if (prevPlace.getRecommendedDuration() != null && prevPlace.getRecommendedDuration() > 0) {
+                    dwellTime = prevPlace.getRecommendedDuration();
+                }
+                // 2순위: 아직 AI 배치가 돌지 않은 신규 유입 장소라면 카테고리 기반 추론
+                else if (prevPlace.getCategory() != null) {
+                    if (prevPlace.getCategory().contains("식음") || prevPlace.getCategory().contains("카페")) {
+                        dwellTime = 60; // 밥/카페는 1시간
+                    } else if (prevPlace.getCategory().contains("쇼핑")) {
+                        dwellTime = 120; // 쇼핑몰은 2시간
+                    } else if (prevPlace.getCategory().contains("숙소")) {
+                        dwellTime = 0; // 숙소 출발 시 체류 시간 0
+                    }
+                }
+
+                // (이전 장소 체류 시간 + 현재 장소까지의 이동 시간)을 누적하여 현재 장소 도착 시간 도출
+                currentTime = currentTime.plusMinutes(dwellTime).plusMinutes(transitMinutes);
             }
+
+            // 계산된 시간을 "HH:mm" 형태로 변환
+            String calculatedTimeStr = currentTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+
+            // 1) DB 저장을 위해 Itinerary 엔티티 덮어쓰기
+            iti.setTime(calculatedTimeStr);
+
+            // 2) 프론트엔드 즉시 렌더링을 위해 AI 응답(JSON) 객체 덮어쓰기
+            aiResponse.getTimeline().stream()
+                    .filter(item -> item.getDay() == iti.getDayNumber() && item.getPlaceName().equals(iti.getPlace().getName()))
+                    .findFirst()
+                    .ifPresent(item -> item.setTime(calculatedTimeStr));
+
+            prevPlace = iti.getPlace();
         }
+
+        // 10. AI가 찍어낸 시간이 아닌, 백엔드가 계산한 시간이 담긴 상태로 최종 DB 갱신
+        planRepository.save(plan);
 
         return aiResponse;
     }

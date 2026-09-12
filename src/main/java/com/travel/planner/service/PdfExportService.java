@@ -35,7 +35,10 @@ public class PdfExportService {
             PdfDocument pdf = new PdfDocument(writer);
             Document document = new Document(pdf);
 
-            PdfFont koreanFont = PdfFontFactory.createFont("src/main/resources/fonts/NanumGothic.ttf", PdfEncodings.IDENTITY_H);
+            org.springframework.core.io.ClassPathResource fontResource = new org.springframework.core.io.ClassPathResource("fonts/NanumGothic.ttf");
+            byte[] fontBytes = fontResource.getInputStream().readAllBytes();
+            PdfFont koreanFont = PdfFontFactory.createFont(fontBytes, PdfEncodings.IDENTITY_H);
+
             document.setFont(koreanFont);
 
             // 2. 타이틀

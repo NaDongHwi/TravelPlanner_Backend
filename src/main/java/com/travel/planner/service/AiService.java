@@ -157,7 +157,12 @@ public class AiService {
         while (retryCount < maxRetries) {
             try {
                 ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody());
+                AiRouteResponse aiResponse = parseGeminiResponse(response.getBody());
+                if (draftRoute != null && !draftRoute.isEmpty()) {
+                    enrichWithRouteOptimization(aiResponse, draftRoute.get(0).getCity());
+                }
+
+                return aiResponse;
             } catch (Exception e) {
                 retryCount++;
                 System.out.println("Gemini 호출 에러 (" + retryCount + "/3): " + e.getMessage());

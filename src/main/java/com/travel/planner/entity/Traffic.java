@@ -24,4 +24,7 @@ public class Traffic {
     private Integer estimatedCost; // 예상 비용 (엔화)
 
     private Integer durationMinutes; // 이동 소요 시간
+
+    @Column(columnDefinition = "TEXT")
+    private String pathDetails;
 }

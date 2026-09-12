@@ -29,7 +29,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // 회원가입, 로그인, 그리고 스웨거 화면은 토큰 없이 통과
-                        .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/error").permitAll()
+                        .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/error", "/api/test/**").permitAll()
                         // 그 외의 모든 기능(여행 일정 생성 등)은 반드시 토큰이 있어야만 통과
                         .anyRequest().authenticated()
                 )

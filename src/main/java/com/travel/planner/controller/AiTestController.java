@@ -28,7 +28,13 @@ public class AiTestController {
 
         try {
             RestTemplate restTemplate = new RestTemplate();
-            String response = restTemplate.postForObject(url, requestBody, String.class);
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+
+            org.springframework.http.HttpEntity<String> request = new org.springframework.http.HttpEntity<>(requestBody, headers);
+
+            String response = restTemplate.postForObject(url, request, String.class);
             return "Gemini 응답 성공: " + response;
         } catch (Exception e) {
             return "에러 발생: " + e.getMessage();

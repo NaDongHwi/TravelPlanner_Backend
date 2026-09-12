@@ -1,5 +1,6 @@
 package com.travel.planner.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.planner.dto.AiRouteResponse;
 import com.travel.planner.dto.RouteInfoDto;
 import com.travel.planner.entity.Itinerary;
@@ -333,6 +334,13 @@ public class PlanController {
                     if (naviInfo != null) {
                         traffic.setDurationMinutes(naviInfo.getTotalTime()); // 찐 대중교통 이동 시간 기록
                         traffic.setEstimatedCost(naviInfo.getOptimalFare()); // 찐 요금 기록
+                        try {
+                            ObjectMapper objectMapper = new ObjectMapper();
+                            String pathDetailsJson = objectMapper.writeValueAsString(naviInfo.getSegments());
+                            traffic.setPathDetails(pathDetailsJson);
+                        } catch (Exception e) {
+                            traffic.setPathDetails("[]");
+                        }
                     } else {
                         // API가 실패하거나 노선이 없으면 동휘 님 기존 하버사인 로직으로 폴백(방어막)
                         double distKm = DistanceUtil.calculateDistance(prevPlace.getLatitude(), prevPlace.getLongitude(), iti.getPlace().getLatitude(), iti.getPlace().getLongitude());
@@ -379,6 +387,18 @@ public class PlanController {
             item.setDescription(iti.getAiComment());
             item.setLatitude(iti.getPlace().getLatitude());
             item.setLongitude(iti.getPlace().getLongitude());
+
+            // --- 추가: 해당 일정(구간)의 교통 데이터를 조회해서 응답에 묶어서 반환 ---
+            // 주의: TrafficRepository에 findByItineraryId 메서드가 구현되어 있어야 합니다.
+            /*
+            Traffic traffic = trafficRepository.findByItineraryId(iti.getId());
+            if (traffic != null) {
+                // TimelineItem에 아래 필드들을 추가해야 동작합니다.
+                // item.setDurationMinutes(traffic.getDurationMinutes());
+                // item.setEstimatedCost(traffic.getEstimatedCost());
+                // item.setPathDetails(traffic.getPathDetails());
+            }
+            */
             return item;
         }).collect(Collectors.toList());
 

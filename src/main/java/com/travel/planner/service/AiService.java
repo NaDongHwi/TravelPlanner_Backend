@@ -319,20 +319,91 @@ public class AiService {
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
         RestTemplate restTemplate = new RestTemplate();
 
-        try {
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+        int maxRetries = 3;
+        int retryCount = 0;
 
-            textResponse = textResponse.replace("```json", "").replace("```", "").trim();
-            return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
-        } catch (Exception e) {
-            System.out.println("AI 테마 일괄 분류 실패: " + e.getMessage());
-            Log enrichmentLog = new Log();
-            enrichmentLog.setErrorType("AI_ENRICHMENT_BULK_FAIL");
-            enrichmentLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "테마 분류 AI 벌크 에러");
-            logRepository.save(enrichmentLog);
+        while (retryCount < maxRetries) {
+            try {
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                JsonNode rootNode = objectMapper.readTree(response.getBody());
+                String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+
+                textResponse = textResponse.replace("```json", "").replace("```", "").trim();
+                return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
+
+            } catch (Exception e) {
+                retryCount++;
+                System.out.println("Gemini 벌크 분류 에러 (" + retryCount + "/3): " + e.getMessage());
+
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 한도 초과! GPT 백업 모델로 즉각 전환합니다.");
+
+                    // [로그 기록] Gemini 완전 실패 기록
+                    Log enrichmentLog = new Log();
+                    enrichmentLog.setErrorType("AI_ENRICHMENT_GEMINI_FAIL");
+                    enrichmentLog.setErrorMessage("Gemini 한도초과로 GPT 전환: " + e.getMessage());
+                    logRepository.save(enrichmentLog);
+
+                    // GPT 대체 호출 후 그 결과를 그대로 반환
+                    return callFallbackOpenAiForBulk(promptBuilder.toString());
+                }
+
+                // 429 에러 방어를 위해 재시도 전 1.5초 대기
+                try { Thread.sleep(1500); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+
+        return new HashMap<>(); // 여길 타게 되면 AdminAsyncService가 1분 휴식을 발동시킴
+    }
+
+    // 관리자 벌크 정제용 GPT 5.6 Terra 비상 전환 메서드
+    private Map<String, String> callFallbackOpenAiForBulk(String prompt) {
+        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
+            System.out.println("OpenAI API 키가 설정되지 않아 데이터 정제를 일시 중단합니다.");
             return new HashMap<>();
+        }
+
+        try {
+            String gptUrl = "https://api.openai.com/v1/chat/completions";
+
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", openAiModel);
+
+            Map<String, String> message = new HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            requestBody.put("messages", Collections.singletonList(message));
+
+            // JSON 출력 강제 (프롬프트 무시하고 헛소리 방지)
+            Map<String, Object> responseFormat = new HashMap<>();
+            responseFormat.put("type", "json_object");
+            requestBody.put("response_format", responseFormat);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(openAiApiKey);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            RestTemplate restTemplate = new RestTemplate();
+
+            ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+            String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
+
+            return objectMapper.readValue(gptText, new TypeReference<Map<String, String>>(){});
+
+        } catch (Exception e) {
+            System.out.println("백업 GPT 에러: " + e.getMessage());
+
+            // [로그 기록] GPT마저 죽은 상황
+            Log fatalLog = new Log();
+            fatalLog.setErrorType("AI_ENRICHMENT_FATAL_GPT_FAIL");
+            fatalLog.setErrorMessage(e.getMessage());
+            logRepository.save(fatalLog);
+
+            return new HashMap<>(); // 빈 맵 반환 -> AdminAsyncService가 1분 대기 모드 돌입
         }
     }
 
@@ -362,24 +433,92 @@ public class AiService {
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
         RestTemplate restTemplate = new RestTemplate();
 
-        try {
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+        // ▼ 3회 재시도 및 GPT 전환 로직 적용 ▼
+        int maxRetries = 3;
+        int retryCount = 0;
 
-            textResponse = textResponse.replace("```json", "").replace("```", "").trim();
+        while (retryCount < maxRetries) {
+            try {
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                JsonNode rootNode = objectMapper.readTree(response.getBody());
+                String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
-            return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
-        } catch (Exception e) {
-            System.out.println("AI 카테고리 클렌징 실패: " + e.getMessage());
+                textResponse = textResponse.replace("```json", "").replace("```", "").trim();
+                return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
 
-            // [로그 기록] 관리자 카테고리 분류 백그라운드 작업 중 에러 시 DB 적재
-            Log cleansingLog = new Log();
-            cleansingLog.setErrorType("AI_CLEANSING_FAIL");
-            cleansingLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "카테고리 정제 AI 에러");
-            logRepository.save(cleansingLog);
+            } catch (Exception e) {
+                retryCount++;
+                System.out.println("Gemini 카테고리 클렌징 에러 (" + retryCount + "/3): " + e.getMessage());
 
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 한도 초과! GPT 백업 모델로 즉각 전환합니다. (카테고리 클렌징)");
+
+                    // [로그 기록] Gemini 완전 실패 기록
+                    Log cleansingLog = new Log();
+                    cleansingLog.setErrorType("AI_CLEANSING_GEMINI_FAIL");
+                    cleansingLog.setErrorMessage("Gemini 한도초과로 GPT 전환: " + e.getMessage());
+                    logRepository.save(cleansingLog);
+
+                    // GPT 대체 호출 후 그 결과를 그대로 반환
+                    return callFallbackOpenAiForCleansing(promptBuilder.toString());
+                }
+
+                // 429 에러 방어를 위해 재시도 전 1.5초 대기
+                try { Thread.sleep(1500); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+
+        return new HashMap<>(); // 여길 타게 되면 AdminAsyncService가 1분 휴식을 발동시킴
+    }
+
+    // 관리자 카테고리 클렌징 전용 GPT 비상 전환 메서드
+    private Map<String, String> callFallbackOpenAiForCleansing(String prompt) {
+        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
+            System.out.println("OpenAI API 키가 설정되지 않아 카테고리 클렌징을 일시 중단합니다.");
             return new HashMap<>();
+        }
+
+        try {
+            String gptUrl = "https://api.openai.com/v1/chat/completions";
+
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", openAiModel);
+
+            Map<String, String> message = new HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            requestBody.put("messages", Collections.singletonList(message));
+
+            // JSON 출력 강제 (프롬프트 무시하고 헛소리 방지)
+            Map<String, Object> responseFormat = new HashMap<>();
+            responseFormat.put("type", "json_object");
+            requestBody.put("response_format", responseFormat);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(openAiApiKey);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            RestTemplate restTemplate = new RestTemplate();
+
+            ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+
+            String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
+
+            return objectMapper.readValue(gptText, new TypeReference<Map<String, String>>(){});
+
+        } catch (Exception e) {
+            System.out.println("백업 GPT 에러 (카테고리 클렌징): " + e.getMessage());
+
+            // [로그 기록] GPT마저 죽은 상황
+            Log fatalLog = new Log();
+            fatalLog.setErrorType("AI_CLEANSING_FATAL_GPT_FAIL");
+            fatalLog.setErrorMessage(e.getMessage());
+            logRepository.save(fatalLog);
+
+            return new HashMap<>(); // 빈 맵 반환 -> AdminAsyncService가 1분 대기 모드 돌입
         }
     }
 

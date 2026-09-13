@@ -61,7 +61,7 @@ public class AdminAsyncService {
                 if (!isEnriching) break;
                 String reviewsText = googleMapsService.getPlaceReviews(p.getCity(), p.getName());
 
-                // 🚀 [쓰레기 데이터 방어 로직] 통신 에러(null) 발생 시 이번 연산에서 제외!
+                // [쓰레기 데이터 방어 로직] 통신 에러(null) 발생 시 이번 연산에서 제외
                 if (reviewsText == null) {
                     System.out.println("[" + p.getName() + "] 리뷰 수집 실패! 쓰레기 값 방지를 위해 이번 턴에서 제외합니다.");
                     continue; // AI에게 넘기지 않고 패스 (다음 사이클에서 재시도 됨)

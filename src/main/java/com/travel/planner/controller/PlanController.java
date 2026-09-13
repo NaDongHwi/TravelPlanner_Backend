@@ -227,7 +227,8 @@ public class PlanController {
         AiRouteResponse aiResponse = aiService.evaluateAndModifyRoute(
                 finalContext, finalOptimizedRoute, request.getLanguage(),
                 request.getAccommodations(), request.isSuggestHotel(), hotelCandidates,
-                request.getStartDate(), totalDays
+                request.getStartDate(), totalDays,
+                request.getInCity(), request.getOutCity()
         );
 
         // 8. DB 영구 저장 로직
@@ -266,10 +267,23 @@ public class PlanController {
                 itinerary.setTime(item.getTime());
                 itinerary.setAiComment(item.getDescription());
 
-                Place matchedPlace = realPlaces.stream()
-                        .filter(p -> p.getName().equals(item.getPlaceName()))
-                        .findFirst()
-                        .orElse(null);
+                Place matchedPlace = null;
+
+                // 1순위: 절대 변하지 않는 고유 ID(placeId)로 먼저 찾기
+                if (item.getPlaceId() != null && !item.getPlaceId().isEmpty()) {
+                    matchedPlace = realPlaces.stream()
+                            .filter(p -> item.getPlaceId().equals(p.getPlaceId()))
+                            .findFirst()
+                            .orElse(null);
+                }
+
+                // 2순위: 혹시라도 AI가 ID를 누락했다면 이름으로 찾기 (안전장치)
+                if (matchedPlace == null) {
+                    matchedPlace = realPlaces.stream()
+                            .filter(p -> p.getName().equals(item.getPlaceName()))
+                            .findFirst()
+                            .orElse(null);
+                }
 
                 if (matchedPlace == null) {
                     Place fetchedPlace = googleMapsService.getPlaceDetails(mainCity, item.getPlaceName(), request.getLanguage());

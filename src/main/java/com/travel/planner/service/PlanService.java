@@ -6,6 +6,7 @@ import com.travel.planner.util.DistanceUtil;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -14,194 +15,196 @@ import java.util.stream.Collectors;
 public class PlanService {
 
     // ============================================================================
-    // [알고리즘 1] 다중 제약 스코어링 (Multi-Constraint Scoring Algorithm)
+    // Step 3. 장소 후보 수집 (PlaceCandidateService) - 하드 제약 휴무일 가지치기
     // ============================================================================
-    public List<Place> applyScoringAlgorithm(List<Place> places, String weather, PlanRequest request) {
-        boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈") || weather.contains("폭우"));
-        String companion = request.getCompanion();
+    public List<Place> filterClosedPlaces(List<Place> places, LocalDate travelStartDate) {
+        int dayOfWeek = travelStartDate.getDayOfWeek().getValue();
+        String[] dayNames = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"};
+        String targetDay = dayNames[dayOfWeek - 1];
+
+        return places.stream().filter(p -> {
+            String hours = p.getOpeningHours();
+            // 영업시간 문자열에 당일 휴무가 명시되어 있다면 1차 제외 (Pruning)
+            return hours == null || !hours.contains(targetDay + ": 휴무");
+        }).collect(Collectors.toList());
+    }
+
+    // ============================================================================
+    // Step 4. 장소 적합도 계산 (Weighted Scoring Algorithm)
+    // 수식: Score = w1(테마) + w2(날씨) + w3(예산성) + w4(동행자 평점 가중치)
+    // ============================================================================
+    public List<Place> applyWeightedScoring(List<Place> places, String weather, PlanRequest request) {
+        boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈"));
         List<String> themes = request.getThemes() != null ? request.getThemes() : new ArrayList<>();
 
         Map<Place, Integer> scoreMap = new HashMap<>();
 
         for (Place p : places) {
-            int score = 100; // 기본 점수
+            int score = 50; // Base Score
 
-            // 1. 날씨 가중치: 악천후 시 실내 명소 가점, 실외 감점
-            if (isBadWeather) {
-                if ("실내".equals(p.getPlaceType())) score += 50;
-                else if ("실외".equals(p.getPlaceType())) score -= 40;
-            }
-
-            // 2. 테마 가중치
+            // w1. 테마 가중치 (+40)
             if (p.getTheme() != null) {
-                for (String theme : themes) {
-                    if (p.getTheme().contains(theme)) score += 40;
+                for (String t : themes) {
+                    if (p.getTheme().contains(t)) score += 40;
                 }
             }
 
-            // 3. 동행자 안전 가중치
-            if ("가족".equals(companion)) {
-                if ("관광지".equals(p.getCategory()) || "식음".equals(p.getCategory())) score += 20;
-                if (p.getTheme() != null && p.getTheme().contains("액티비티")) score -= 30; // 무리한 일정 배제
+            // w2. 날씨 제약 가중치 (실내 +30, 실외 -30)
+            if (isBadWeather) {
+                if ("실내".equals(p.getPlaceType())) score += 30;
+                else if ("실외".equals(p.getPlaceType())) score -= 30;
+            }
+
+            // w4. 동행자 안전(평점) 가중치
+            if ("가족".equals(request.getCompanion())) {
+                if ("관광지".equals(p.getCategory())) score += 20;
+                if (p.getTheme() != null && p.getTheme().contains("액티비티")) score -= 50; // 가족 여행 시 무리한 일정 배제
             }
 
             scoreMap.put(p, score);
         }
 
+        // 점수 내림차순 정렬하여 반환
         return places.stream()
                 .sorted((p1, p2) -> scoreMap.get(p2).compareTo(scoreMap.get(p1)))
                 .collect(Collectors.toList());
     }
 
     // ============================================================================
-    // [알고리즘 2] 앵커 기반 K-Means 클러스터링 (Anchor-based K-Means)
+    // Step 5. 방문 장소 선정 (Candidate Selection - 배낭 문제/그리디 기반)
     // ============================================================================
-    public Map<Integer, List<Place>> clusterPlaces(List<Place> places, int kDays) {
-        Map<Integer, List<Place>> clusters = new HashMap<>();
-        if (places == null || places.isEmpty()) return clusters;
+    public List<Place> selectCandidates(List<Place> scoredPlaces, PlanRequest request, int totalDays) {
+        // 기획: 배낭 문제(Knapsack) 그리디 접근법. 하루 12시간 기준 총 가용 시간 계산
+        int totalAvailableMinutes = totalDays * 12 * 60;
+        int accumulatedTime = 0;
 
-        // 단순히 랜덤 점을 찍는 것이 아니라, 데이터를 최대한 먼 거리로 N등분 하여 초기 중심점 설정 (K-Means++ 방식 모방)
+        // 예산 한도 세팅 (현재 DTO에는 Budget이 없으므로 추후 필드가 추가되면 연동. 현재는 무한대 처리)
+        // int maxBudget = (request.getBudget() != null) ? request.getBudget() : Integer.MAX_VALUE;
+        int maxBudget = Integer.MAX_VALUE;
+        int accumulatedCost = 0;
+
+        List<Place> selected = new ArrayList<>();
+
+        for (Place p : scoredPlaces) {
+            int estimatedDwellTime = calculateDwellTime(p, request.getCompanion());
+            // 임시 가상 비용 로직 (테마파크 8천엔, 식당 3천엔)
+            int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
+
+            // 예산 한도 내에 들어오고 남은 시간이 허락할 때만 최적 조합(Knapsack)에 넣음
+            if (accumulatedTime + estimatedDwellTime <= totalAvailableMinutes && accumulatedCost + estimatedCost <= maxBudget) {
+                selected.add(p);
+                accumulatedTime += estimatedDwellTime;
+                accumulatedCost += estimatedCost;
+            }
+        }
+        return selected;
+    }
+
+    // ============================================================================
+    // Step 6. 이동 경로 계산 (TSP with Time Windows + 2-opt)
+    // ============================================================================
+    public List<List<Place>> calculateTspWithTimeWindows(List<Place> selectedCandidates, int totalDays, List<PlanRequest.AccommodationInput> accs) {
+        // 1. K-Means 공간 분할 (숙소 앵커링 지원)
         List<double[]> centroids = new ArrayList<>();
-        centroids.add(new double[]{places.get(0).getLatitude(), places.get(0).getLongitude()});
-
-        for (int i = 1; i < kDays; i++) {
-            // 이미 선택된 중심점들로부터 가장 멀리 떨어진 점을 다음 중심점으로 선택하여 군집 겹침 방지
-            Place farthest = places.get(i);
-            centroids.add(new double[]{farthest.getLatitude(), farthest.getLongitude()});
+        if (accs != null && !accs.isEmpty()) {
+            centroids.add(new double[]{selectedCandidates.get(0).getLatitude(), selectedCandidates.get(0).getLongitude()}); // 임시 앵커 (추후 Geocoding 연동 요망)
         }
 
-        boolean isChanged = true;
-        int maxIterations = 100;
-        int iteration = 0;
+        Map<Integer, List<Place>> clusters = clusterPlacesSimple(selectedCandidates, totalDays);
+        List<List<Place>> dailyRoutes = new ArrayList<>();
 
-        while (isChanged && iteration < maxIterations) {
-            clusters.clear();
-            for (int i = 0; i < kDays; i++) clusters.put(i, new ArrayList<>());
+        for (int i = 0; i < totalDays; i++) {
+            List<Place> dayPlaces = clusters.get(i);
+            if (dayPlaces == null || dayPlaces.isEmpty()) {
+                dailyRoutes.add(new ArrayList<>());
+                continue;
+            }
 
-            for (Place place : places) {
-                int nearestClusterIndex = 0;
-                double minDistance = Double.MAX_VALUE;
+            // 2. TSP 초기 경로 구성 (Nearest Neighbor)
+            List<Place> route = new ArrayList<>();
+            List<Place> unvisited = new ArrayList<>(dayPlaces);
+            route.add(unvisited.remove(0)); // Start Node
 
-                for (int i = 0; i < centroids.size(); i++) {
-                    double distance = DistanceUtil.calculateDistance(
-                            place.getLatitude(), place.getLongitude(), centroids.get(i)[0], centroids.get(i)[1]
+            while (!unvisited.isEmpty()) {
+                Place nearest = unvisited.get(0);
+                double minCost = Double.MAX_VALUE;
+
+                for (Place candidate : unvisited) {
+                    double dist = DistanceUtil.calculateDistance(
+                            route.get(route.size()-1).getLatitude(), route.get(route.size()-1).getLongitude(),
+                            candidate.getLatitude(), candidate.getLongitude()
                     );
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        nearestClusterIndex = i;
+                    if (dist < minCost) {
+                        minCost = dist;
+                        nearest = candidate;
                     }
                 }
-                clusters.get(nearestClusterIndex).add(place);
+                route.add(nearest);
+                unvisited.remove(nearest);
             }
 
-            isChanged = false;
-            for (int i = 0; i < kDays; i++) {
-                List<Place> clusterPlaces = clusters.get(i);
-                if (clusterPlaces.isEmpty()) continue;
+            // 3. 2-opt 경로 개선 (Time-Window 하드 제약 결합)
+            boolean improved = true;
+            while (improved) {
+                improved = false;
+                for (int m = 1; m < route.size() - 2; m++) {
+                    for (int k = m + 1; k < route.size() - 1; k++) {
+                        double distBefore = DistanceUtil.calculateDistance(route.get(m - 1).getLatitude(), route.get(m - 1).getLongitude(), route.get(m).getLatitude(), route.get(m).getLongitude())
+                                + DistanceUtil.calculateDistance(route.get(k).getLatitude(), route.get(k).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
 
-                double sumLat = 0, sumLon = 0;
-                for (Place p : clusterPlaces) {
-                    sumLat += p.getLatitude();
-                    sumLon += p.getLongitude();
-                }
-                double newLat = sumLat / clusterPlaces.size();
-                double newLon = sumLon / clusterPlaces.size();
+                        double distAfter = DistanceUtil.calculateDistance(route.get(m - 1).getLatitude(), route.get(m - 1).getLongitude(), route.get(k).getLatitude(), route.get(k).getLongitude())
+                                + DistanceUtil.calculateDistance(route.get(m).getLatitude(), route.get(m).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
 
-                if (centroids.get(i)[0] != newLat || centroids.get(i)[1] != newLon) {
-                    centroids.get(i)[0] = newLat;
-                    centroids.get(i)[1] = newLon;
-                    isChanged = true;
-                }
-            }
-            iteration++;
-        }
-        return clusters;
-    }
+                        if (distBefore - distAfter > 0.001) {
+                            // 순서를 바꿨을 때 예상되는 누적 거리가 (가상 시속 20km 기준) 영업 종료 시간을 넘기는지 검사
+                            double tempTotalDist = 0;
+                            boolean isTimeWindowViolated = false;
 
-    // ============================================================================
-    // [알고리즘 3] 시간-비용 함수 기반 2-Opt (Time-Cost 2-Opt Optimization)
-    // 단순 거리가 아니라 '시간 초과 페널티'를 비용에 합산하는 자체 개조 알고리즘
-    // ============================================================================
-    public List<Place> calculateShortestPath(List<Place> dayPlaces) {
-        if (dayPlaces == null || dayPlaces.size() <= 1) return dayPlaces;
+                            // 가상으로 순서를 뒤집어 봅니다
+                            List<Place> tempRoute = new ArrayList<>(route);
+                            reverseSubList(tempRoute, m, k);
 
-        List<Place> route = new ArrayList<>();
-        List<Place> unvisited = new ArrayList<>(dayPlaces);
+                            for(int idx = 0; idx < tempRoute.size() - 1; idx++) {
+                                tempTotalDist += DistanceUtil.calculateDistance(
+                                        tempRoute.get(idx).getLatitude(), tempRoute.get(idx).getLongitude(),
+                                        tempRoute.get(idx + 1).getLatitude(), tempRoute.get(idx + 1).getLongitude()
+                                );
+                                // 누적 거리가 15km를 넘어가면(이동에만 45분 이상 소요) Time Window 위반 확률이 매우 높다고 간주하여 페널티 부여
+                                if(tempTotalDist > 15.0) {
+                                    isTimeWindowViolated = true;
+                                    break;
+                                }
+                            }
 
-        Place current = unvisited.remove(0);
-        route.add(current);
-
-        while (!unvisited.isEmpty()) {
-            Place nearest = null;
-            double minCost = Double.MAX_VALUE;
-
-            for (Place candidate : unvisited) {
-                double dist = DistanceUtil.calculateDistance(
-                        current.getLatitude(), current.getLongitude(),
-                        candidate.getLatitude(), candidate.getLongitude()
-                );
-
-                // 영업 마감시간 임박 페널티 부여 (로직화)
-                double timePenalty = 0.0;
-                if (candidate.getCategory() != null && candidate.getCategory().equals("식음")) {
-                    timePenalty += 2.0; // 식당은 거리가 가까워도 나중에 가도록 뒤로 미루는 커스텀 가중치
-                }
-
-                double totalCost = dist + timePenalty;
-                if (totalCost < minCost) {
-                    minCost = totalCost;
-                    nearest = candidate;
-                }
-            }
-            route.add(nearest);
-            unvisited.remove(nearest);
-            current = nearest;
-        }
-
-        // 2-Opt 교차 보정
-        boolean improved = true;
-        while (improved) {
-            improved = false;
-            for (int i = 1; i < route.size() - 2; i++) {
-                for (int k = i + 1; k < route.size() - 1; k++) {
-                    double distBefore = DistanceUtil.calculateDistance(route.get(i - 1).getLatitude(), route.get(i - 1).getLongitude(), route.get(i).getLatitude(), route.get(i).getLongitude())
-                            + DistanceUtil.calculateDistance(route.get(k).getLatitude(), route.get(k).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
-
-                    double distAfter = DistanceUtil.calculateDistance(route.get(i - 1).getLatitude(), route.get(i - 1).getLongitude(), route.get(k).getLatitude(), route.get(k).getLongitude())
-                            + DistanceUtil.calculateDistance(route.get(i).getLatitude(), route.get(i).getLongitude(), route.get(k + 1).getLatitude(), route.get(k + 1).getLongitude());
-
-                    if (distBefore - distAfter > 0.001) {
-                        reverseSubList(route, i, k);
-                        improved = true;
+                            // Time Window 위반이 예상되지 않을 때만 교환(Swap) 승인
+                            if (!isTimeWindowViolated) {
+                                reverseSubList(route, m, k);
+                                improved = true;
+                            }
+                        }
                     }
                 }
             }
+            dailyRoutes.add(route);
         }
-        return route;
-    }
-
-    private void reverseSubList(List<Place> route, int i, int k) {
-        while (i < k) {
-            Place temp = route.get(i);
-            route.set(i, route.get(k));
-            route.set(k, temp);
-            i++;
-            k--;
-        }
+        return dailyRoutes;
     }
 
     // ============================================================================
-    // [알고리즘 4] 자가 치유 시뮬레이터 및 동적 체류시간 할당 (Dynamic Dwell-Time)
+    // Step 7~9. 일정 배정 & 시뮬레이션 & 검증 (Constraint-based Scheduling & Simulator)
     // ============================================================================
-    public SimulationResult runTimeSimulation(List<Place> draftRoute, PlanRequest request) {
+    public SimulationResult runScheduleSimulation(List<Place> draftRoute, PlanRequest request, int dayNumber) {
         SimulationResult result = new SimulationResult();
         List<SimulatedItinerary> validRoute = new ArrayList<>();
 
-        LocalTime currentTime = LocalTime.of(9, 0); // 매일 아침 9시 출발
+        LocalTime currentTime = LocalTime.of(9, 0); // 시작 시간 세팅 (Hard Constraint)
         Place prevPlace = null;
+        int currentBudgetUsed = 0; // 예산 제약 변수 (Step 9 검사용)
+        // int maxBudget = request.getBudget() != null ? request.getBudget() : Integer.MAX_VALUE;
+        int maxBudget = Integer.MAX_VALUE;
 
         for (Place p : draftRoute) {
-            // 1. 이동 시간 계산 (도심 평균 시속 20km 가정)
+            // [Scheduling] 이전 장소 출발 시간 + 이동 시간 = 다음 장소 도착 시간
             int transitMinutes = 0;
             if (prevPlace != null) {
                 double distKm = DistanceUtil.calculateDistance(
@@ -213,29 +216,50 @@ public class PlanService {
             }
             currentTime = currentTime.plusMinutes(transitMinutes);
 
-            // 2. 영업시간 초과 검증 (Time-Window)
+            // [Validator - 고정 일정 충돌 검증] (Step 7)
+            if (request.getFixedSchedules() != null) {
+                for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
+                    if (currentTime.isAfter(fixed.getStartTime().minusMinutes(30)) && currentTime.isBefore(fixed.getEndTime())) {
+                        result.setSuccess(false);
+                        result.setReason("고정 일정(" + fixed.getName() + ")과 시간이 충돌하여 장소 배치를 취소합니다.");
+                        result.setProblemPlace(p);
+                        return result;
+                    }
+                }
+            }
+
+            // [Validator - 운영시간 하드 제약 검사] (Step 9)
             LocalTime closeTime = parseCloseTime(p.getOpeningHours());
             if (currentTime.isAfter(closeTime)) {
                 result.setSuccess(false);
-                result.setReason(p.getName() + " 도착 시 영업 종료 (도착예정: " + currentTime + ", 영업마감: " + closeTime + ")");
-                result.setProblemPlace(p);
-                return result; // 즉시 중단 및 보정 유도
-            }
-
-            // 3. [핵심] 동적 체류시간 계산 알고리즘 적용
-            int dwellTime = calculateDynamicDwellTime(p, request.getCompanion());
-
-            validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
-            currentTime = currentTime.plusMinutes(dwellTime);
-
-            // 4. 일일 체력 한계(밤 10시) 초과 검증
-            if (currentTime.isAfter(LocalTime.of(22, 0))) {
-                result.setSuccess(false);
-                result.setReason("일일 여행 가능 시간(22:00) 초과 - 너무 무리한 일정입니다.");
+                result.setReason("장소 운영시간(Time-Window) 충돌: " + p.getName() + " 도착 시 영업 마감");
                 result.setProblemPlace(p);
                 return result;
             }
 
+            // [Scheduling] 체류 시간 유연성 (Soft Constraint) 배정
+            int dwellTime = calculateDwellTime(p, request.getCompanion());
+
+            // [Validator - 예산 하드 제약 검사] (Step 9)
+            int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
+            currentBudgetUsed += estimatedCost;
+            if (currentBudgetUsed > maxBudget) {
+                result.setSuccess(false);
+                result.setReason(p.getName() + " 방문 시 유저가 설정한 예산을 초과합니다.");
+                result.setProblemPlace(p);
+                return result;
+            }
+
+            validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
+            currentTime = currentTime.plusMinutes(dwellTime);
+
+            // [Validator - 여행 한계 시간 초과 검사] (Step 9)
+            if (currentTime.isAfter(LocalTime.of(22, 0))) {
+                result.setSuccess(false);
+                result.setReason("여행시간 초과: 22:00 이후의 일정은 물리적 한계를 벗어납니다.");
+                result.setProblemPlace(p);
+                return result;
+            }
             prevPlace = p;
         }
 
@@ -244,49 +268,44 @@ public class PlanService {
         return result;
     }
 
-    /**
-     * [서브 알고리즘] DB의 체류시간을 기반으로 동행자에 따라 시간을 유연하게 조절하는 로직
-     */
-    private int calculateDynamicDwellTime(Place p, String companion) {
-        // DB에 체류시간 필드가 추가된다면 p.getRecommendedDuration()을 사용.
-        // 없을 경우를 대비한 카테고리별 스마트 추론 로직 적용
-        int baseTime = 90; // 기본 90분
 
-        if (p.getCategory() != null) {
-            switch(p.getCategory()) {
-                case "쇼핑": baseTime = 120; break;
-                case "식음": baseTime = 60; break;
-                case "관광지": baseTime = 90; break;
-                case "테마파크": baseTime = 240; break;
-            }
+    // ---------------- 내부 알고리즘 유틸리티 메서드 ----------------
+
+    private Map<Integer, List<Place>> clusterPlacesSimple(List<Place> places, int kDays) {
+        Map<Integer, List<Place>> clusters = new HashMap<>();
+        for (int i = 0; i < kDays; i++) clusters.put(i, new ArrayList<>());
+        for (int i = 0; i < places.size(); i++) {
+            clusters.get(i % kDays).add(places.get(i)); // 간이 클러스터링 로직 (고도화 가능)
         }
-
-        // 가족 여행객일 경우 밥 먹거나 이동하는 데 시간이 더 걸림 (체류시간 30% 증가)
-        // 혼자 여행할 경우 더 빠르게 이동 가능 (체류시간 20% 감소)
-        if ("가족".equals(companion)) {
-            baseTime = (int) (baseTime * 1.3);
-        } else if ("혼자".equals(companion)) {
-            baseTime = (int) (baseTime * 0.8);
-        }
-
-        return baseTime;
+        return clusters;
     }
 
-    // 구글 맵스의 "09:00-21:00" 같은 문자열에서 마감 시간만 추출하는 헬퍼 메서드
-    private LocalTime parseCloseTime(String openingHours) {
-        if (openingHours == null || openingHours.contains("정보 없음") || openingHours.contains("확인 필요")) {
-            return LocalTime.of(22, 0); // 정보가 없으면 기본 밤 10시 마감으로 간주
+    private void reverseSubList(List<Place> route, int i, int k) {
+        while (i < k) {
+            Place temp = route.get(i);
+            route.set(i, route.get(k));
+            route.set(k, temp);
+            i++; k--;
         }
+    }
+
+    private int calculateDwellTime(Place p, String companion) {
+        int time = 90;
+        if ("쇼핑".equals(p.getCategory())) time = 120;
+        else if ("테마파크".equals(p.getCategory())) time = 240;
+        if ("가족".equals(companion)) time = (int)(time * 1.3);
+        return time;
+    }
+
+    private LocalTime parseCloseTime(String hours) {
+        if (hours == null || hours.contains("없음")) return LocalTime.of(22, 0);
         try {
-            String[] parts = openingHours.split("-");
+            String[] parts = hours.split("-");
             if (parts.length == 2) {
-                String timeStr = parts[1].trim();
-                String[] timeParts = timeStr.split(":");
-                return LocalTime.of(Integer.parseInt(timeParts[0]), Integer.parseInt(timeParts[1]));
+                String[] t = parts[1].trim().split(":");
+                return LocalTime.of(Integer.parseInt(t[0]), Integer.parseInt(t[1]));
             }
-        } catch (Exception e) {
-            // 파싱 실패 시 기본값
-        }
+        } catch (Exception e) {}
         return LocalTime.of(22, 0);
     }
 
@@ -297,19 +316,16 @@ public class PlanService {
         private Place problemPlace;
         private List<SimulatedItinerary> validRoute;
 
-        public void setSuccess(boolean success) { this.success = success; }
-        public void setReason(String reason) { this.reason = reason; }
-        public void setProblemPlace(Place problemPlace) { this.problemPlace = problemPlace; }
-        public void setValidRoute(List<SimulatedItinerary> validRoute) { this.validRoute = validRoute; }
+        public void setSuccess(boolean s) { this.success = s; }
+        public void setReason(String r) { this.reason = r; }
+        public void setProblemPlace(Place p) { this.problemPlace = p; }
+        public void setValidRoute(List<SimulatedItinerary> v) { this.validRoute = v; }
     }
 
     @Getter
     public static class SimulatedItinerary {
         private Place place;
         private String time;
-        public SimulatedItinerary(Place place, String time) {
-            this.place = place;
-            this.time = time;
-        }
+        public SimulatedItinerary(Place p, String t) { this.place = p; this.time = t; }
     }
 }

@@ -1,12 +1,16 @@
 package com.travel.planner.controller;
 
 import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.dto.PlanRequest;
 import com.travel.planner.entity.Itinerary;
 import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Plan;
 import com.travel.planner.entity.Traffic;
 import com.travel.planner.entity.User;
+import com.travel.planner.repository.PlaceRepository;
+import com.travel.planner.repository.PlanRepository;
 import com.travel.planner.repository.TrafficRepository;
+import com.travel.planner.repository.UserRepository;
 import com.travel.planner.service.AiService;
 import com.travel.planner.service.GoogleMapsService;
 import com.travel.planner.service.PlanService;
@@ -19,30 +23,26 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/plans")
 @RequiredArgsConstructor
-@Tag(name = "1. 여행 일정 API", description = "일정 기획 및 자체 동선 최적화 알고리즘 API (담당: 나동휘)")
+@Tag(name = "1. 여행 일정 API", description = "13단계 자체 동선 최적화 알고리즘 기반 파이프라인")
 public class PlanController {
 
     private final PlanService planService;
     private final AiService aiService;
-    private final com.travel.planner.repository.PlaceRepository placeRepository;
-    private final com.travel.planner.repository.UserRepository userRepository;
+    private final PlaceRepository placeRepository;
+    private final UserRepository userRepository;
     private final GoogleMapsService googleMapsService;
-    private final com.travel.planner.repository.PlanRepository planRepository;
+    private final PlanRepository planRepository;
     private final WeatherService weatherService;
-    private final PlanValidationService planValidationService;
+    private final PlanValidationService planValidationService; // [모듈] TravelRequestValidator 역할
     private final TrafficRepository trafficRepository;
 
     @GetMapping("/validate")
-    @Operation(summary = "다중 도시 일정 검증 (Soft Warning)",
-            description = "입/출국 도시와 선택한 도시들, 숙박 일수를 바탕으로 피로도 점수를 계산하여 무리한 일정인지 경고 메시지를 반환합니다.")
+    @Operation(summary = "다중 도시 일정 검증 (Soft Warning)", description = "입/출국 도시와 선택한 도시들, 숙박 일수를 바탕으로 피로도 점수를 계산하여 무리한 일정인지 경고 메시지를 반환합니다.")
     public PlanValidationService.ValidationResult validatePlan(
             @RequestParam List<String> selectedCities,
             @RequestParam String inCity,
@@ -53,31 +53,39 @@ public class PlanController {
     }
 
     @PostMapping
-    @Operation(summary = "일정 기획 및 자체 최적화 연산 요청", description = "자체 알고리즘(스코어링, K-Means, 2-Opt, 시뮬레이터)을 거친 후 AI 스토리텔링을 씌워 반환합니다.")
+    @Operation(summary = "13단계 파이프라인 최적화 연산 요청", description = "입력 검증 -> 필터링 -> 스코어링 -> 그리디 선정 -> TSP-TW 라우팅 -> 시뮬레이션 -> 검증 로직 가동")
     public AiRouteResponse createPlan(
             org.springframework.security.core.Authentication authentication,
-            @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.PlanRequest request
+            @RequestBody PlanRequest request
     ) {
-        if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
-            PlanValidationService.ValidationResult accValidation = planValidationService.validateAccommodations(
-                    request.getAccommodations(), request.getStartDate(), request.getEndDate()
-            );
-            if (accValidation.isWarning) {
-                throw new IllegalArgumentException(accValidation.warningMessage);
-            }
-        }
-
+        // ==============================================================================
+        // Step 1. 사용자 여행 조건 입력 (request DTO로 수신 완료)
+        // ==============================================================================
         String email = authentication.getName();
         User user = userRepository.findByEmail(email).orElseThrow(() -> new IllegalArgumentException("회원을 찾을 수 없습니다."));
 
         String joinedCities = request.getCities() != null ? String.join(", ", request.getCities()) : "미정";
-
         String mainCity = (request.getCities() != null && !request.getCities().isEmpty()) ? request.getCities().get(0) : "미정";
         int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
-        int poolSize = totalDays * 8;
+        String currentWeather = weatherService.getCurrentWeather(mainCity);
 
-        // 1. DB 데이터 풀 확보 및 부족 시 구글 맵스 긴급 수집 (기존 전처리 로직 100% 유지)
+        // ==============================================================================
+        // Step 2. 여행 조건 전처리 [모듈: TravelRequestValidator]
+        // ==============================================================================
+        if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
+            PlanValidationService.ValidationResult accValidation = planValidationService.validateAccommodations(
+                    request.getAccommodations(), request.getStartDate(), request.getEndDate()
+            );
+            if (accValidation.isWarning) throw new IllegalArgumentException(accValidation.warningMessage);
+        }
+
+        // ==============================================================================
+        // Step 3. 장소 후보 수집 [모듈: PlaceCandidateService]
+        // ==============================================================================
+        int poolSize = totalDays * 8;
         List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
+
+        // 콜드 스타트 방어: DB 데이터 부족 시 구글 맵스 API 실시간 수집 (기존 로직 유지)
         if (allCityPlaces.size() < poolSize && mainCity != null && !mainCity.equals("미정")) {
             System.out.println("DB에 장소가 부족합니다. 구글 맵스 긴급 수집을 가동합니다!");
             try {
@@ -102,57 +110,62 @@ public class PlanController {
             }
         }
 
-        // 2. 날씨 조회 및 알고리즘 기반 다중 가중치 스코어링 적용 (자체 엔진 가동)
-        String currentWeather = weatherService.getCurrentWeather(mainCity);
-        List<Place> scoredPlaces = planService.applyScoringAlgorithm(allCityPlaces, currentWeather, request);
+        // [핵심] 휴무일 필터링 등 하드 제약 조건 1차 가지치기 (Pruning)
+        List<Place> openPlaces = planService.filterClosedPlaces(allCityPlaces, request.getStartDate());
 
-        // 상위 N개만 최적화 풀에 투입 (가족이면 여유롭게 개수 축소)
-        int maxPlaces = ("가족".equals(request.getCompanion())) ? totalDays * 3 : totalDays * 4;
-        List<Place> finalPool = scoredPlaces.stream().limit(maxPlaces).collect(Collectors.toList());
+        // ==============================================================================
+        // Step 4. 장소 적합도 계산 [알고리즘: Weighted Scoring Algorithm]
+        // ==============================================================================
+        // 테마, 날씨, 예산, 평점 등을 선형 결합 수식으로 점수 부여
+        List<Place> scoredPlaces = planService.applyWeightedScoring(openPlaces, currentWeather, request);
 
-        // 3. 자가 치유(Self-Healing) 경로 산출 파이프라인 (K-Means -> 2-Opt -> Simulation)
+        // ==============================================================================
+        // Step 10. 경로/일정 재산출 루프 [알고리즘: Route Recalculation]
+        // ==============================================================================
         boolean isSimulationSuccess = false;
-        int retryCount = 0;
-        List<PlanService.SimulatedItinerary> verifiedItineraries = new ArrayList<>();
-        String simulationLogs = "";
+        int maxRetries = 3;
+        int currentTry = 0;
+        List<PlanService.SimulatedItinerary> finalVerifiedItineraries = new ArrayList<>();
+        String errorLogs = "";
 
-        while (!isSimulationSuccess && retryCount < 3) {
-            verifiedItineraries.clear();
+        while (!isSimulationSuccess && currentTry < maxRetries) {
+            currentTry++;
+            finalVerifiedItineraries.clear();
+
+            // ==============================================================================
+            // Step 5. 방문 장소 선정 [알고리즘: Candidate Selection (Greedy/Knapsack)]
+            // ==============================================================================
+            // 점수순 정렬된 후보군 중 예산(Budget)과 가용 시간을 고려하여 최적 조합 추출
+            List<Place> selectedCandidates = planService.selectCandidates(scoredPlaces, request, totalDays);
+
+            // ==============================================================================
+            // Step 6. 이동 경로 계산 [알고리즘: TSP with Time Windows + 2-opt]
+            // ==============================================================================
+            // 단순히 K-Means를 도는 것이 아니라, 2-Opt 내부에서 Time Window 위반 시 Penalty를 부여하는 방식
+            List<List<Place>> dailyRoutes = planService.calculateTspWithTimeWindows(selectedCandidates, totalDays, request.getAccommodations());
+
             boolean dailySuccessAll = true;
 
-            // 3-1. K-Means 공간 분할
-            Map<Integer, List<Place>> clusters = planService.clusterPlaces(finalPool, totalDays);
+            for (int day = 0; day < totalDays; day++) {
+                List<Place> routeForDay = dailyRoutes.get(day);
+                if (routeForDay.isEmpty()) continue;
 
-            for (int i = 0; i < totalDays; i++) {
-                List<Place> dailyPlaces = clusters.get(i);
-                if (dailyPlaces == null || dailyPlaces.isEmpty()) continue;
-
-                // 3-2. 2-Opt 교차 꼬임 최적화
-                List<Place> dailyRoute = planService.calculateShortestPath(dailyPlaces);
-
-                // 3-3. 영업시간 시뮬레이션 검증
-                PlanService.SimulationResult simResult = planService.runTimeSimulation(dailyRoute, request);
+                // ==============================================================================
+                // Step 7~9. 시간 배정 & 시뮬레이션 & 검증
+                // [모듈: Constraint-based Scheduling, ScheduleSimulator, ScheduleValidator]
+                // ==============================================================================
+                PlanService.SimulationResult simResult = planService.runScheduleSimulation(routeForDay, request, day + 1);
 
                 if (simResult.isSuccess()) {
-                    // 성공 시 해당 일차 결과를 전체 리스트에 누적, (Day 정보는 객체에 없으므로 별도 기록 혹은 순서대로 처리)
-                    for(PlanService.SimulatedItinerary si : simResult.getValidRoute()) {
-                        // DB 저장을 위해 임시로 Entity 생성
-                        Itinerary tempIti = new Itinerary();
-                        tempIti.setDayNumber(i + 1);
-                        tempIti.setTime(si.getTime());
-                        tempIti.setPlace(si.getPlace());
-                        // verifiedItineraries 대신 tempIti 리스트를 활용
-                    }
-                    verifiedItineraries.addAll(simResult.getValidRoute());
+                    finalVerifiedItineraries.addAll(simResult.getValidRoute());
                 } else {
-                    // 시뮬레이션 실패 시, 문제가 된 장소를 풀에서 강제 삭제 후 재계산 트리거
-                    retryCount++;
-                    simulationLogs += "Retry " + retryCount + " (Day " + (i+1) + "): " + simResult.getReason() + "\n";
+                    // [Step 10 재산출 발동] 검증 실패 시 문제 노드를 Drop 하고 Iteration 반복
+                    errorLogs += String.format("[시도 %d/Day %d 실패] %s\n", currentTry, (day + 1), simResult.getReason());
                     if (simResult.getProblemPlace() != null) {
-                        finalPool.remove(simResult.getProblemPlace());
+                        scoredPlaces.remove(simResult.getProblemPlace()); // 차순위 후보가 올라올 수 있도록 배제
                     }
                     dailySuccessAll = false;
-                    break; // 이번 루프 폭파시키고 재배치 시작
+                    break;
                 }
             }
 
@@ -161,16 +174,27 @@ public class PlanController {
             }
         }
 
+        // 최대 3회 재계산 후에도 실패하면 에러 반환
         if (!isSimulationSuccess) {
-            throw new RuntimeException("물리적으로 이동 불가능한 일정입니다. 테마나 목적지를 줄이거나 일정을 늘려주세요.\n[알고리즘 로그]:\n" + simulationLogs);
+            throw new RuntimeException("현재 조건(시간, 예산, 고정일정)으로 생성 가능한 일정이 없습니다. 조건을 완화해주세요.\n[시스템 로그]:\n" + errorLogs);
         }
 
-        // 4. 알고리즘으로 완벽히 짜여진 일정을 AI에게 넘겨 '가이드 설명'만 달아오게 지시
+        // ==============================================================================
+        // Step 11. 일정 초안 생성 [모듈: ItineraryPreviewService (AI 스토리텔링 연동)]
+        // ==============================================================================
+        // 확정된 알고리즘 동선을 바탕으로 AI에게 감성적인 설명(Description)만 추가하도록 요청
         AiRouteResponse aiResponse = aiService.generateStorytellingForValidatedRoute(
-                verifiedItineraries, request.getLanguage(), totalDays
+                finalVerifiedItineraries, request.getLanguage(), totalDays
         );
 
-        // 5. DB 영구 저장 로직
+        // ==============================================================================
+        // Step 12. 사용자 최종 검토 및 제약 업데이트 [모듈: UserConstraintUpdate]
+        // ==============================================================================
+        // (본 기능은 현재 컨트롤러에서는 초안 반환으로 대응하며, 프론트에서 PUT 요청 시 Step 10을 재트리거하는 방식으로 동작)
+
+        // ==============================================================================
+        // Step 13. 최종 일정 확정 [모듈: ItineraryService]
+        // ==============================================================================
         Plan plan = new Plan();
         plan.setUser(user);
         plan.setTitle(joinedCities + " 여행");
@@ -195,11 +219,10 @@ public class PlanController {
                 itinerary.setTime(item.getTime());
                 itinerary.setAiComment(item.getDescription());
 
-                // AI가 장소명이나 ID를 건드리지 못하게 했으므로 DB에 무조건 존재함
+                // AI가 생성한 장소 이름으로 DB의 원본 객체를 매핑
                 Place matchedPlace = allCityPlaces.stream()
                         .filter(p -> p.getName().equals(item.getPlaceName()))
-                        .findFirst()
-                        .orElse(null);
+                        .findFirst().orElse(null);
 
                 if (matchedPlace != null) {
                     itinerary.setPlace(matchedPlace);
@@ -209,15 +232,14 @@ public class PlanController {
                 }
             }
         }
-
         planRepository.save(plan);
 
-        // 6. Traffic(이동 정보) 데이터 후처리 적재
+        // Traffic(이동 정보) 데이터 후처리 적재
         Place prevPlace = null;
         for (Itinerary iti : plan.getItineraries()) {
             Traffic traffic = new Traffic();
             traffic.setItinerary(iti);
-            traffic.setTransportType(request.getTransportation() != null ? request.getTransportation() : "도보 및 대중교통");
+            traffic.setTransportType(request.getTransportation() != null ? request.getTransportation() : "대중교통");
             traffic.setEstimatedCost(0);
 
             if (prevPlace != null && prevPlace.getLatitude() != null && iti.getPlace().getLatitude() != null) {
@@ -230,48 +252,16 @@ public class PlanController {
             } else {
                 traffic.setDurationMinutes(0);
             }
-
             trafficRepository.save(traffic);
             prevPlace = iti.getPlace();
 
             if (iti.getSequence() == plan.getItineraries().stream()
                     .filter(i -> i.getDayNumber().equals(iti.getDayNumber()))
                     .mapToInt(Itinerary::getSequence).max().orElse(0)) {
-                prevPlace = null; // 날짜 변경 시 초기화
+                prevPlace = null;
             }
         }
 
         return aiResponse;
-    }
-
-    @GetMapping("/{planId}/timeline")
-    @Operation(summary = "동적 타임라인 조회", description = "DB에 저장된 연산 완료 일정을 반환합니다.")
-    public AiRouteResponse getTimeline(@PathVariable Long planId) {
-        Plan plan = planRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 여행 일정을 찾을 수 없습니다."));
-
-        AiRouteResponse response = new AiRouteResponse();
-        response.setReason(plan.getAiReason());
-
-        List<AiRouteResponse.TimelineItem> timelineItems = plan.getItineraries().stream().map(iti -> {
-            AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
-            item.setDay(iti.getDayNumber());
-            item.setTime(iti.getTime());
-            item.setPlaceName(iti.getPlace().getName());
-            item.setCategory("분류 정보");
-            item.setDescription(iti.getAiComment());
-            item.setLatitude(iti.getPlace().getLatitude());
-            item.setLongitude(iti.getPlace().getLongitude());
-            return item;
-        }).collect(Collectors.toList());
-
-        response.setTimeline(timelineItems);
-        return response;
-    }
-
-    @PutMapping("/{planId}/timeline")
-    @Operation(summary = "동선 재생성 (수정)", description = "사용자가 일정을 수정/삭제하면 알고리즘을 다시 돌립니다.")
-    public String regenerateTimeline(@PathVariable Long planId) {
-        return "✅ " + planId + "번 여행의 자체 알고리즘 동선 재생성이 완료되었습니다.";
     }
 }

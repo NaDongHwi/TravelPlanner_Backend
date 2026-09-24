@@ -70,7 +70,7 @@ public class AdminController {
         int totalSkipped = 0;
 
         for (String kw : keywordSuite) {
-            List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, kw);
+            List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, kw, false);
 
             for (Place googlePlace : googlePlaces) {
                 googlePlace.setCity(city);

@@ -169,35 +169,31 @@ public class GoogleMapsService {
     }
 
     // [자동 페이지네이션 업그레이드] next_page_token을 추적하여 한 키워드당 최대 60개 명소를 싹 긁어옵니다.
-    public List<Place> searchNewPlacesFromGoogle(String city, String keyword) {
+    // isEmergency 파라미터 추가 및 내부 메서드로 전달
+    public List<Place> searchNewPlacesFromGoogle(String city, String keyword, boolean isEmergency) {
         List<Place> fetchedPlaces = new ArrayList<>();
         String baseUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={key}&language=ko&region=jp";
         String pageTokenUrl = "https://maps.googleapis.com/maps/api/place/textsearch/json?pagetoken={pagetoken}&key={key}&language=ko";
 
         try {
             String searchQuery = city + " " + keyword;
-            // 1. 첫 번째 페이지(1~20등) 호출
             String response = restTemplate.getForObject(baseUrl, String.class, searchQuery, googleMapsApiKey);
             JsonNode root = objectMapper.readTree(response);
 
             // 1페이지 데이터 리스트에 적재
-            parsePlacesFromNode(root, fetchedPlaces, city);
+            parsePlacesFromNode(root, fetchedPlaces, city, isEmergency);
 
-            // 2. 다음 페이지 토큰(next_page_token)이 있는지 확인 후 루프 가동
             String nextToken = root.path("next_page_token").asText();
             int pageCount = 1;
 
             while (nextToken != null && !nextToken.isEmpty() && pageCount < 3) {
-                // [구글 필수 제약사항] next_page_token은 발급 후 구글 서버에서 활성화되기까지 약 1.5초~2초의 시간이 걸립니다.
-                // 슬립 없이 바로 쏘면 구글이 INVALID_REQUEST 에러를 뱉으므로 2초 숨을 고르게 합니다.
                 Thread.sleep(2000);
-
                 System.out.println("➡️ [" + keyword + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 연속 수집 중...");
                 String nextResponse = restTemplate.getForObject(pageTokenUrl, String.class, nextToken, googleMapsApiKey);
                 JsonNode nextRoot = objectMapper.readTree(nextResponse);
 
-                parsePlacesFromNode(nextRoot, fetchedPlaces, city);
-                nextToken = nextRoot.path("next_page_token").asText(); // 다음 3페이지 토큰 갱신
+                parsePlacesFromNode(nextRoot, fetchedPlaces, city, isEmergency);
+                nextToken = nextRoot.path("next_page_token").asText();
                 pageCount++;
             }
 
@@ -208,7 +204,8 @@ public class GoogleMapsService {
     }
 
     // [수질 관리] 다단 필터링 적용
-    private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city) {
+    // isEmergency 파라미터 추가 및 완화 커트라인 로직(1.5점, 10개) 적용
+    private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city, boolean isEmergency) {
         if ("OK".equals(root.path("status").asText())) {
             JsonNode results = root.path("results");
             for (JsonNode node : results) {
@@ -216,30 +213,22 @@ public class GoogleMapsService {
                 int reviewCount = node.path("user_ratings_total").asInt(0);
                 String placeName = node.path("name").asText();
 
-                // 구글이 내려준 정식 주소 텍스트를 뽑아냅니다.
                 String address = node.path("formatted_address").asText();
                 if (address == null) continue;
 
-                // [필터 0]
-
                 String lowerAddr = address.toLowerCase();
-
-                // 1. 한국 주소 1순위로 쳐내기 (명백한 타국가 데이터 차단)
                 if (lowerAddr.contains("대한민국") || lowerAddr.contains("한국") ||
                         lowerAddr.contains("korea") || lowerAddr.contains("seoul") || lowerAddr.contains("서울")) {
-                    // System.out.println("[한국 식당 차단됨] " + placeName + " -> 주소: " + address);
                     continue;
                 }
 
-                // [필터 1] 일반적인 고품질 장소 (평점 4.0 이상 & 리뷰 300개 이상)
                 boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
-
-                // [필터 2] 호불호가 갈리지만 무조건 가봐야 하는 랜드마크
-                // (평점 3.6 이상 ~ 4.0 미만이더라도, 리뷰가 1,500개가 넘어가면 압도적 인지도로 판단)
                 boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 1500);
+                // 💡 [신규] 긴급 수집 모드일 경우: 평점 1.5 이상, 리뷰 10개 이상이면 무조건 통과!
+                boolean isEmergencyPass = isEmergency && (rating >= 1.5 && reviewCount >= 10);
 
-                // 둘 중 하나라도 만족하면 DB에 적재
-                if (isHighQuality || isSuperLandmark) {
+                // 셋 중 하나라도 만족하면 DB에 적재
+                if (isHighQuality || isSuperLandmark || isEmergencyPass) {
                     Place place = new Place();
                     place.setPlaceId(node.path("place_id").asText());
                     place.setName(placeName);
@@ -249,10 +238,6 @@ public class GoogleMapsService {
                     place.setCategory(determineCategoryFromTypes(node.path("types")));
 
                     fetchedPlaces.add(place);
-                } else {
-                    // 평점 3.5 이하이거나, 평점은 4.5인데 리뷰가 10개밖에 안 되는 '조작 의심/무명' 장소는 탈락
-                    // 필터에 걸리는 데이터 확인용, 주석 해제 후 데이터 확인합니다.
-                    // System.out.println("[필터 탈락] " + placeName + " (평점: " + rating + ", 리뷰: " + reviewCount + "개)");
                 }
             }
         }

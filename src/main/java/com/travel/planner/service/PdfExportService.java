@@ -35,11 +35,15 @@ public class PdfExportService {
             PdfDocument pdf = new PdfDocument(writer);
             Document document = new Document(pdf);
 
-            org.springframework.core.io.ClassPathResource fontResource = new org.springframework.core.io.ClassPathResource("fonts/NanumGothic.ttf");
-            byte[] fontBytes = fontResource.getInputStream().readAllBytes();
-            PdfFont koreanFont = PdfFontFactory.createFont(fontBytes, PdfEncodings.IDENTITY_H);
-
-            document.setFont(koreanFont);
+            // 프로젝트 내부 리소스(fonts/NanumGothic.ttf)만 사용
+            try {
+                org.springframework.core.io.ClassPathResource fontResource = new org.springframework.core.io.ClassPathResource("fonts/NanumGothic.ttf");
+                byte[] fontBytes = fontResource.getInputStream().readAllBytes();
+                PdfFont koreanFont = PdfFontFactory.createFont(fontBytes, PdfEncodings.IDENTITY_H);
+                document.setFont(koreanFont);
+            } catch (Exception e) {
+                System.err.println("한글 폰트 로드 실패: " + e.getMessage());
+            }
 
             // 2. 타이틀
             Text titleText = new Text(plan.getTitle() + " 일정표").simulateBold();

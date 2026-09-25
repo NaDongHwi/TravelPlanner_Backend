@@ -80,9 +80,7 @@ public class PlanController {
         // Step 3. 시간 총량(Time-Volume) 기반 장소 후보 수집 (Cold Start 방어)
         // ==============================================================================
         List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
-
         int physicalAvailableMinutes = planService.calculateTotalPhysicalMinutes(request, totalDays);
-
         int fixedScheduleMinutes = 0;
         if (request.getFixedSchedules() != null) {
             for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
@@ -92,34 +90,43 @@ public class PlanController {
         int minRequiredVolume = Math.max(0, physicalAvailableMinutes - fixedScheduleMinutes);
         int targetPoolVolume = (int) (minRequiredVolume * 1.5);
 
-        int currentDbVolume = allCityPlaces.stream()
-                .mapToInt(p -> planService.calculateDwellTime(p, request))
-                .sum();
+        // 최대 3회 반복하는 while문
+        int emergencyCallCount = 0;
 
-        System.out.println("현재 DB 확보 시간 볼륨: " + currentDbVolume + "분 / 필요 볼륨: " + targetPoolVolume + "분");
+        while (emergencyCallCount < 3) {
+            int currentDbVolume = allCityPlaces.stream()
+                    .mapToInt(p -> planService.calculateDwellTime(p, request))
+                    .sum();
 
-        if (currentDbVolume < targetPoolVolume && mainCity != null && !mainCity.equals("미정")) {
-            System.out.println("DB 시간 볼륨 부족 감지. 구글 API 긴급 수집 가동 (최대 3회 Safety Cap 적용)");
+            System.out.println("현재 DB 확보 시간: " + currentDbVolume + "분 / 필요 볼륨: " + targetPoolVolume + "분");
+
+            // 목표량을 채웠거나, 도시가 미정이면 루프 탈출
+            if (currentDbVolume >= targetPoolVolume || mainCity == null || mainCity.equals("미정")) {
+                break;
+            }
+
+            System.out.println("데이터 부족! 구글 API 긴급 수집 가동 (시도: " + (emergencyCallCount + 1) + "/3)");
             try {
                 String formalizedCity = googleMapsService.getFormalizedJapanCity(mainCity);
-                String searchKeyword = (request.getThemes() != null && !request.getThemes().isEmpty()) ? request.getThemes().get(0) : "유명 관광지";
+                // 매 시도마다 검색 키워드를 다르게 주어 다양한 장소 수집 유도
+                String[] fallbackKeywords = {"유명 관광지", "랜드마크", "인기 맛집"};
+                String searchKeyword = (request.getThemes() != null && !request.getThemes().isEmpty() && emergencyCallCount == 0)
+                        ? request.getThemes().get(0) : fallbackKeywords[emergencyCallCount % 3];
+
                 List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword, true);
-                java.util.Set<String> newlyAddedIds = new java.util.HashSet<>();
 
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
-                    if (newlyAddedIds.contains(p.getPlaceId())) continue;
-
                     p.setCity(mainCity);
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         Place savedPlace = placeRepository.save(p);
                         allCityPlaces.add(savedPlace);
-                        newlyAddedIds.add(savedPlace.getPlaceId());
                     }
                 }
             } catch (Exception e) {
                 System.out.println("긴급 수집 통신 에러: " + e.getMessage());
             }
+            emergencyCallCount++;
         }
 
         List<Place> openPlaces = planService.filterClosedPlaces(allCityPlaces, request.getStartDate());

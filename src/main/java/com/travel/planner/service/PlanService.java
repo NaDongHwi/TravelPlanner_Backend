@@ -26,7 +26,6 @@ public class PlanService {
         return totalMinutes;
     }
 
-    // 일차별 '실제 물리적 가용 시간' 개별 정밀 계산
     public int getDailyPhysicalMinutes(PlanRequest request, int day, int totalDays) {
         LocalTime inTime = parseInOutTime(request.getInTime(), true);
         LocalTime outTime = parseInOutTime(request.getOutTime(), false);
@@ -80,28 +79,49 @@ public class PlanService {
     public List<Place> applyWeightedScoring(List<Place> places, String weather, PlanRequest request) {
         boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈"));
         List<String> themes = request.getThemes() != null ? request.getThemes() : new ArrayList<>();
+        String inCity = request.getInCity() != null ? request.getInCity() : "";
 
         Map<Place, Integer> scoreMap = new HashMap<>();
 
+        // (선택) 기준점이 될 메인 도시 좌표 (시즈오카역 기준: 34.9717, 138.3886) - 없으면 첫 번째 장소 기준
+        double baseLat = places.isEmpty() ? 0 : places.get(0).getLatitude();
+        double baseLng = places.isEmpty() ? 0 : places.get(0).getLongitude();
+
         for (Place p : places) {
-            int score = 50;
+            int score = 50; // 기본 점수
+
+            // 1. 공항 예외 처리
+            if (p.getName().contains("공항") && !p.getName().contains(inCity)) {
+                boolean isExceptionalAirport =
+                        (inCity.contains("도쿄") && (p.getName().contains("나리타") || p.getName().contains("하네다"))) ||
+                                (inCity.contains("오사카") && p.getName().contains("간사이")) ||
+                                (inCity.contains("삿포로") && p.getName().contains("신치토세"));
+
+                if (!isExceptionalAirport) score -= 1000;
+            }
+
+            // 2. 테마 가중치 현실화 (+100점)
             if (p.getTheme() != null) {
                 for (String t : themes) {
-                    if (p.getTheme().contains(t)) score += 40;
+                    if (p.getTheme().contains(t)) score += 100;
                 }
             }
+
+            // 3. 부가 조건 가중치 상향
             if (isBadWeather) {
-                if ("실내".equals(p.getPlaceType())) score += 30;
-                else if ("실외".equals(p.getPlaceType())) score -= 30;
+                if ("실내".equals(p.getPlaceType())) score += 50;
+                else if ("실외".equals(p.getPlaceType())) score -= 50;
             }
             if ("가족".equals(request.getCompanion())) {
-                if ("관광지".equals(p.getCategory())) score += 20;
+                if ("관광지".equals(p.getCategory())) score += 40;
                 if (p.getTheme() != null && p.getTheme().contains("액티비티")) score -= 50;
             }
+
             scoreMap.put(p, score);
         }
 
         return places.stream()
+                .filter(p -> scoreMap.get(p) > 0)
                 .sorted((p1, p2) -> scoreMap.get(p2).compareTo(scoreMap.get(p1)))
                 .collect(Collectors.toList());
     }
@@ -116,7 +136,7 @@ public class PlanService {
         int foodCount = 0, tourCount = 0, shoppingCount = 0;
 
         boolean isFoodLover = request.getThemes() != null && request.getThemes().stream().anyMatch(t -> t.contains("맛집") || t.contains("식도락"));
-        int maxFoodLimit = isFoodLover ? totalDays * 4 : totalDays * 2;
+        int maxFoodLimit = isFoodLover ? totalDays * 3 : totalDays * 2;
 
         for (Place p : scoredPlaces) {
             if ("식음".equals(p.getCategory()) && foodCount >= maxFoodLimit) continue;
@@ -138,6 +158,7 @@ public class PlanService {
         return selected;
     }
 
+    // 2-opt 로직
     public List<List<Place>> calculateTspWithTimeWindows(List<Place> selectedCandidates, int totalDays, List<PlanRequest.AccommodationInput> accs, boolean forceDummyNode, PlanRequest request) {
         Map<Integer, List<Place>> clusters = clusterPlacesGeographically(selectedCandidates, totalDays, forceDummyNode, request);
         List<List<Place>> dailyRoutes = new ArrayList<>();
@@ -230,6 +251,7 @@ public class PlanService {
         Place prevPlace = null;
         int currentBudgetUsed = 0;
         int maxBudget = Integer.MAX_VALUE;
+        int dailyFoodCount = 0; // 일일 식사 횟수 트래커
 
         for (Place p : draftRoute) {
             int transitMinutes = 0;
@@ -241,9 +263,14 @@ public class PlanService {
                 transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
                 transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2);
             }
-            currentTime = currentTime.plusMinutes(transitMinutes);
+            LocalTime arrivalTime = currentTime.plusMinutes(transitMinutes);
 
-            // 에러 폭발(Exception) 대신 쿨하게 스킵(Continue)하여 유연성 확보
+            // 자정 오버플로우 방어 로직 (도착 시간이 현재 시간보다 과거로 돌아가면 자정 넘은 것)
+            if (arrivalTime.isBefore(currentTime) || arrivalTime.isAfter(dayEndTime)) {
+                continue;
+            }
+            currentTime = arrivalTime;
+
             if (request.getFixedSchedules() != null) {
                 boolean hasConflict = false;
                 for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
@@ -252,12 +279,24 @@ public class PlanService {
                         break;
                     }
                 }
-                if (hasConflict) continue; // 고정일정과 겹치면 이 장소는 스킵
+                if (hasConflict) continue;
+            }
+
+            // 연속 식음 방어: 하루 최대 2끼 및 연속 식음 금지
+            if ("식음".equals(p.getCategory())) {
+                if (dailyFoodCount >= 2) continue;
+                if (prevPlace != null && "식음".equals(prevPlace.getCategory())) continue;
+            }
+
+            // 술집, 오뎅, 야경은 17시 이전 방문 금지 (Time-of-day 필터링)
+            boolean isNightSpot = p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경"));
+            if (isNightSpot && currentTime.isBefore(LocalTime.of(17, 0))) {
+                continue;
             }
 
             LocalTime closeTime = parseCloseTime(p.getOpeningHours());
             if (currentTime.isAfter(closeTime)) {
-                continue; // 영업 마감 시 에러 내지 않고 스킵
+                continue;
             }
 
             int dwellTime = calculateDwellTime(p, request);
@@ -266,13 +305,17 @@ public class PlanService {
 
             currentBudgetUsed += estimatedCost;
             if (currentBudgetUsed > maxBudget) {
-                continue; // 예산 초과 시 에러 내지 않고 스킵
+                continue;
             }
 
             LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
-            if (finishTime.isAfter(dayEndTime)) {
-                continue; // 하루 여행 한계 시간 초과 시 에러 내지 않고 스킵
+
+            // 종료 시간 자정 오버플로우 한 번 더 방어
+            if (finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
+                continue;
             }
+
+            if ("식음".equals(p.getCategory())) dailyFoodCount++;
 
             validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
             currentTime = finishTime;
@@ -322,7 +365,6 @@ public class PlanService {
         } else {
             int currentDay = 0;
             int currentDayTime = 0;
-            // 1/N 평균치가 아닌 해당 일차의 '실제 물리적 가용 시간'을 실시간 갱신하여 할당
             int dailyMaxMinutes = getDailyPhysicalMinutes(request, currentDay + 1, kDays);
 
             for (Place p : sortedPlaces) {
@@ -331,7 +373,7 @@ public class PlanService {
                 if (currentDayTime + costTime > dailyMaxMinutes && currentDay < kDays - 1) {
                     currentDay++;
                     currentDayTime = 0;
-                    dailyMaxMinutes = getDailyPhysicalMinutes(request, currentDay + 1, kDays); // 다음 날 용량 갱신
+                    dailyMaxMinutes = getDailyPhysicalMinutes(request, currentDay + 1, kDays);
                 }
                 clusters.get(currentDay).add(p);
                 currentDayTime += costTime;

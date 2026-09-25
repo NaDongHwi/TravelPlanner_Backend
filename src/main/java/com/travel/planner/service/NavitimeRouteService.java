@@ -22,7 +22,7 @@ import java.util.Set;
 @Service
 public class NavitimeRouteService {
 
-    @Value("${navitime.api.key}")
+    @Value("${navitime.api-key}")
     private String navitimeApiKey;
 
     // 프로젝트 환경에 맞춰 빈(Bean) 주입 대신 직접 생성 방식으로 변경하여 오류 방지

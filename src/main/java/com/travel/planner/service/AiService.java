@@ -31,21 +31,20 @@ public class AiService {
     @Value("${ai.openai.api-key:}")
     private String openAiApiKey;
 
-    @Value("${ai.openai.model:gpt-5.6-terra}")
+    @Value("${ai.openai.model:gpt-3.5-turbo}") // GPT 기본 모델 지정
     private String openAiModel;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LogRepository logRepository;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     // ============================================================================
-    // 알고리즘 기반 확정 동선 -> 스토리텔링 가이드 포맷팅 도구
+    // 1. 알고리즘 기반 확정 동선 -> 스토리텔링 가이드 포맷팅 도구 (유지)
     // ============================================================================
     public AiRouteResponse generateStorytellingForValidatedRoute(
             List<PlanService.SimulatedItinerary> verifiedItineraries, String lang, int totalDays) {
 
         String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
-
-        // 백엔드 알고리즘이 완벽하게 짠 일정표를 텍스트로 변환하여 AI에게 주입
         StringBuilder rigidTimeline = new StringBuilder();
         int currentDay = 1;
         int count = 0;
@@ -74,58 +73,161 @@ public class AiService {
                 "  \"reason\": \"자체 알고리즘 동선에 대한 총평 1줄\"\n" +
                 "}";
 
-        Map<String, Object> requestBody = new HashMap<>();
-        Map<String, Object> contents = new HashMap<>();
-        Map<String, Object> parts = new HashMap<>();
-        parts.put("text", prompt);
-        contents.put("parts", Collections.singletonList(parts));
-        requestBody.put("contents", Collections.singletonList(contents));
-
+        Map<String, Object> requestBody = buildGeminiRequest(prompt);
         String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         int maxRetries = 3;
         int retryCount = 0;
 
         while (retryCount < maxRetries) {
             try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
                 ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody());
+                return parseGeminiResponse(response.getBody(), AiRouteResponse.class);
             } catch (Exception e) {
                 retryCount++;
-                System.out.println("Gemini 스토리텔링 호출 에러 (" + retryCount + "/3): " + e.getMessage());
-
-                Log errorLog = new Log();
-                errorLog.setErrorType("AI_GEMINI_FAIL_" + retryCount);
-                errorLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "Gemini 호출 에러");
-                logRepository.save(errorLog);
+                saveErrorLog("AI_GEMINI_STORYTELLING_FAIL_" + retryCount, e.getMessage());
 
                 if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 최종 실패! [OpenAI] 백업 모델 전환");
-                    return callFallbackOpenAiForStorytelling(prompt); // Failover!
+                    System.out.println("Gemini 스토리텔링 최종 실패! [OpenAI] 백업 모델 전환");
+                    AiRouteResponse fallbackResponse = callFallbackOpenAi(prompt, AiRouteResponse.class);
+                    return fallbackResponse != null ? fallbackResponse : createEmergencyFallbackResponse(verifiedItineraries, totalDays);
                 }
-
                 try { Thread.sleep(1000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             }
         }
         return createEmergencyFallbackResponse(verifiedItineraries, totalDays);
     }
 
-    private AiRouteResponse parseGeminiResponse(String responseBody) throws Exception {
+    // ============================================================================
+    // 2. 관리자용 오프라인 전처리 (리뷰 기반 테마 분류)
+    // ============================================================================
+    public Map<String, String> classifyPlaceAttributesBulk(List<Place> places, Map<String, String> reviewsMap) {
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 장소들의 이름과 구글 리뷰를 분석해서, 테마와 장소 속성을 한 번에 분류해.\n\n");
+        promptBuilder.append("【 분류 절대 규칙 】\n");
+        promptBuilder.append("1. 테마: 반드시 [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 이 12개 단어 안에서만 1~3개를 선택해. 절대 다른 단어를 창조하지 마!\n");
+        promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 무조건 [실내] 또는 [실외] 중 하나만 고정해서 적어.\n");
+        promptBuilder.append("3. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내\", \"ChIJ5678\": \"온천,힐링|실외\"}\n\n[분류 대상 목록]\n");
+
+        for (Place p : places) {
+            String reviews = reviewsMap.get(p.getPlaceId());
+            promptBuilder.append("- ID: ").append(p.getPlaceId())
+                    .append(" / 이름: ").append(p.getName())
+                    .append(" / 리뷰: ").append(reviews != null ? reviews : "리뷰 없음").append("\n");
+        }
+
+        String prompt = promptBuilder.toString();
+        Map<String, Object> requestBody = buildGeminiRequest(prompt);
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+
+        int maxRetries = 3;
+        int retryCount = 0;
+
+        while (retryCount < maxRetries) {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
+            } catch (Exception e) {
+                retryCount++;
+                saveErrorLog("AI_ENRICHMENT_FAIL_" + retryCount, e.getMessage());
+
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 전처리(테마) 최종 실패! [OpenAI] 백업 모델 전환");
+                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
+                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
+                }
+                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        }
+        return new HashMap<>();
+    }
+
+    // ============================================================================
+    // 3. 관리자용 오프라인 전처리 (5대 카테고리 정제)
+    // ============================================================================
+    public Map<String, String> cleansePlaceCategories(List<Place> places) {
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("너는 여행 데이터 분류 전문가야. 다음 주어진 일본 장소들의 이름(한국/일어/영어 혼재)을 보고, ");
+        promptBuilder.append("해당 장소가 다음 5가지 카테고리 중 어디에 속하는지 추론해: [관광지, 식음, 쇼핑, 숙소, 교통].\n");
+        promptBuilder.append("결과는 반드시 장소 ID를 키(key)로, 카테고리를 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"교통\", \"ChIJ5678\": \"식음\", \"ChIJ9012\": \"숙소\"}\n\n[분류 대상 목록]\n");
+
+        for (Place p : places) {
+            promptBuilder.append("- ID: ").append(p.getPlaceId()).append(" / 이름: ").append(p.getName()).append("\n");
+        }
+
+        String prompt = promptBuilder.toString();
+        Map<String, Object> requestBody = buildGeminiRequest(prompt);
+        String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
+
+        int maxRetries = 3;
+        int retryCount = 0;
+
+        while (retryCount < maxRetries) {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
+            } catch (Exception e) {
+                retryCount++;
+                saveErrorLog("AI_CLEANSING_FAIL_" + retryCount, e.getMessage());
+
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 정제(카테고리) 최종 실패! [OpenAI] 백업 모델 전환");
+                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
+                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
+                }
+                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        }
+        return new HashMap<>();
+    }
+
+    // ============================================================================
+    // 유틸리티 메서드 (제미나이 파싱, 오픈AI 호출, 에러 로그)
+    // ============================================================================
+    private Map<String, Object> buildGeminiRequest(String prompt) {
+        Map<String, Object> requestBody = new HashMap<>();
+        Map<String, Object> contents = new HashMap<>();
+        Map<String, Object> parts = new HashMap<>();
+        parts.put("text", prompt);
+        contents.put("parts", Collections.singletonList(parts));
+        requestBody.put("contents", Collections.singletonList(contents));
+        return requestBody;
+    }
+
+    // Class 타입(객체) 파싱
+    private <T> T parseGeminiResponse(String responseBody, Class<T> valueType) throws Exception {
         JsonNode rootNode = objectMapper.readTree(responseBody);
         String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
         aiText = aiText.replace("```json", "").replace("```", "").trim();
-        return objectMapper.readValue(aiText, AiRouteResponse.class);
+        return objectMapper.readValue(aiText, valueType);
     }
 
-    private AiRouteResponse callFallbackOpenAiForStorytelling(String prompt) {
-        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
-            return new AiRouteResponse(); // 키 없으면 빈 껍데기 반환 처리
-        }
+    // TypeReference 타입(Map, List 등 제네릭) 파싱
+    private <T> T parseGeminiResponse(String responseBody, TypeReference<T> valueTypeRef) throws Exception {
+        JsonNode rootNode = objectMapper.readTree(responseBody);
+        String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+        aiText = aiText.replace("```json", "").replace("```", "").trim();
+        return objectMapper.readValue(aiText, valueTypeRef);
+    }
+
+    // 모든 API에서 공통으로 사용할 수 있는 범용 GPT 백업 호출 메서드
+    private <T> T callFallbackOpenAi(String prompt, Object typeOrClass) {
+        if (openAiApiKey == null || openAiApiKey.isEmpty()) return null;
+
         try {
             String gptUrl = "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)";
             Map<String, Object> requestBody = new HashMap<>();
@@ -145,26 +247,26 @@ public class AiService {
             headers.setBearerAuth(openAiApiKey);
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-            RestTemplate restTemplate = new RestTemplate();
-
             ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
+
             JsonNode rootNode = objectMapper.readTree(response.getBody());
             String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
 
-            return objectMapper.readValue(gptText, AiRouteResponse.class);
+            if (typeOrClass instanceof Class) {
+                return (T) objectMapper.readValue(gptText, (Class<?>) typeOrClass);
+            } else if (typeOrClass instanceof TypeReference) {
+                return (T) objectMapper.readValue(gptText, (TypeReference<?>) typeOrClass);
+            }
         } catch (Exception e) {
-            Log fatalLog = new Log();
-            fatalLog.setErrorType("AI_FATAL_GPT_FAIL");
-            fatalLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "GPT 에러");
-            logRepository.save(fatalLog);
-            return new AiRouteResponse();
+            saveErrorLog("AI_FATAL_GPT_FAIL", e.getMessage());
         }
+        return null;
     }
 
     private AiRouteResponse createEmergencyFallbackResponse(List<PlanService.SimulatedItinerary> routes, int totalDays) {
+        // 기존 뼈대 유지
         AiRouteResponse failoverResponse = new AiRouteResponse();
         List<AiRouteResponse.TimelineItem> fallbackTimeline = new ArrayList<>();
-
         int currentDay = 1;
         int count = 0;
         int placesPerDay = routes.size() / totalDays;
@@ -188,96 +290,12 @@ public class AiService {
         return failoverResponse;
     }
 
-    // ============================================================================
-    // 관리자용 오프라인 전처리 (리뷰 기반 테마 분류)
-    // ============================================================================
-    public Map<String, String> classifyPlaceAttributesBulk(List<Place> places, Map<String, String> reviewsMap) {
-        StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 여러 장소들의 이름과 구글 리뷰를 정밀하게 분석해서, 각각의 테마와 장소 속성을 한 번에 분류해.\n\n");
-        promptBuilder.append("【 분류 절대 규칙 】\n");
-        promptBuilder.append("1. 테마: [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 중 가장 적합한 1~3개를 선택.\n");
-        promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 [실내] 또는 [실외] 중 무조건 하나만 강제로 선택해!\n");
-        promptBuilder.append("3. 결과는 반드시 아래 예시처럼 장소 ID를 키(key)로, '테마1,테마2|장소속성' 문자열을 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
-        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내\", \"ChIJ5678\": \"자연,힐링|실외\"}\n\n[분류 대상 목록]\n");
-
-        for (Place p : places) {
-            String reviews = reviewsMap.get(p.getPlaceId());
-            promptBuilder.append("- ID: ").append(p.getPlaceId())
-                    .append(" / 이름: ").append(p.getName())
-                    .append(" / 리뷰: ").append(reviews != null ? reviews : "리뷰 없음").append("\n");
-        }
-
-        Map<String, Object> requestBody = new HashMap<>();
-        Map<String, Object> contents = new HashMap<>();
-        Map<String, Object> parts = new HashMap<>();
-        parts.put("text", promptBuilder.toString());
-        contents.put("parts", Collections.singletonList(parts));
-        requestBody.put("contents", Collections.singletonList(contents));
-
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
-
+    private void saveErrorLog(String errorType, String message) {
         try {
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-            textResponse = textResponse.replace("```json", "").replace("```", "").trim();
-            return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
-        } catch (Exception e) {
-            System.out.println("AI 테마 일괄 분류 실패: " + e.getMessage());
-            Log enrichmentLog = new Log();
-            enrichmentLog.setErrorType("AI_ENRICHMENT_BULK_FAIL");
-            enrichmentLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "테마 분류 AI 에러");
-            logRepository.save(enrichmentLog);
-            return new HashMap<>();
-        }
-    }
-
-    // ============================================================================
-    // 관리자용 오프라인 전처리 (5대 카테고리 정제)
-    // ============================================================================
-    public Map<String, String> cleansePlaceCategories(List<Place> places) {
-        StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("너는 여행 데이터 분류 전문가야. 다음 주어진 일본 장소들의 이름(한국어/일본어/영어 혼재)을 보고, ");
-        promptBuilder.append("해당 장소가 다음 5가지 카테고리 중 어디에 속하는지 추론해: [관광지, 식음, 쇼핑, 숙소, 교통].\n");
-        promptBuilder.append("결과는 반드시 아래 예시처럼 장소 ID를 키(key)로, 카테고리를 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
-        promptBuilder.append("예시: {\"ChIJ1234\": \"교통\", \"ChIJ5678\": \"식음\", \"ChIJ9012\": \"숙소\"}\n\n[분류 대상 목록]\n");
-
-        for (Place p : places) {
-            promptBuilder.append("- ID: ").append(p.getPlaceId()).append(" / 이름: ").append(p.getName()).append("\n");
-        }
-
-        Map<String, Object> requestBody = new HashMap<>();
-        Map<String, Object> contents = new HashMap<>();
-        Map<String, Object> parts = new HashMap<>();
-        parts.put("text", promptBuilder.toString());
-        contents.put("parts", Collections.singletonList(parts));
-        requestBody.put("contents", Collections.singletonList(contents));
-
-        String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-        RestTemplate restTemplate = new RestTemplate();
-
-        try {
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String textResponse = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-            textResponse = textResponse.replace("```json", "").replace("```", "").trim();
-            return objectMapper.readValue(textResponse, new TypeReference<Map<String, String>>(){});
-        } catch (Exception e) {
-            System.out.println("AI 카테고리 클렌징 실패: " + e.getMessage());
-            Log cleansingLog = new Log();
-            cleansingLog.setErrorType("AI_CLEANSING_FAIL");
-            cleansingLog.setErrorMessage(e.getMessage() != null ? e.getMessage() : "카테고리 정제 AI 에러");
-            logRepository.save(cleansingLog);
-            return new HashMap<>();
-        }
+            Log errorLog = new Log();
+            errorLog.setErrorType(errorType);
+            errorLog.setErrorMessage(message != null ? message : "Unknown Error");
+            logRepository.save(errorLog);
+        } catch (Exception ignore) {}
     }
 }

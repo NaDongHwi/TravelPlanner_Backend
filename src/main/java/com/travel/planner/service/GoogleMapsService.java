@@ -222,12 +222,16 @@ public class GoogleMapsService {
                     continue;
                 }
 
+                // 주소에 검색한 '도시(city)' 이름이 없으면 버림
+                if (!address.contains(city)) {
+                    System.out.println("[타 지역 침범 차단] " + placeName + " (" + address + ") -> " + city + " 지역이 아니므로 스킵합니다.");
+                    continue;
+                }
+
                 boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
                 boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 1500);
-                // 💡 [신규] 긴급 수집 모드일 경우: 평점 1.5 이상, 리뷰 10개 이상이면 무조건 통과!
                 boolean isEmergencyPass = isEmergency && (rating >= 1.5 && reviewCount >= 10);
 
-                // 셋 중 하나라도 만족하면 DB에 적재
                 if (isHighQuality || isSuperLandmark || isEmergencyPass) {
                     Place place = new Place();
                     place.setPlaceId(node.path("place_id").asText());

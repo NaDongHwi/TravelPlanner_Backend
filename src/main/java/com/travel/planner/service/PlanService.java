@@ -86,16 +86,27 @@ public class PlanService {
         double baseLat = places.isEmpty() ? 0 : places.get(0).getLatitude();
         double baseLng = places.isEmpty() ? 0 : places.get(0).getLongitude();
 
+        if (request.getAccommodations() != null && !request.getAccommodations().isEmpty() && request.getAccommodations().get(0).getCheckIn() != null) {
+            // 프론트에서 넘어온 숙소 객체가 있다면 처리 (생략)
+        } else {
+            for (Place p : places) {
+                if (p.getName().contains("역") || p.getName().contains("Station")) {
+                    baseLat = p.getLatitude();
+                    baseLng = p.getLongitude();
+                    break;
+                }
+            }
+        }
+
         for (Place p : places) {
             int score = 50;
 
-            // 무조건 공항이면 검사하도록 분리
             if (p.getName().contains("공항")) {
                 boolean isExceptionalAirport =
                         (inCity.contains("도쿄") && (p.getName().contains("나리타") || p.getName().contains("하네다"))) ||
                                 (inCity.contains("오사카") && p.getName().contains("간사이")) ||
                                 (inCity.contains("삿포로") && p.getName().contains("신치토세")) ||
-                                p.getName().contains(inCity); // "시즈오카 공항" 정상 통과!
+                                p.getName().contains(inCity);
 
                 if (isExceptionalAirport) score += 5000;
                 else score -= 1000;
@@ -117,9 +128,12 @@ public class PlanService {
             }
 
             if (baseLat != 0 && baseLng != 0 && !p.getName().contains("공항")) {
-                double dist = DistanceUtil.calculateDistance(baseLat, baseLng, p.getLatitude(), p.getLongitude());
-                score -= (int)(dist);
+                double distKm = DistanceUtil.calculateDistance(baseLat, baseLng, p.getLatitude(), p.getLongitude());
+                if (distKm > 10.0) {
+                    score -= (int)((distKm - 10) * 5);
+                }
             }
+
             scoreMap.put(p, score);
         }
 
@@ -136,12 +150,18 @@ public class PlanService {
         int accumulatedCost = 0;
 
         List<Place> selected = new ArrayList<>();
-        int foodCount = 0, tourCount = 0, shoppingCount = 0;
-
+        int foodCount = 0;
         boolean isFoodLover = request.getThemes() != null && request.getThemes().stream().anyMatch(t -> t.contains("맛집") || t.contains("식도락"));
         int maxFoodLimit = isFoodLover ? totalDays * 3 : totalDays * 2;
 
         for (Place p : scoredPlaces) {
+            if (p.getName().contains("공항")) {
+                selected.add(p);
+            }
+        }
+
+        for (Place p : scoredPlaces) {
+            if (p.getName().contains("공항")) continue;
             if ("식음".equals(p.getCategory()) && foodCount >= maxFoodLimit) continue;
 
             int estimatedDwellTime = calculateDwellTime(p, request);
@@ -154,17 +174,12 @@ public class PlanService {
                 accumulatedCost += estimatedCost;
 
                 if ("식음".equals(p.getCategory())) foodCount++;
-                else if ("쇼핑".equals(p.getCategory())) shoppingCount++;
-                else if ("관광지".equals(p.getCategory())) tourCount++;
             }
         }
         return selected;
     }
 
-    // 2-opt 로직
     public List<List<Place>> calculateTspWithTimeWindows(List<Place> selectedCandidates, int totalDays, List<PlanRequest.AccommodationInput> accs, boolean forceDummyNode, PlanRequest request) {
-
-        // 공항이 3~4일차로 끌려가지 않도록 군집화 전에 아예 분리해서 빼둡니다.
         Place airport = selectedCandidates.stream()
                 .filter(p -> p.getName().contains("공항"))
                 .findFirst().orElse(null);
@@ -241,7 +256,6 @@ public class PlanService {
                 }
             }
 
-            // TSP 정렬이 모두 끝난 후, 1일 차 맨 앞과 마지막 날 맨 뒤에 공항을 강제로 꽂아 넣습니다.
             if (airport != null) {
                 if (i == 0) {
                     route.add(0, airport);
@@ -276,15 +290,12 @@ public class PlanService {
         int dailyFoodCount = 0;
 
         for (Place p : draftRoute) {
-            // 공항 타임라인 정교화
             if (p.getName().contains("공항")) {
                 if (dayNumber == 1) {
-                    // 입국일: 공항에서 출발하므로 체류시간 없이 타임라인 기록 후 기준점으로 지정
                     validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
                     prevPlace = p;
                     continue;
                 } else if (dayNumber == totalDays) {
-                    // 출국일: 마지막 장소에서 공항까지 가는 이동 시간을 차감한 후 도착 시간을 기록
                     int transitMinutes = 0;
                     if (prevPlace != null) {
                         double distKm = DistanceUtil.calculateDistance(
@@ -296,7 +307,7 @@ public class PlanService {
                     }
                     currentTime = currentTime.plusMinutes(transitMinutes);
                     validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
-                    continue; // 여행 종료이므로 다음 장소 계산 생략
+                    continue;
                 }
             }
 
@@ -337,23 +348,22 @@ public class PlanService {
                 continue;
             }
 
+            // 문자열에서 오픈 시간과 마감 시간을 모두 추출
+            LocalTime openTime = parseOpenTime(p.getOpeningHours());
             LocalTime closeTime = parseCloseTime(p.getOpeningHours());
-            if (currentTime.isAfter(closeTime)) {
-                continue;
-            }
 
             int dwellTime = calculateDwellTime(p, request);
             int bufferTime = calculateBufferTime(request);
             int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
+            LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
 
-            currentBudgetUsed += estimatedCost;
-            if (currentBudgetUsed > maxBudget) {
+            // 도착 시간이 오픈 전이거나, 일정을 끝내고 나올 시간이 마감 시간 이후면 스킵
+            if (currentTime.isBefore(openTime) || finishTime.isAfter(closeTime) || finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
                 continue;
             }
 
-            LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
-
-            if (finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
+            currentBudgetUsed += estimatedCost;
+            if (currentBudgetUsed > maxBudget) {
                 continue;
             }
 
@@ -378,6 +388,50 @@ public class PlanService {
         result.setSuccess(true);
         result.setValidRoute(validRoute);
         return result;
+    }
+
+    // ============================================================================
+    // 문자열 분해 및 오픈/마감 시간 추출 유틸리티
+    // ============================================================================
+
+    private LocalTime parseOpenTime(String hours) {
+        if (hours == null || hours.contains("없음") || hours.contains("24시간")) return LocalTime.of(0, 0);
+        try {
+            // 예: "월요일: 오전 11:00 ~ 오후 5:00 | 화요일: ..." -> 첫 번째 요일 블록 추출
+            String firstDay = hours.split("\\|")[0];
+            String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
+            String openStr = timeRange.split("~|-")[0].trim(); // "오전 11:00" 분리
+
+            return extractTime(openStr);
+        } catch (Exception e) {}
+        return LocalTime.of(0, 0); // 파싱 실패 시 상시 오픈으로 간주
+    }
+
+    private LocalTime parseCloseTime(String hours) {
+        if (hours == null || hours.contains("없음") || hours.contains("24시간")) return LocalTime.of(23, 59);
+        try {
+            String firstDay = hours.split("\\|")[0];
+            String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
+            String closeStr = timeRange.split("~|-")[1].trim(); // "오후 5:00" 분리
+
+            return extractTime(closeStr);
+        } catch (Exception e) {}
+        return LocalTime.of(23, 59); // 파싱 실패 시 밤 23:59 마감으로 간주
+    }
+
+    private LocalTime extractTime(String timeStr) {
+        boolean isPM = timeStr.contains("오후") || timeStr.toUpperCase().contains("PM");
+        String timePart = timeStr.replaceAll("[^0-9:]", "").trim();
+        if (timePart.isEmpty()) return LocalTime.of(0, 0);
+
+        String[] t = timePart.split(":");
+        int hour = Integer.parseInt(t[0]);
+        int minute = t.length > 1 ? Integer.parseInt(t[1]) : 0;
+
+        if (isPM && hour < 12) hour += 12;
+        if (!isPM && hour == 12) hour = 0;
+
+        return LocalTime.of(hour, minute);
     }
 
     private Map<Integer, List<Place>> clusterPlacesGeographically(List<Place> places, int kDays, boolean forceDummyNode, PlanRequest request) {
@@ -435,27 +489,20 @@ public class PlanService {
 
     public int calculateDwellTime(Place p, PlanRequest request) {
         int time = 90;
-        if ("쇼핑".equals(p.getCategory())) time = 120;
-        else if ("테마파크".equals(p.getCategory()) || p.getName().contains("유니버셜") || p.getName().contains("디즈니")) time = 480;
-        else if ("식음".equals(p.getCategory())) time = 60;
-        else if ("자유시간".equals(p.getCategory())) return 120;
+
+        if (p.getRecommendedDuration() != null && p.getRecommendedDuration() > 0) {
+            time = p.getRecommendedDuration();
+        } else {
+            if ("쇼핑".equals(p.getCategory())) time = 120;
+            else if ("테마파크".equals(p.getCategory()) || p.getName().contains("유니버셜") || p.getName().contains("디즈니")) time = 480;
+            else if ("식음".equals(p.getCategory())) time = 60;
+            else if ("자유시간".equals(p.getCategory())) return 120;
+        }
 
         if ("가족".equals(request.getCompanion()) || (request.getThemes() != null && request.getThemes().contains("힐링"))) {
             time = (int)(time * 1.2);
         }
         return time;
-    }
-
-    private LocalTime parseCloseTime(String hours) {
-        if (hours == null || hours.contains("없음")) return LocalTime.of(22, 0);
-        try {
-            String[] parts = hours.split("-");
-            if (parts.length == 2) {
-                String[] t = parts[1].trim().split(":");
-                return LocalTime.of(Integer.parseInt(t[0]), Integer.parseInt(t[1]));
-            }
-        } catch (Exception e) {}
-        return LocalTime.of(22, 0);
     }
 
     @Getter

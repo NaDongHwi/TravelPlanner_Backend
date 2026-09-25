@@ -208,6 +208,14 @@ public class GoogleMapsService {
     private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city, boolean isEmergency) {
         if ("OK".equals(root.path("status").asText())) {
             JsonNode results = root.path("results");
+
+            // 구글 주소의 우편번호 트랩 회피 로직
+            // 넘어온 정식 주소(예: "일본 도쿄도")에서 "일본" 글자를 떼어내고 핵심 행정구역명("도쿄도")만 추출
+            String coreCityName = city.replace("일본", "").replaceAll("〒[0-9]{3}-[0-9]{4}", "").trim();
+            if (coreCityName.contains(" ")) {
+                coreCityName = coreCityName.split(" ")[0]; // 혹시 띄어쓰기가 있으면 맨 앞(도쿄도)만 추출
+            }
+
             for (JsonNode node : results) {
                 double rating = node.path("rating").asDouble(0.0);
                 int reviewCount = node.path("user_ratings_total").asInt(0);
@@ -222,14 +230,14 @@ public class GoogleMapsService {
                     continue;
                 }
 
-                // 주소에 검색한 '도시(city)' 이름이 없으면 버림
-                if (!address.contains(city)) {
-                    System.out.println("[타 지역 침범 차단] " + placeName + " (" + address + ") -> " + city + " 지역이 아니므로 스킵합니다.");
+                // "도쿄도" 포함 여부 검사
+                if (!address.contains(coreCityName)) {
                     continue;
                 }
 
                 boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
                 boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 1500);
+                // 긴급 수집 모드일 경우: 평점 1.5 이상, 리뷰 10개 이상이면 무조건 통과
                 boolean isEmergencyPass = isEmergency && (rating >= 1.5 && reviewCount >= 10);
 
                 if (isHighQuality || isSuperLandmark || isEmergencyPass) {

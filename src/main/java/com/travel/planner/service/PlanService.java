@@ -83,31 +83,30 @@ public class PlanService {
 
         Map<Place, Integer> scoreMap = new HashMap<>();
 
-        // (선택) 기준점이 될 메인 도시 좌표 (시즈오카역 기준: 34.9717, 138.3886) - 없으면 첫 번째 장소 기준
         double baseLat = places.isEmpty() ? 0 : places.get(0).getLatitude();
         double baseLng = places.isEmpty() ? 0 : places.get(0).getLongitude();
 
         for (Place p : places) {
-            int score = 50; // 기본 점수
+            int score = 50;
 
-            // 1. 공항 예외 처리
-            if (p.getName().contains("공항") && !p.getName().contains(inCity)) {
+            // 무조건 공항이면 검사하도록 분리
+            if (p.getName().contains("공항")) {
                 boolean isExceptionalAirport =
                         (inCity.contains("도쿄") && (p.getName().contains("나리타") || p.getName().contains("하네다"))) ||
                                 (inCity.contains("오사카") && p.getName().contains("간사이")) ||
-                                (inCity.contains("삿포로") && p.getName().contains("신치토세"));
+                                (inCity.contains("삿포로") && p.getName().contains("신치토세")) ||
+                                p.getName().contains(inCity); // "시즈오카 공항" 정상 통과!
 
-                if (!isExceptionalAirport) score -= 1000;
+                if (isExceptionalAirport) score += 5000;
+                else score -= 1000;
             }
 
-            // 2. 테마 가중치 현실화 (+100점)
             if (p.getTheme() != null) {
                 for (String t : themes) {
-                    if (p.getTheme().contains(t)) score += 100;
+                    if (p.getTheme().contains(t)) score += 60;
                 }
             }
 
-            // 3. 부가 조건 가중치 상향
             if (isBadWeather) {
                 if ("실내".equals(p.getPlaceType())) score += 50;
                 else if ("실외".equals(p.getPlaceType())) score -= 50;
@@ -117,6 +116,10 @@ public class PlanService {
                 if (p.getTheme() != null && p.getTheme().contains("액티비티")) score -= 50;
             }
 
+            if (baseLat != 0 && baseLng != 0 && !p.getName().contains("공항")) {
+                double dist = DistanceUtil.calculateDistance(baseLat, baseLng, p.getLatitude(), p.getLongitude());
+                score -= (int)(dist);
+            }
             scoreMap.put(p, score);
         }
 
@@ -160,6 +163,15 @@ public class PlanService {
 
     // 2-opt 로직
     public List<List<Place>> calculateTspWithTimeWindows(List<Place> selectedCandidates, int totalDays, List<PlanRequest.AccommodationInput> accs, boolean forceDummyNode, PlanRequest request) {
+
+        // 공항이 3~4일차로 끌려가지 않도록 군집화 전에 아예 분리해서 빼둡니다.
+        Place airport = selectedCandidates.stream()
+                .filter(p -> p.getName().contains("공항"))
+                .findFirst().orElse(null);
+        if (airport != null) {
+            selectedCandidates.remove(airport);
+        }
+
         Map<Integer, List<Place>> clusters = clusterPlacesGeographically(selectedCandidates, totalDays, forceDummyNode, request);
         List<List<Place>> dailyRoutes = new ArrayList<>();
 
@@ -228,6 +240,16 @@ public class PlanService {
                     }
                 }
             }
+
+            // TSP 정렬이 모두 끝난 후, 1일 차 맨 앞과 마지막 날 맨 뒤에 공항을 강제로 꽂아 넣습니다.
+            if (airport != null) {
+                if (i == 0) {
+                    route.add(0, airport);
+                } else if (i == totalDays - 1) {
+                    route.add(airport);
+                }
+            }
+
             dailyRoutes.add(route);
         }
         return dailyRoutes;
@@ -251,9 +273,33 @@ public class PlanService {
         Place prevPlace = null;
         int currentBudgetUsed = 0;
         int maxBudget = Integer.MAX_VALUE;
-        int dailyFoodCount = 0; // 일일 식사 횟수 트래커
+        int dailyFoodCount = 0;
 
         for (Place p : draftRoute) {
+            // 공항 타임라인 정교화
+            if (p.getName().contains("공항")) {
+                if (dayNumber == 1) {
+                    // 입국일: 공항에서 출발하므로 체류시간 없이 타임라인 기록 후 기준점으로 지정
+                    validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
+                    prevPlace = p;
+                    continue;
+                } else if (dayNumber == totalDays) {
+                    // 출국일: 마지막 장소에서 공항까지 가는 이동 시간을 차감한 후 도착 시간을 기록
+                    int transitMinutes = 0;
+                    if (prevPlace != null) {
+                        double distKm = DistanceUtil.calculateDistance(
+                                prevPlace.getLatitude(), prevPlace.getLongitude(),
+                                p.getLatitude(), p.getLongitude()
+                        );
+                        transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
+                        transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2);
+                    }
+                    currentTime = currentTime.plusMinutes(transitMinutes);
+                    validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
+                    continue; // 여행 종료이므로 다음 장소 계산 생략
+                }
+            }
+
             int transitMinutes = 0;
             if (prevPlace != null) {
                 double distKm = DistanceUtil.calculateDistance(
@@ -265,7 +311,6 @@ public class PlanService {
             }
             LocalTime arrivalTime = currentTime.plusMinutes(transitMinutes);
 
-            // 자정 오버플로우 방어 로직 (도착 시간이 현재 시간보다 과거로 돌아가면 자정 넘은 것)
             if (arrivalTime.isBefore(currentTime) || arrivalTime.isAfter(dayEndTime)) {
                 continue;
             }
@@ -282,13 +327,11 @@ public class PlanService {
                 if (hasConflict) continue;
             }
 
-            // 연속 식음 방어: 하루 최대 2끼 및 연속 식음 금지
             if ("식음".equals(p.getCategory())) {
                 if (dailyFoodCount >= 2) continue;
                 if (prevPlace != null && "식음".equals(prevPlace.getCategory())) continue;
             }
 
-            // 술집, 오뎅, 야경은 17시 이전 방문 금지 (Time-of-day 필터링)
             boolean isNightSpot = p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경"));
             if (isNightSpot && currentTime.isBefore(LocalTime.of(17, 0))) {
                 continue;
@@ -310,7 +353,6 @@ public class PlanService {
 
             LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
 
-            // 종료 시간 자정 오버플로우 한 번 더 방어
             if (finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
                 continue;
             }

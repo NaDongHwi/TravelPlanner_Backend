@@ -20,27 +20,30 @@ public class PlanService {
     // ============================================================================
     public int calculateTotalPhysicalMinutes(PlanRequest request, int totalDays) {
         int totalMinutes = 0;
+        for (int day = 1; day <= totalDays; day++) {
+            totalMinutes += getDailyPhysicalMinutes(request, day, totalDays);
+        }
+        return totalMinutes;
+    }
+
+    // 일차별 '실제 물리적 가용 시간' 개별 정밀 계산
+    public int getDailyPhysicalMinutes(PlanRequest request, int day, int totalDays) {
         LocalTime inTime = parseInOutTime(request.getInTime(), true);
         LocalTime outTime = parseInOutTime(request.getOutTime(), false);
 
-        for (int day = 1; day <= totalDays; day++) {
-            if (day == 1) { // 입국일: 입국 시간 + 수속 버퍼(2시간)
-                LocalTime start = inTime.plusHours(2);
-                if (start.isBefore(LocalTime.of(9, 0))) start = LocalTime.of(9, 0);
-                if (start.isBefore(LocalTime.of(22, 0))) {
-                    totalMinutes += (int) Duration.between(start, LocalTime.of(22, 0)).toMinutes();
-                }
-            } else if (day == totalDays) { // 출국일: 출국 시간 - 수속 버퍼(3시간)
-                LocalTime end = outTime.minusHours(3);
-                if (end.isAfter(LocalTime.of(22, 0))) end = LocalTime.of(22, 0);
-                if (end.isAfter(LocalTime.of(9, 0))) {
-                    totalMinutes += (int) Duration.between(LocalTime.of(9, 0), end).toMinutes();
-                }
-            } else { // 중간일: 13시간 (09:00 ~ 22:00)
-                totalMinutes += 13 * 60;
-            }
+        if (day == 1) { // 입국일
+            LocalTime start = inTime.plusHours(2);
+            if (start.isBefore(LocalTime.of(9, 0))) start = LocalTime.of(9, 0);
+            if (start.isAfter(LocalTime.of(22, 0))) return 0;
+            return (int) Duration.between(start, LocalTime.of(22, 0)).toMinutes();
+        } else if (day == totalDays) { // 출국일
+            LocalTime end = outTime.minusHours(3);
+            if (end.isAfter(LocalTime.of(22, 0))) end = LocalTime.of(22, 0);
+            if (end.isBefore(LocalTime.of(9, 0))) return 0;
+            return (int) Duration.between(LocalTime.of(9, 0), end).toMinutes();
+        } else { // 중간일
+            return 13 * 60; // 09:00 ~ 22:00
         }
-        return totalMinutes;
     }
 
     private LocalTime parseInOutTime(String timeStr, boolean isArrival) {
@@ -53,22 +56,16 @@ public class PlanService {
         return isArrival ? LocalTime.of(9, 0) : LocalTime.of(22, 0);
     }
 
-    // ============================================================================
-    // 사용자 취향 기반 동적 여유 시간(Buffer Time) 로직
-    // ============================================================================
     public int calculateBufferTime(PlanRequest request) {
         boolean isTight = request.getThemes() != null && (request.getThemes().contains("액티비티") || request.getThemes().contains("쇼핑"));
         boolean isRelaxed = request.getThemes() != null && request.getThemes().contains("힐링");
         boolean isFamily = "가족".equals(request.getCompanion()) || "부모님".equals(request.getCompanion());
 
-        if (isRelaxed || isFamily) return 30; // Type C: 여유로운 일정
-        if (isTight) return 10;               // Type A: 빡빡한 일정
-        return 20;                            // Type B: 보통 일정 (기본값)
+        if (isRelaxed || isFamily) return 30;
+        if (isTight) return 10;
+        return 20;
     }
 
-    // ============================================================================
-    // Step 3. 장소 후보 수집 (PlaceCandidateService) - 하드 제약 휴무일 가지치기
-    // ============================================================================
     public List<Place> filterClosedPlaces(List<Place> places, LocalDate travelStartDate) {
         int dayOfWeek = travelStartDate.getDayOfWeek().getValue();
         String[] dayNames = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"};
@@ -80,9 +77,6 @@ public class PlanService {
         }).collect(Collectors.toList());
     }
 
-    // ============================================================================
-    // Step 4. 장소 적합도 계산 (Weighted Scoring Algorithm)
-    // ============================================================================
     public List<Place> applyWeightedScoring(List<Place> places, String weather, PlanRequest request) {
         boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈"));
         List<String> themes = request.getThemes() != null ? request.getThemes() : new ArrayList<>();
@@ -90,8 +84,7 @@ public class PlanService {
         Map<Place, Integer> scoreMap = new HashMap<>();
 
         for (Place p : places) {
-            int score = 50; // Base Score
-
+            int score = 50;
             if (p.getTheme() != null) {
                 for (String t : themes) {
                     if (p.getTheme().contains(t)) score += 40;
@@ -113,9 +106,6 @@ public class PlanService {
                 .collect(Collectors.toList());
     }
 
-    // ============================================================================
-    // Step 5. 방문 장소 선정 (Candidate Selection - 배낭 문제/그리디 기반)
-    // ============================================================================
     public List<Place> selectCandidates(List<Place> scoredPlaces, PlanRequest request, int totalDays) {
         int totalAvailableMinutes = calculateTotalPhysicalMinutes(request, totalDays);
         int accumulatedTime = 0;
@@ -132,7 +122,7 @@ public class PlanService {
             if ("식음".equals(p.getCategory()) && foodCount >= maxFoodLimit) continue;
 
             int estimatedDwellTime = calculateDwellTime(p, request);
-            int bufferTime = calculateBufferTime(request); // 미시적 계산: 버퍼 차감
+            int bufferTime = calculateBufferTime(request);
             int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
 
             if (accumulatedTime + estimatedDwellTime + bufferTime <= totalAvailableMinutes && accumulatedCost + estimatedCost <= maxBudget) {
@@ -148,14 +138,8 @@ public class PlanService {
         return selected;
     }
 
-    // ============================================================================
-    // Step 6. 이동 경로 계산 (TSP with Time Windows + 2-opt) & 지리적 군집 재분배
-    // ============================================================================
     public List<List<Place>> calculateTspWithTimeWindows(List<Place> selectedCandidates, int totalDays, List<PlanRequest.AccommodationInput> accs, boolean forceDummyNode, PlanRequest request) {
-
-        // 지리적 군집성을 완벽하게 유지하는 분배 알고리즘 적용
         Map<Integer, List<Place>> clusters = clusterPlacesGeographically(selectedCandidates, totalDays, forceDummyNode, request);
-
         List<List<Place>> dailyRoutes = new ArrayList<>();
 
         for (int i = 0; i < totalDays; i++) {
@@ -228,14 +212,10 @@ public class PlanService {
         return dailyRoutes;
     }
 
-    // ============================================================================
-    // Step 7~9. 일정 배정 & 시뮬레이션 & 검증 (Constraint-based Scheduling & Simulator)
-    // ============================================================================
     public SimulationResult runScheduleSimulation(List<Place> draftRoute, PlanRequest request, int dayNumber, int totalDays, boolean insertDummyNode) {
         SimulationResult result = new SimulationResult();
         List<SimulatedItinerary> validRoute = new ArrayList<>();
 
-        // 입국/출국일 시간에 맞춘 시작/종료 타임라인 동적 계산
         LocalTime currentTime = LocalTime.of(9, 0);
         if (dayNumber == 1) {
             LocalTime inTime = parseInOutTime(request.getInTime(), true).plusHours(2);
@@ -259,60 +239,51 @@ public class PlanService {
                         p.getLatitude(), p.getLongitude()
                 );
                 transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
-                transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2); // 이동 시간 20% 마진
+                transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2);
             }
             currentTime = currentTime.plusMinutes(transitMinutes);
 
+            // 에러 폭발(Exception) 대신 쿨하게 스킵(Continue)하여 유연성 확보
             if (request.getFixedSchedules() != null) {
+                boolean hasConflict = false;
                 for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
                     if (currentTime.isAfter(fixed.getStartTime().minusMinutes(30)) && currentTime.isBefore(fixed.getEndTime())) {
-                        result.setSuccess(false);
-                        result.setReason("고정 일정(" + fixed.getName() + ")과 시간이 충돌하여 장소 배치를 취소합니다.");
-                        result.setProblemPlace(p);
-                        return result;
+                        hasConflict = true;
+                        break;
                     }
                 }
+                if (hasConflict) continue; // 고정일정과 겹치면 이 장소는 스킵
             }
 
             LocalTime closeTime = parseCloseTime(p.getOpeningHours());
             if (currentTime.isAfter(closeTime)) {
-                result.setSuccess(false);
-                result.setReason("장소 운영시간(Time-Window) 충돌: " + p.getName() + " 도착 시 영업 마감");
-                result.setProblemPlace(p);
-                return result;
+                continue; // 영업 마감 시 에러 내지 않고 스킵
             }
 
             int dwellTime = calculateDwellTime(p, request);
-            int bufferTime = calculateBufferTime(request); // 동적 여유 시간
+            int bufferTime = calculateBufferTime(request);
             int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
 
             currentBudgetUsed += estimatedCost;
             if (currentBudgetUsed > maxBudget) {
-                result.setSuccess(false);
-                result.setReason(p.getName() + " 방문 시 유저가 설정한 예산을 초과합니다.");
-                result.setProblemPlace(p);
-                return result;
+                continue; // 예산 초과 시 에러 내지 않고 스킵
+            }
+
+            LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
+            if (finishTime.isAfter(dayEndTime)) {
+                continue; // 하루 여행 한계 시간 초과 시 에러 내지 않고 스킵
             }
 
             validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
-            currentTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
-
-            if (currentTime.isAfter(dayEndTime)) {
-                result.setSuccess(false);
-                result.setReason("여행 한계 시간 초과");
-                result.setProblemPlace(p);
-                return result;
-            }
+            currentTime = finishTime;
             prevPlace = p;
         }
 
-        // 데이터 부족 시 가상 블록(Dummy Node) 삽입 로직
         if (insertDummyNode && currentTime.isBefore(dayEndTime.minusHours(2))) {
             Place dummyNode = new Place();
             dummyNode.setName("[자유 시간 및 로컬 탐방]");
             dummyNode.setCategory("자유시간");
             dummyNode.setTheme("힐링,산책");
-            // 거리 뻥튀기를 막기 위해 이전 장소의 좌표를 물려받음
             dummyNode.setLatitude(prevPlace != null ? prevPlace.getLatitude() : 0.0);
             dummyNode.setLongitude(prevPlace != null ? prevPlace.getLongitude() : 0.0);
 
@@ -324,10 +295,6 @@ public class PlanService {
         return result;
     }
 
-
-    // ---------------- 내부 알고리즘 유틸리티 메서드 ----------------
-
-    // 지리적 군집 유지 및 시간 기반 배낭 분배 알고리즘
     private Map<Integer, List<Place>> clusterPlacesGeographically(List<Place> places, int kDays, boolean forceDummyNode, PlanRequest request) {
         Map<Integer, List<Place>> clusters = new HashMap<>();
         for (int i = 0; i < kDays; i++) clusters.put(i, new ArrayList<>());
@@ -347,26 +314,24 @@ public class PlanService {
         }
 
         if (forceDummyNode) {
-            // [데이터 기근 상황 - 기획 5-나] 지리적 정렬 순서를 유지한 채 1/N로 균등하게 깍둑썰기(Chunking)
             int placesPerDay = (int) Math.ceil((double) sortedPlaces.size() / kDays);
             for (int i = 0; i < sortedPlaces.size(); i++) {
                 int dayIndex = Math.min(i / placesPerDay, kDays - 1);
                 clusters.get(dayIndex).add(sortedPlaces.get(i));
             }
         } else {
-            // [일반 상황 - 기획 1-나] 개수(4~5개)가 아닌 '시간 총량' 기준으로 일차별 배낭을 꽉꽉 채워 배정
             int currentDay = 0;
             int currentDayTime = 0;
-            int dailyMaxMinutes = calculateTotalPhysicalMinutes(request, kDays) / kDays; // 하루 평균 물리적 가용 시간
+            // 1/N 평균치가 아닌 해당 일차의 '실제 물리적 가용 시간'을 실시간 갱신하여 할당
+            int dailyMaxMinutes = getDailyPhysicalMinutes(request, currentDay + 1, kDays);
 
             for (Place p : sortedPlaces) {
-                // 해당 장소 소요 시간 = 체류 시간 + 사용자 취향별 여유 시간 + 기본 이동 시간 추정치(약 30분)
                 int costTime = calculateDwellTime(p, request) + calculateBufferTime(request) + 30;
 
-                // 배낭 용량(일일 시간)이 넘치면 다음 날로 넘김 (마지막 날 제외)
                 if (currentDayTime + costTime > dailyMaxMinutes && currentDay < kDays - 1) {
                     currentDay++;
                     currentDayTime = 0;
+                    dailyMaxMinutes = getDailyPhysicalMinutes(request, currentDay + 1, kDays); // 다음 날 용량 갱신
                 }
                 clusters.get(currentDay).add(p);
                 currentDayTime += costTime;
@@ -389,7 +354,7 @@ public class PlanService {
         if ("쇼핑".equals(p.getCategory())) time = 120;
         else if ("테마파크".equals(p.getCategory()) || p.getName().contains("유니버셜") || p.getName().contains("디즈니")) time = 480;
         else if ("식음".equals(p.getCategory())) time = 60;
-        else if ("자유시간".equals(p.getCategory())) return 120; // 가상 블록 기본 시간
+        else if ("자유시간".equals(p.getCategory())) return 120;
 
         if ("가족".equals(request.getCompanion()) || (request.getThemes() != null && request.getThemes().contains("힐링"))) {
             time = (int)(time * 1.2);

@@ -62,14 +62,26 @@ public class AdminController {
             return "오류 발생: 정확한 일본 지명을 찾을 수 없어 데이터 수집을 취소합니다.";
         }
 
+        // 신버전 API의 적은 응답량을 극복하기 위해 스위핑 키워드 확장
         String[] keywordSuite = (keyword == null || keyword.trim().isEmpty())
-                ? new String[]{"필수 명소", "유명 관광지", "랜드마크", "역사 유적지", "테마파크", "핫플레이스 맛집", "유명 카페", "대형 쇼핑몰"}
+                ? new String[]{
+                // 1. 관광 명소 세분화
+                "필수 관광지", "숨은 명소", "역사 유적지", "신사 사찰", "박물관 미술관", "대형 공원",
+                "테마파크", "가족 여행 명소", "연인 데이트 코스", "야경 명소", "일몰 명소", "전망대",
+                // 2. 식음료(F&B) 세분화
+                "현지인 추천 맛집", "로컬 맛집", "미슐랭 식당", "예약 필수 레스토랑",
+                "스시 오마카세", "야키니쿠 전문점", "라멘 맛집", "우동 소바", "가성비 식당",
+                "유명 카페", "인스타 감성 디저트", "베이커리", "전통 찻집", "이자카야", "포장마차 거리",
+                // 3. 쇼핑 세분화
+                "대형 백화점", "아울렛 쇼핑", "돈키호테", "드럭스토어", "기념품 상점", "전통 시장"
+        }
                 : new String[]{keyword};
 
         int totalInserted = 0;
         int totalSkipped = 0;
 
         for (String kw : keywordSuite) {
+            // 구글 신버전 API를 30번 찌릅니다.
             List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, kw, false);
 
             for (Place googlePlace : googlePlaces) {

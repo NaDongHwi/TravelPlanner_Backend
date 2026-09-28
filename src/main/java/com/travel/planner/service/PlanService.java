@@ -15,6 +15,15 @@ import java.util.stream.Collectors;
 @Service
 public class PlanService {
 
+    // 유저가 입력한 시작/종료 시간이 없으면 디폴트(09:00~22:00)를 반환하는 동적 헬퍼 메서드
+    private LocalTime getDailyStart(PlanRequest request) {
+        return request.getPreferredStartTime() != null ? request.getPreferredStartTime() : LocalTime.of(9, 0);
+    }
+
+    private LocalTime getDailyEnd(PlanRequest request) {
+        return request.getPreferredEndTime() != null ? request.getPreferredEndTime() : LocalTime.of(22, 0);
+    }
+
     // ============================================================================
     // 시간 총량 기반 (거시적) 물리적 가용 시간 계산 로직
     // ============================================================================
@@ -27,32 +36,36 @@ public class PlanService {
     }
 
     public int getDailyPhysicalMinutes(PlanRequest request, int day, int totalDays) {
-        LocalTime inTime = parseInOutTime(request.getInTime(), true);
-        LocalTime outTime = parseInOutTime(request.getOutTime(), false);
+        LocalTime inTime = parseInOutTime(request.getInTime(), true, request);
+        LocalTime outTime = parseInOutTime(request.getOutTime(), false, request);
+
+        // 유저 맞춤형 시작/종료 시간 적용
+        LocalTime defaultStart = getDailyStart(request);
+        LocalTime defaultEnd = getDailyEnd(request);
 
         if (day == 1) { // 입국일
             LocalTime start = inTime.plusHours(2);
-            if (start.isBefore(LocalTime.of(9, 0))) start = LocalTime.of(9, 0);
-            if (start.isAfter(LocalTime.of(22, 0))) return 0;
-            return (int) Duration.between(start, LocalTime.of(22, 0)).toMinutes();
+            if (start.isBefore(defaultStart)) start = defaultStart;
+            if (start.isAfter(defaultEnd)) return 0;
+            return (int) Duration.between(start, defaultEnd).toMinutes();
         } else if (day == totalDays) { // 출국일
             LocalTime end = outTime.minusHours(3);
-            if (end.isAfter(LocalTime.of(22, 0))) end = LocalTime.of(22, 0);
-            if (end.isBefore(LocalTime.of(9, 0))) return 0;
-            return (int) Duration.between(LocalTime.of(9, 0), end).toMinutes();
+            if (end.isAfter(defaultEnd)) end = defaultEnd;
+            if (end.isBefore(defaultStart)) return 0;
+            return (int) Duration.between(defaultStart, end).toMinutes();
         } else { // 중간일
-            return 13 * 60; // 09:00 ~ 22:00
+            return (int) Duration.between(defaultStart, defaultEnd).toMinutes();
         }
     }
 
-    private LocalTime parseInOutTime(String timeStr, boolean isArrival) {
+    private LocalTime parseInOutTime(String timeStr, boolean isArrival, PlanRequest request) {
         if (timeStr == null || timeStr.contains("미정")) {
-            return isArrival ? LocalTime.of(9, 0) : LocalTime.of(22, 0);
+            return isArrival ? getDailyStart(request) : getDailyEnd(request);
         }
         if (timeStr.contains("오전")) return LocalTime.of(10, 0);
         if (timeStr.contains("오후")) return LocalTime.of(14, 0);
         if (timeStr.contains("저녁") || timeStr.contains("밤")) return LocalTime.of(19, 0);
-        return isArrival ? LocalTime.of(9, 0) : LocalTime.of(22, 0);
+        return isArrival ? getDailyStart(request) : getDailyEnd(request);
     }
 
     public int calculateBufferTime(PlanRequest request) {
@@ -76,9 +89,11 @@ public class PlanService {
         }).collect(Collectors.toList());
     }
 
+    // 스코어링 + 블랙리스트(제외 테마) 방어 로직 추가
     public List<Place> applyWeightedScoring(List<Place> places, String weather, PlanRequest request) {
         boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈"));
         List<String> themes = request.getThemes() != null ? request.getThemes() : new ArrayList<>();
+        List<String> excludedThemes = request.getExcludedThemes() != null ? request.getExcludedThemes() : new ArrayList<>();
         String inCity = request.getInCity() != null ? request.getInCity() : "";
 
         Map<Place, Integer> scoreMap = new HashMap<>();
@@ -87,7 +102,7 @@ public class PlanService {
         double baseLng = places.isEmpty() ? 0 : places.get(0).getLongitude();
 
         if (request.getAccommodations() != null && !request.getAccommodations().isEmpty() && request.getAccommodations().get(0).getCheckIn() != null) {
-            // 프론트에서 넘어온 숙소 객체가 있다면 처리 (생략)
+            // 프론트에서 넘어온 숙소가 있으면 기준 좌표로 세팅 (생략)
         } else {
             for (Place p : places) {
                 if (p.getName().contains("역") || p.getName().contains("Station")) {
@@ -99,6 +114,18 @@ public class PlanService {
         }
 
         for (Place p : places) {
+            // 제외하고 싶은 테마(블랙리스트)가 포함되어 있다면 점수 연산조차 하지 않고 아예 버림
+            boolean isExcluded = false;
+            if (p.getTheme() != null && !excludedThemes.isEmpty()) {
+                for (String ex : excludedThemes) {
+                    if (p.getTheme().contains(ex)) {
+                        isExcluded = true;
+                        break;
+                    }
+                }
+            }
+            if (isExcluded) continue; // 철저히 배제됨
+
             int score = 50;
 
             if (p.getName().contains("공항")) {
@@ -137,7 +164,7 @@ public class PlanService {
             scoreMap.put(p, score);
         }
 
-        return places.stream()
+        return scoreMap.keySet().stream()
                 .filter(p -> scoreMap.get(p) > 0)
                 .sorted((p1, p2) -> scoreMap.get(p2).compareTo(scoreMap.get(p1)))
                 .collect(Collectors.toList());
@@ -273,14 +300,19 @@ public class PlanService {
         SimulationResult result = new SimulationResult();
         List<SimulatedItinerary> validRoute = new ArrayList<>();
 
-        LocalTime currentTime = LocalTime.of(9, 0);
+        // 유저 맞춤형 시작/종료 시간 적용 (시뮬레이터 핵심 로직)
+        LocalTime defaultStart = getDailyStart(request);
+        LocalTime defaultEnd = getDailyEnd(request);
+
+        LocalTime currentTime = defaultStart;
         if (dayNumber == 1) {
-            LocalTime inTime = parseInOutTime(request.getInTime(), true).plusHours(2);
+            LocalTime inTime = parseInOutTime(request.getInTime(), true, request).plusHours(2);
             currentTime = inTime.isAfter(currentTime) ? inTime : currentTime;
         }
-        LocalTime dayEndTime = LocalTime.of(22, 0);
+
+        LocalTime dayEndTime = defaultEnd;
         if (dayNumber == totalDays) {
-            LocalTime outTime = parseInOutTime(request.getOutTime(), false).minusHours(3);
+            LocalTime outTime = parseInOutTime(request.getOutTime(), false, request).minusHours(3);
             dayEndTime = outTime.isBefore(dayEndTime) ? outTime : dayEndTime;
         }
 
@@ -348,7 +380,6 @@ public class PlanService {
                 continue;
             }
 
-            // 문자열에서 오픈 시간과 마감 시간을 모두 추출
             LocalTime openTime = parseOpenTime(p.getOpeningHours());
             LocalTime closeTime = parseCloseTime(p.getOpeningHours());
 
@@ -357,7 +388,6 @@ public class PlanService {
             int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
             LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
 
-            // 도착 시간이 오픈 전이거나, 일정을 끝내고 나올 시간이 마감 시간 이후면 스킵
             if (currentTime.isBefore(openTime) || finishTime.isAfter(closeTime) || finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
                 continue;
             }
@@ -390,21 +420,15 @@ public class PlanService {
         return result;
     }
 
-    // ============================================================================
-    // 문자열 분해 및 오픈/마감 시간 추출 유틸리티
-    // ============================================================================
-
     private LocalTime parseOpenTime(String hours) {
         if (hours == null || hours.contains("없음") || hours.contains("24시간")) return LocalTime.of(0, 0);
         try {
-            // 예: "월요일: 오전 11:00 ~ 오후 5:00 | 화요일: ..." -> 첫 번째 요일 블록 추출
             String firstDay = hours.split("\\|")[0];
             String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
-            String openStr = timeRange.split("~|-")[0].trim(); // "오전 11:00" 분리
-
+            String openStr = timeRange.split("~|-")[0].trim();
             return extractTime(openStr);
         } catch (Exception e) {}
-        return LocalTime.of(0, 0); // 파싱 실패 시 상시 오픈으로 간주
+        return LocalTime.of(0, 0);
     }
 
     private LocalTime parseCloseTime(String hours) {
@@ -412,11 +436,10 @@ public class PlanService {
         try {
             String firstDay = hours.split("\\|")[0];
             String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
-            String closeStr = timeRange.split("~|-")[1].trim(); // "오후 5:00" 분리
-
+            String closeStr = timeRange.split("~|-")[1].trim();
             return extractTime(closeStr);
         } catch (Exception e) {}
-        return LocalTime.of(23, 59); // 파싱 실패 시 밤 23:59 마감으로 간주
+        return LocalTime.of(23, 59);
     }
 
     private LocalTime extractTime(String timeStr) {

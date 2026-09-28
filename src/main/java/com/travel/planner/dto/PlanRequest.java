@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 @Getter
@@ -28,6 +29,17 @@ public class PlanRequest {
     @Schema(description = "여행 테마 최대 3개 (Step 4)", example = "[\"맛집\", \"사진\", \"카페\"]")
     private List<String> themes;
 
+    // 사용자가 제외하고 싶은 테마(블랙리스트) 파라미터 추가
+    @Schema(description = "제외할 테마 (선택 사항)", example = "[\"서브컬쳐\", \"액티비티\"]")
+    private List<String> excludedThemes;
+
+    // 유동적인 일과 시작/종료 시간 파라미터 추가 (미입력 시 09:00~22:00 적용)
+    @Schema(description = "선호하는 하루 일정 시작 시간 (기본 09:00)", type = "string", example = "09:00:00")
+    private LocalTime preferredStartTime;
+
+    @Schema(description = "선호하는 하루 일정 종료 시간 (기본 22:00)", type = "string", example = "22:00:00")
+    private LocalTime preferredEndTime;
+
     @Schema(description = "주요 이동수단 (Step 5)", example = "도보 및 대중교통")
     private String transportation;
 
@@ -41,11 +53,9 @@ public class PlanRequest {
         private java.time.LocalTime endTime;
     }
 
-    // 입출국 도시
     private String inCity;
     private String outCity;
 
-    // 입출국 시간 (예: "오전", "오후", "저녁", "미정")
     private String inTime;
     private String outTime;
 
@@ -58,12 +68,11 @@ public class PlanRequest {
     @Schema(description = "숙소 역제안 받기 여부 (true: 추천해줘, false: 숙소 없이 동선 짜줘)", example = "true")
     private boolean suggestHotel;
 
-    // 내부 클래스로 숙소 정보 규격 정의
     @Getter
     @Setter
     public static class AccommodationInput {
         private String name;
-        private String address; // 혹은 구글 placeId
+        private String address;
         private LocalDate checkIn;
         private LocalDate checkOut;
     }

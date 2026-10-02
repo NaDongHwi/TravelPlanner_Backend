@@ -5,16 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDate;
 
 @Service
+@RequiredArgsConstructor
 public class WeatherService {
 
     @Value("${weather.openweathermap.api-key}")
     private String weatherApiKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 도시 이름을 받아 현재 기상 상태(비, 맑음 등)를 한국어로 반환

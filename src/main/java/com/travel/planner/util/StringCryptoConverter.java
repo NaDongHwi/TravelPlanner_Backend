@@ -20,8 +20,11 @@ public class StringCryptoConverter implements AttributeConverter<String, String>
     // application.properties의 jwt.secret을 불러와 static 변수에 주입합니다.
     @Value("${jwt.secret}")
     public void setSecretKey(String secretKey) {
-        // AES-128 암호화 규격에 맞게 16바이트로 안전하게 자르거나 채웁니다.
-        StringCryptoConverter.KEY = Arrays.copyOf(secretKey.getBytes(), 16);
+        try {
+            StringCryptoConverter.KEY = Arrays.copyOf(secretKey.getBytes("UTF-8"), 16);
+        } catch (java.io.UnsupportedEncodingException e) {
+            throw new RuntimeException("UTF-8 인코딩을 지원하지 않습니다.", e);
+        }
     }
 
     @Override

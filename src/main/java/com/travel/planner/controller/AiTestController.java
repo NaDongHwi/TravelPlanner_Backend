@@ -5,10 +5,14 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/test")
+@RequiredArgsConstructor
 public class AiTestController {
+
+    private final RestTemplate restTemplate;
 
     // 1. API 키 불러오기
     @Value("${ai.gemini.api-key}")
@@ -27,8 +31,6 @@ public class AiTestController {
         String requestBody = "{ \"contents\": [{ \"parts\":[{\"text\": \"" + prompt + "\"}] }] }";
 
         try {
-            RestTemplate restTemplate = new RestTemplate();
-
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
 

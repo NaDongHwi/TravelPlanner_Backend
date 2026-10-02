@@ -2,6 +2,8 @@ package com.travel.planner.controller;
 
 import com.travel.planner.dto.AiRouteResponse;
 import com.travel.planner.dto.PlanRequest;
+import com.travel.planner.dto.RerouteRequest;
+import com.travel.planner.dto.RerouteResponse;
 import com.travel.planner.entity.Itinerary;
 import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Plan;
@@ -11,11 +13,7 @@ import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.repository.PlanRepository;
 import com.travel.planner.repository.TrafficRepository;
 import com.travel.planner.repository.UserRepository;
-import com.travel.planner.service.AiService;
-import com.travel.planner.service.GoogleMapsService;
-import com.travel.planner.service.PlanService;
-import com.travel.planner.service.WeatherService;
-import com.travel.planner.service.PlanValidationService;
+import com.travel.planner.service.*;
 import com.travel.planner.util.DistanceUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -40,6 +38,7 @@ public class PlanController {
     private final WeatherService weatherService;
     private final PlanValidationService planValidationService;
     private final TrafficRepository trafficRepository;
+    private final PlanModifierService planModifierService;
 
     @GetMapping("/validate")
     @Operation(summary = "다중 도시 일정 검증 (Soft Warning)", description = "입/출국 도시와 선택한 도시들, 숙박 일수를 바탕으로 피로도 점수를 계산하여 무리한 일정인지 경고 메시지를 반환합니다.")
@@ -118,6 +117,12 @@ public class PlanController {
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
                     p.setCity(mainCity);
+
+                    // 스코어링과 시뮬레이션에서 터지지 않도록 최소한의 디폴트 값 강제 부여
+                    if (p.getCategory() == null) p.setCategory("관광지");
+                    if (p.getTheme() == null) p.setTheme("기본 명소");
+                    if (p.getRecommendedDuration() == null) p.setRecommendedDuration(90);
+
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         Place savedPlace = placeRepository.save(p);
                         allCityPlaces.add(savedPlace);
@@ -155,7 +160,7 @@ public class PlanController {
             List<Place> selectedCandidates = planService.selectCandidates(scoredPlaces, request, totalDays);
 
             if (forceDummyNode && selectedCandidates.size() > 0) {
-                System.out.println("[데이터 기근 감지] 후반부 일정 비어있음 - 사후 재분배 및 가상 블록(Dummy Node) 삽입 트리거");
+                System.out.println("[데이터 기근 감지] 후반부 일정 비어있음 사후 재분배 및 가상 블록(Dummy Node) 삽입 트리거");
             }
 
             List<List<Place>> dailyRoutes = planService.calculateTspWithTimeWindows(selectedCandidates, totalDays, request.getAccommodations(), forceDummyNode, request);
@@ -332,5 +337,15 @@ public class PlanController {
         }
 
         return finalResponse;
+    }
+
+    @PostMapping("/{planId}/reroute")
+    @Operation(summary = "실시간 동적 경로 재탐색 (Dynamic Rerouting)",
+            description = "사용자가 즉석에서 장소를 추가/변경할 때 AI 체류시간 추론 및 시뮬레이터를 가동하여 도미노 붕괴를 방어합니다.")
+    public RerouteResponse modifyPlanRoute(
+            @PathVariable Long planId,
+            @RequestBody RerouteRequest request
+    ) {
+        return planModifierService.modifyPlanRoute(planId, request);
     }
 }

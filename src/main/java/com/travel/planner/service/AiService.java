@@ -36,7 +36,7 @@ public class AiService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LogRepository logRepository;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     // ============================================================================
     // 1. 알고리즘 기반 확정 동선 -> 스토리텔링 가이드 포맷팅 도구 (유지)
@@ -297,5 +297,45 @@ public class AiService {
             errorLog.setErrorMessage(message != null ? message : "Unknown Error");
             logRepository.save(errorLog);
         } catch (Exception ignore) {}
+    }
+
+    // ============================================================================
+    // 4. 실시간 동적 라우팅용 단건 속성/체류시간 추론
+    // ============================================================================
+    public void inferPlaceAttributesRealTime(Place place) {
+        String prompt = "너는 여행 전문가야. 방금 사용자가 일정에 [" + place.getName() + "] 장소를 추가했어.\n" +
+                "이 장소의 테마를 반드시 [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 이 12개 단어 안에서 1~2개 추론하고, \n" +
+                "장소 속성(실내/실외 중 1개), 평균적으로 머무는 체류시간(분 단위 정수)을 함께 추론해줘.\n" +
+                "결과는 반드시 아래 JSON 형식으로만 반환해. 마크다운 금지.\n" +
+                "{\"theme\":\"관광,사진\", \"type\":\"실내\", \"duration\":90}";
+
+        try {
+            Map<String, Object> requestBody = buildGeminiRequest(prompt);
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+            JsonNode rootNode = objectMapper.readTree(response.getBody());
+            String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
+            aiText = aiText.replace("```json", "").replace("```", "").trim();
+
+            JsonNode resultNode = objectMapper.readTree(aiText);
+            place.setTheme(resultNode.path("theme").asText("기본 명소"));
+            place.setPlaceType(resultNode.path("type").asText("실내"));
+            place.setCategory("관광지");
+            place.setRecommendedDuration(resultNode.path("duration").asInt(90));
+
+            System.out.println("[AI 실시간 추론 완료] " + place.getName() + " -> " + place.getRecommendedDuration() + "분 소요 예상");
+
+        } catch (Exception e) {
+            System.out.println("[AI 실시간 추론 실패 - 기본값 부여] " + e.getMessage());
+            place.setTheme("기본 명소");
+            place.setPlaceType("실내");
+            place.setCategory("관광지");
+            place.setRecommendedDuration(90); // 실패 시 90분 기본 할당
+        }
     }
 }

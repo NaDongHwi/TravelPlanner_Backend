@@ -18,7 +18,7 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String password;
 
     @Convert(converter = StringCryptoConverter.class) // DB 저장 시 자동 암호화

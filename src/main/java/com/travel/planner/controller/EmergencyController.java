@@ -7,14 +7,18 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
+import lombok.RequiredArgsConstructor;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/emergency")
+@RequiredArgsConstructor
 @Tag(name = "5. 긴급 안전 API", description = "GPS 기반 주변 긴급 시설 검색 및 비상연락망 제공 (보고서 DOC-003, 기획 2번)")
 public class EmergencyController {
+
+    private final RestTemplate restTemplate;
 
     // yml에서 가져옵니다.
     @Value("${google.maps.api-key}")
@@ -44,7 +48,6 @@ public class EmergencyController {
                 lat, lng, googleApiKey
         );
 
-        RestTemplate restTemplate = new RestTemplate();
         String response = restTemplate.getForObject(url, String.class);
 
         return ResponseEntity.ok(response);

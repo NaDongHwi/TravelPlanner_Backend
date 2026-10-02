@@ -38,13 +38,15 @@ public class JwtFilter extends OncePerRequestFilter {
 
         // 4. 문지기가 토큰이 진짜인지 확인합니다.
         if (jwtUtil.isTokenValid(token)) {
-            // 진짜라면 토큰에서 이메일을 뽑아냅니다.
             String email = jwtUtil.extractEmail(token);
-
-            // 스프링 시큐리티에게 "이 사람 신분 확인됐어 통과시켜 줘" 라고 보고합니다.
             UsernamePasswordAuthenticationToken authenticationToken =
                     new UsernamePasswordAuthenticationToken(email, null, Collections.emptyList());
             SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+        } else {
+            // 토큰이 유효하지 않으면 401 에러를 프론트엔드로 확실하게 쏴주고 여기서 끝냄
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("토큰이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.");
+            return; // 다음 필터로 안 넘어가게 강제 종료!
         }
 
         // 5. 다음 단계로 보냅니다.

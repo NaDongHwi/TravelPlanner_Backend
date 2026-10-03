@@ -69,19 +69,30 @@ public class AdminAsyncService {
             for (Place p : targetPlaces) {
                 if (!isEnriching) break;
 
+                // 빨간 줄의 원인이었던 변수 선언입니다. 기본적으로 성공한다고 가정합니다.
+                boolean isOpeningHoursFixed = true;
+
                 // 1. 영업시간 복구 로직
                 if (p.getOpeningHours() == null || p.getOpeningHours().contains("없음") || p.getOpeningHours().isEmpty()) {
-                    Place details = googleMapsService.getPlaceDetails(p.getCity(), p.getName(), "ko");
+                    // 이름(Text Search) 대신 고유 ID(Place ID)로 다이렉트 호출
+                    Place details = googleMapsService.getPlaceDetailsById(p.getPlaceId(), "ko");
                     if (details.getOpeningHours() != null && !details.getOpeningHours().contains("없음")) {
                         p.setOpeningHours(details.getOpeningHours());
-                        placeRepository.save(p); // 영업시간 먼저 DB 업데이트
-                        System.out.println("-> [" + p.getName() + "] 누락된 영업시간 정보 복구 완료!");
+                        placeRepository.save(p);
+                        System.out.println("-> [" + p.getName() + "] 고유 ID 기반 영업시간 복구 완료!");
+                        isOpeningHoursFixed = true; // 복구 성공
+                    } else {
+                        isOpeningHoursFixed = false; // 복구 실패 (해당 장소가 정말로 24시간 개방 거리/자연명소라 영업시간이 없는 경우 등)
                     }
                 }
 
                 // 2. 테마와 속성이 이미 있다면, AI 호출 스킵 로직
                 if (p.getTheme() != null && p.getPlaceType() != null && p.getRecommendedDuration() != null) {
-                    continue;
+                    // 영업시간 복구에 실패했는데 테마만 완벽한 상태라면, 이 장소를 임시 블랙리스트에 올립니다.
+                    if (!isOpeningHoursFixed) {
+                        failedPlaceIdsThisSession.add(p.getId());
+                    }
+                    continue; // AI 호출 안 하고 스킵
                 }
 
                 // 3. 리뷰 수집
@@ -105,7 +116,7 @@ public class AdminAsyncService {
                 continue;
             }
 
-            // AI 벌크 분류 요청
+            // 4. AI 벌크 분류 요청
             Map<String, String> enrichedDataMap = aiService.classifyPlaceAttributesBulk(validPlacesForBulk, reviewsMap);
 
             if (enrichedDataMap == null || enrichedDataMap.isEmpty()) {

@@ -129,6 +129,49 @@ public class GoogleMapsService {
         return resultPlace;
     }
 
+    // 이름 검색 대신, 고유 Place ID를 사용해 100% 정확하게 장소 상세 정보를 가져오는 메서드
+    public Place getPlaceDetailsById(String placeId, String lang) {
+        Place resultPlace = new Place();
+        resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
+
+        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
+        // Text Search가 아닌 신버전 Place Details 엔드포인트 (GET 방식)
+        String url = "https://places.googleapis.com/v1/places/" + placeId + "?languageCode=" + targetLang;
+
+        try {
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.set("X-Goog-Api-Key", googleMapsApiKey);
+            // 딱 필요한 정보만 핀포인트로 요청
+            headers.set("X-Goog-FieldMask", "id,location,regularOpeningHours.weekdayDescriptions,rating,userRatingCount,displayName");
+
+            org.springframework.http.HttpEntity<Void> request = new org.springframework.http.HttpEntity<>(headers);
+            org.springframework.http.ResponseEntity<String> response = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, request, String.class);
+
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(response.getBody());
+
+            if (node != null && !node.isMissingNode()) {
+                // 이미 DB에 있는 인증된 장소이므로 평점/리뷰 수 검증(수질 검증) 로직을 생략합니다.
+                // (국립공원, 거리 등은 원래 평점이 누락되기도 함)
+                resultPlace.setLatitude(node.path("location").path("latitude").asDouble(0.0));
+                resultPlace.setLongitude(node.path("location").path("longitude").asDouble(0.0));
+
+                // 영업시간 조립
+                com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
+                if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
+                    List<String> hoursList = new ArrayList<>();
+                    for (com.fasterxml.jackson.databind.JsonNode desc : weekdayText) {
+                        hoursList.add(desc.asText());
+                    }
+                    resultPlace.setOpeningHours(String.join(" | ", hoursList));
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Place Details (ID) 통신 에러 (" + placeId + "): " + e.getMessage());
+        }
+
+        return resultPlace;
+    }
+
     // 3. 리뷰 수집 도구
     public String getPlaceReviews(String city, String placeName) {
         String url = "https://places.googleapis.com/v1/places:searchText";

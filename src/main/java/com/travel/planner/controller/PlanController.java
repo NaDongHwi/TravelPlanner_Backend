@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 @RestController
@@ -76,7 +77,7 @@ public class PlanController {
         }
 
         // ==============================================================================
-        // Step 3. 시간 총량(Time-Volume) 기반 장소 후보 수집 (Cold Start 방어)
+        // Step 3. 시간 총량(Time-Volume) 기반 장소 후보 수집 (잉여 시간 산출 및 근교 확장)
         // ==============================================================================
         List<Place> allCityPlaces = placeRepository.findByCityIn(request.getCities());
         int physicalAvailableMinutes = planService.calculateTotalPhysicalMinutes(request, totalDays);
@@ -89,43 +90,68 @@ public class PlanController {
         int minRequiredVolume = Math.max(0, physicalAvailableMinutes - fixedScheduleMinutes);
         int targetPoolVolume = (int) (minRequiredVolume * 1.5);
 
-        // 최대 3회 반복하는 while문
-        int emergencyCallCount = 0;
+        // 기존 다중 도시 검증 로직(PlanValidationService)을 역이용한 '잉여 일수(Overflow Days)' 계산
+        // 도시 1개당 평균 2일이 필요하다고 가정. (1개 도시에 10일 일정이면 8일의 잉여 발생)
+        int excessDays = totalDays - (request.getCities().size() * 2);
 
-        while (emergencyCallCount < 3) {
+        int emergencyCallCount = 0;
+        int maxEmergencyCalls = Math.max(3, request.getThemes() != null ? request.getThemes().size() : 3);
+
+        while (emergencyCallCount < maxEmergencyCalls) {
             int currentDbVolume = allCityPlaces.stream()
                     .mapToInt(p -> planService.calculateDwellTime(p, request))
                     .sum();
 
-            System.out.println("현재 DB 확보 시간: " + currentDbVolume + "분 / 필요 볼륨: " + targetPoolVolume + "분");
-
-            // 목표량을 채웠거나, 도시가 미정이면 루프 탈출
             if (currentDbVolume >= targetPoolVolume || mainCity == null || mainCity.equals("미정")) {
                 break;
             }
 
-            System.out.println("데이터 부족! 구글 API 긴급 수집 가동 (시도: " + (emergencyCallCount + 1) + "/3)");
             try {
                 String formalizedCity = googleMapsService.getFormalizedJapanCity(mainCity);
-                // 매 시도마다 검색 키워드를 다르게 주어 다양한 장소 수집 유도
-                String[] fallbackKeywords = {"유명 관광지", "랜드마크", "인기 맛집"};
-                String searchKeyword = (request.getThemes() != null && !request.getThemes().isEmpty() && emergencyCallCount == 0)
-                        ? request.getThemes().get(0) : fallbackKeywords[emergencyCallCount % 3];
+
+                List<String> dynamicKeywords = new ArrayList<>();
+                if (request.getThemes() != null && !request.getThemes().isEmpty()) {
+                    dynamicKeywords.addAll(request.getThemes());
+                } else {
+                    dynamicKeywords.addAll(Arrays.asList("필수 관광지", "인기 맛집", "랜드마크"));
+                }
+
+                String baseKeyword = dynamicKeywords.get(emergencyCallCount % dynamicKeywords.size());
+                String searchKeyword = baseKeyword;
+
+                // 테마 제한 해제 & 프론트엔드 파라미터(excludeSuburbs) 연동
+                // 잉여 일수가 3일 이상이고, 유저가 '근교 제외'를 요청하지 않았다면 무조건 근교를 포함하여 스위핑
+                if (excessDays >= 3 && !request.isExcludeSuburbs()) {
+                    searchKeyword = baseKeyword + " 근교 명소";
+                    System.out.println("[장기 여행자 감지] 잉여 일수 " + excessDays + "일. 근교(" + searchKeyword + ") 탐색 범위 자동 확장!");
+                }
 
                 List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword, true);
 
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
-                    p.setCity(mainCity);
 
-                    // 스코어링과 시뮬레이션에서 터지지 않도록 최소한의 디폴트 값 강제 부여
+                    // DB 무결성 보호: p.setCity(mainCity); 삭제
+                    // 아타미(근교) 장소의 city 값을 억지로 '시즈오카'로 덮어씌우면 DB 지리 정보가 오염됨.
+                    // Google API가 반환한 원래 도시명(또는 null)을 유지하되, 이번 여행 메모리 풀(allCityPlaces)에는 합류시켜 좌표 기반으로 동선이 짜이게 만듦.
+                    if (p.getCity() == null) {
+                        p.setCity(mainCity); // 구글이 도시를 못 줬을 때만 임시로 메인 도시 부여
+                    }
+
                     if (p.getCategory() == null) p.setCategory("관광지");
-                    if (p.getTheme() == null) p.setTheme("기본 명소");
-                    if (p.getRecommendedDuration() == null) p.setRecommendedDuration(90);
+                    if (p.getTheme() == null) p.setTheme(baseKeyword);
+                    if (p.getRecommendedDuration() == null) p.setRecommendedDuration(120);
 
+                    // DB 적재 및 현재 여행 시뮬레이션 풀에 합류
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         Place savedPlace = placeRepository.save(p);
                         allCityPlaces.add(savedPlace);
+                    } else {
+                        // 이미 DB에 있는 근교 장소라도, 이번 여행 풀에 없다면 끌어옴
+                        Place existingPlace = placeRepository.findByPlaceId(p.getPlaceId()).get();
+                        if (!allCityPlaces.contains(existingPlace)) {
+                            allCityPlaces.add(existingPlace);
+                        }
                     }
                 }
             } catch (Exception e) {

@@ -68,6 +68,9 @@ public class PlanRequest {
     @Schema(description = "숙소 역제안 받기 여부 (true: 추천해줘, false: 숙소 없이 동선 짜줘)", example = "true")
     private boolean suggestHotel;
 
+    @Schema(description = "근교 추천 제외 여부 (true: 선택한 도시 내부만 탐색, false: 일정 여유 시 근교 자동 확장)", example = "false")
+    private boolean excludeSuburbs;
+
     @Getter
     @Setter
     public static class AccommodationInput {

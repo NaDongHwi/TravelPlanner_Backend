@@ -420,26 +420,43 @@ public class PlanService {
         return result;
     }
 
+    // ============================================================================
+    // 문자열 분해 및 오픈/마감 시간 추출 유틸리티 (안전 시간 보장 로직 추가)
+    // ============================================================================
     private LocalTime parseOpenTime(String hours) {
-        if (hours == null || hours.contains("없음") || hours.contains("24시간")) return LocalTime.of(0, 0);
+        if (hours != null && hours.contains("24시간")) return LocalTime.of(0, 0);
+
+        // 정보가 없을 경우 무조건 '오전 11시 오픈'으로 간주하여 아침 일찍 배치되는 것을 방지
+        if (hours == null || hours.isEmpty() || hours.contains("없음")) {
+            return LocalTime.of(11, 0);
+        }
+
         try {
             String firstDay = hours.split("\\|")[0];
             String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
             String openStr = timeRange.split("~|-")[0].trim();
             return extractTime(openStr);
         } catch (Exception e) {}
-        return LocalTime.of(0, 0);
+
+        return LocalTime.of(11, 0); // 파싱 에러 시에도 안전하게 11시 보장
     }
 
     private LocalTime parseCloseTime(String hours) {
-        if (hours == null || hours.contains("없음") || hours.contains("24시간")) return LocalTime.of(23, 59);
+        if (hours != null && hours.contains("24시간")) return LocalTime.of(23, 59);
+
+        // 정보가 없을 경우 무조건 '오후 5시(17:00) 마감'으로 간주하여 밤 늦게 배치되는 것을 방지
+        if (hours == null || hours.isEmpty() || hours.contains("없음")) {
+            return LocalTime.of(17, 0);
+        }
+
         try {
             String firstDay = hours.split("\\|")[0];
             String timeRange = firstDay.substring(firstDay.indexOf(":") + 1).trim();
             String closeStr = timeRange.split("~|-")[1].trim();
             return extractTime(closeStr);
         } catch (Exception e) {}
-        return LocalTime.of(23, 59);
+
+        return LocalTime.of(17, 0); // 파싱 에러 시에도 안전하게 17시 보장
     }
 
     private LocalTime extractTime(String timeStr) {

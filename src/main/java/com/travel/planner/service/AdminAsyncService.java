@@ -41,7 +41,8 @@ public class AdminAsyncService {
             List<Place> targetPlaces = allPlaces.stream()
                     .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
                             || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty()
-                            || p.getRecommendedDuration() == null)
+                            || p.getRecommendedDuration() == null
+                            || p.getOpeningHours() == null || p.getOpeningHours().contains("없음") || p.getOpeningHours().isEmpty())
                     .limit(30)
                     .collect(Collectors.toList());
 
@@ -59,6 +60,17 @@ public class AdminAsyncService {
 
             for (Place p : targetPlaces) {
                 if (!isEnriching) break;
+
+                // 구글 데이터가 누락되었던 곳이라면, 리뷰를 긁기 전에 Place Details API로 영업시간부터 다시 찔러서 복구 시도
+                if (p.getOpeningHours() == null || p.getOpeningHours().contains("없음") || p.getOpeningHours().isEmpty()) {
+                    Place details = googleMapsService.getPlaceDetails(p.getCity(), p.getName(), "ko");
+                    if (details.getOpeningHours() != null && !details.getOpeningHours().contains("없음")) {
+                        p.setOpeningHours(details.getOpeningHours());
+                        placeRepository.save(p); // 영업시간 먼저 DB 업데이트
+                        System.out.println("-> [" + p.getName() + "] 누락된 영업시간 정보 복구 완료!");
+                    }
+                }
+
                 String reviewsText = googleMapsService.getPlaceReviews(p.getCity(), p.getName());
 
                 // [쓰레기 데이터 방어 로직] 통신 에러(null) 발생 시 이번 연산에서 제외

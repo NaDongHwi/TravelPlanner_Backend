@@ -1,5 +1,6 @@
 package com.travel.planner.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.travel.planner.entity.Place;
 import com.travel.planner.repository.PlaceRepository;
 import lombok.RequiredArgsConstructor;
@@ -8,8 +9,10 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,9 +39,15 @@ public class AdminAsyncService {
 
         System.out.println("[어드민 엔진] 오프라인 AI 데이터 인리치먼트 백그라운드 파이프라인 가동 (벌크 최적화)...");
 
+        // 이번 실행 세션 동안에만 실패한 장소 ID를 기억하는 '임시 블랙리스트'
+        // DB에 저장되지 않으므로, 작업 종료 후 다음에 다시 버튼을 누르면 초기화되어 재시도합니다.
+        Set<Long> failedPlaceIdsThisSession = new HashSet<>();
+
         while (isEnriching) {
             List<Place> allPlaces = placeRepository.findAll();
             List<Place> targetPlaces = allPlaces.stream()
+                    // 이번 세션에서 실패한 전적이 있는 장소는 필터링에서 제외 (무한 루프 방어)
+                    .filter(p -> !failedPlaceIdsThisSession.contains(p.getId()))
                     .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
                             || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty()
                             || p.getRecommendedDuration() == null
@@ -47,21 +56,20 @@ public class AdminAsyncService {
                     .collect(Collectors.toList());
 
             if (targetPlaces.isEmpty()) {
-                System.out.println("[인리치먼트 완료] 처리할 데이터가 없습니다!");
+                System.out.println("[인리치먼트 완료] 남은 데이터가 없거나 모두 처리에 실패한 데이터입니다.");
                 isEnriching = false;
                 break;
             }
 
             System.out.println("남은 테마 데이터 정제 중... (현재 " + targetPlaces.size() + "건 일괄 처리 시도)");
 
-            // 1. 구글 리뷰 30건 개별 수집
             Map<String, String> reviewsMap = new HashMap<>();
-            List<Place> validPlacesForBulk = new ArrayList<>(); // 퀄리티가 검증된 장소만 모을 리스트
+            List<Place> validPlacesForBulk = new ArrayList<>();
 
             for (Place p : targetPlaces) {
                 if (!isEnriching) break;
 
-                // 구글 데이터가 누락되었던 곳이라면, 리뷰를 긁기 전에 Place Details API로 영업시간부터 다시 찔러서 복구 시도
+                // 1. 영업시간 복구 로직
                 if (p.getOpeningHours() == null || p.getOpeningHours().contains("없음") || p.getOpeningHours().isEmpty()) {
                     Place details = googleMapsService.getPlaceDetails(p.getCity(), p.getName(), "ko");
                     if (details.getOpeningHours() != null && !details.getOpeningHours().contains("없음")) {
@@ -71,65 +79,66 @@ public class AdminAsyncService {
                     }
                 }
 
+                // 2. 테마와 속성이 이미 있다면, AI 호출 스킵 로직
                 if (p.getTheme() != null && p.getPlaceType() != null && p.getRecommendedDuration() != null) {
                     continue;
                 }
 
+                // 3. 리뷰 수집
                 String reviewsText = googleMapsService.getPlaceReviews(p.getCity(), p.getName());
 
-                // [쓰레기 데이터 방어 로직] 통신 에러(null) 발생 시 이번 연산에서 제외
-                if (reviewsText == null) {
-                    System.out.println("[" + p.getName() + "] 리뷰 수집 실패! 쓰레기 값 방지를 위해 이번 턴에서 제외합니다.");
-                    continue; // AI에게 넘기지 않고 패스 (다음 사이클에서 재시도 됨)
+                // 리뷰 수집이 불가능한 경우 (더미 데이터 삽입 대신 메모리에만 기록)
+                if (reviewsText == null || reviewsText.contains("리뷰 정보 없음") || reviewsText.trim().isEmpty()) {
+                    System.out.println("[" + p.getName() + "] 리뷰 수집 불가! 이번 세션에서 임시 제외합니다.");
+                    failedPlaceIdsThisSession.add(p.getId()); // 임시 블랙리스트에 추가하여 다음 루프 때 배제됨
+                    continue;
                 }
 
                 reviewsMap.put(p.getPlaceId(), reviewsText);
-                validPlacesForBulk.add(p); // 통과한 데이터만 진짜 리스트에 추가
+                validPlacesForBulk.add(p);
             }
             if (!isEnriching) break;
 
             if (validPlacesForBulk.isEmpty()) {
-                System.out.println("모든 리뷰 수집이 실패했습니다. 10초 대기 후 재시도합니다.");
+                System.out.println("[알림] 이번 30건은 AI 처리가 필요 없거나 리뷰가 없습니다. 10초 후 다음 배치를 탐색합니다.");
                 try { Thread.sleep(10000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 continue;
             }
 
-            // 2. AI 벌크 분류 요청 (30건을 1번의 제미나이 호출로 처리)
-            Map<String, String> enrichedDataMap = aiService.classifyPlaceAttributesBulk(targetPlaces, reviewsMap);
+            // AI 벌크 분류 요청
+            Map<String, String> enrichedDataMap = aiService.classifyPlaceAttributesBulk(validPlacesForBulk, reviewsMap);
 
-            // 3. AI 429 에러 방어
             if (enrichedDataMap == null || enrichedDataMap.isEmpty()) {
                 System.out.println("[경고] AI API 429 한도 초과! 1분(60초) 대기 후 재시도합니다...");
                 try { Thread.sleep(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 continue;
             }
 
-            // 4. DB 일괄 업데이트
             int successCount = 0;
-            for (Place place : targetPlaces) {
+            for (Place place : validPlacesForBulk) {
                 String aiResult = enrichedDataMap.get(place.getPlaceId());
                 if (aiResult != null && aiResult.contains("|")) {
                     String[] parts = aiResult.split("\\|");
                     if (parts.length >= 3) {
                         place.setTheme(parts[0].trim());
                         place.setPlaceType(parts[1].trim());
-
                         try {
                             place.setRecommendedDuration(Integer.parseInt(parts[2].trim()));
                         } catch (NumberFormatException e) {
-                            place.setRecommendedDuration(90); // 파싱 실패 시 안전하게 기본값 90분
+                            place.setRecommendedDuration(90);
                         }
-
                         placeRepository.save(place);
                         successCount++;
+                    } else {
+                        failedPlaceIdsThisSession.add(place.getId()); // AI 응답 형식이 깨진 것도 임시 블랙리스트행
                     }
+                } else {
+                    failedPlaceIdsThisSession.add(place.getId()); // AI가 응답을 안 해준 것도 임시 블랙리스트행
                 }
             }
-            System.out.println("[벌크 인리치먼트 성공] 30건 중 " + successCount + "건 테마/속성 적재 완료.");
+            System.out.println("[벌크 인리치먼트 성공] " + validPlacesForBulk.size() + "건 중 " + successCount + "건 테마/속성 적재 완료.");
 
-            // 5. 사이클 휴식 (1번 호출했으니 짧게 10초만 쉬어도 충분합니다)
             try {
-                System.out.println("API 한도 누적 방지를 위해 10초간 안전 휴식을 취합니다...");
                 Thread.sleep(10000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

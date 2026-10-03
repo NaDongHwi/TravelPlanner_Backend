@@ -71,6 +71,10 @@ public class AdminAsyncService {
                     }
                 }
 
+                if (p.getTheme() != null && p.getPlaceType() != null && p.getRecommendedDuration() != null) {
+                    continue;
+                }
+
                 String reviewsText = googleMapsService.getPlaceReviews(p.getCity(), p.getName());
 
                 // [쓰레기 데이터 방어 로직] 통신 에러(null) 발생 시 이번 연산에서 제외

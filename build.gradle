@@ -35,6 +35,7 @@ dependencies {
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
 	implementation 'com.itextpdf:itext-core:9.6.0'
 	implementation 'com.google.firebase:firebase-admin:9.10.0'
+	implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 }
 
 tasks.named('test') {

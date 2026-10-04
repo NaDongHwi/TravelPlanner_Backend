@@ -25,34 +25,31 @@ public class UserService {
 
         User newUser = new User();
         newUser.setEmail(request.getEmail());
-
-        // 비밀번호 암호화 저장
-        String encryptedPassword = passwordEncoder.encode(request.getPassword());
-        newUser.setPassword(encryptedPassword);
-
+        newUser.setPassword(passwordEncoder.encode(request.getPassword()));
         newUser.setGender(request.getGender());
         newUser.setAgeGroup(request.getAgeGroup());
 
-        userRepository.save(newUser);
+        // 자체 가입자는 local로 명시
+        newUser.setProvider("local");
 
+        userRepository.save(newUser);
         return "회원가입 완료! (비밀번호가 안전하게 암호화되어 저장되었습니다.)";
     }
 
-    // 2. 로그인 및 JWT 발급 로직
     public String login(LoginRequest request) {
-        // 이메일 확인
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new IllegalArgumentException("가입되지 않은 이메일입니다."));
 
-        // 비밀번호 확인
+        // 소셜 계정으로 가입한 유저가 로컬로 로그인 시도 시 방어
+        if (!"local".equals(user.getProvider())) {
+            throw new IllegalArgumentException(user.getProvider() + " 소셜 계정으로 로그인해주세요.");
+        }
+
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             return "비밀번호가 일치하지 않습니다.";
         }
 
-        // JwtUtil을 사용해 암호화된 토큰을 발급합니다.
-        String token = jwtUtil.generateToken(user.getEmail());
-
-        return token;
+        return jwtUtil.generateToken(user.getEmail());
     }
 
     @org.springframework.transaction.annotation.Transactional

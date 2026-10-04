@@ -193,21 +193,29 @@ public class PlanController {
                 );
 
                 if (simResult.isSuccess()) {
-                    // 시뮬레이션 된 장소들을 즉시 DTO 템플릿(TimelineItem)에 매핑
                     for (PlanService.SimulatedItinerary simIti : simResult.getValidRoute()) {
                         AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
-                        item.setDay(day + 1); // 정확한 일차(Day) 셋팅
+                        item.setDay(day + 1);
                         item.setTime(simIti.getTime());
                         item.setPlaceId(simIti.getPlace().getPlaceId());
                         item.setPlaceName(simIti.getPlace().getName());
                         item.setCategory(simIti.getPlace().getCategory());
 
-                        // AI 의존성을 빼고 기본 설명 셋팅
                         String desc = simIti.getPlace().getTheme() != null ? simIti.getPlace().getTheme() + " 일정" : "추천 일정";
                         item.setDescription(desc);
 
                         item.setLatitude(simIti.getPlace().getLatitude());
                         item.setLongitude(simIti.getPlace().getLongitude());
+
+                        // 시작일(startDate) + 현재 루프의 일차(day) = 실제 방문 날짜 계산
+                        java.time.LocalDate targetDate = request.getStartDate().plusDays(day);
+
+                        // 계산된 실제 방문 날짜를 함께 넘겨서 그 요일에 맞는 영업시간만 빼옵니다.
+                        String[] displayDetails = googleMapsService.getPlaceDetailsForDisplay(simIti.getPlace().getPlaceId(), request.getLanguage(), targetDate);
+
+                        item.setFormattedAddress(displayDetails[0]);
+                        item.setPhoneNumber(displayDetails[1]);
+                        item.setOpeningHours(displayDetails[2]);
 
                         finalVerifiedTimeline.add(item);
                     }
@@ -262,13 +270,20 @@ public class PlanController {
                     }
 
                     AiRouteResponse.TimelineItem hotelItem = new AiRouteResponse.TimelineItem();
-                    hotelItem.setDay(1); // 1일차 마지막에 추천 (원하는 로직으로 변경 가능)
+                    hotelItem.setDay(1);
                     hotelItem.setTime("20:00");
                     hotelItem.setPlaceName(bestHotel.getName());
                     hotelItem.setCategory("숙소");
                     hotelItem.setDescription("[추천 숙소] " + city + " 지역의 평점 높은 숙소입니다.");
                     hotelItem.setLatitude(bestHotel.getLatitude());
                     hotelItem.setLongitude(bestHotel.getLongitude());
+
+                    // 숙소에도 텍스트 추가
+                    String[] hotelDetails = googleMapsService.getPlaceDetailsForDisplay(bestHotel.getPlaceId(), request.getLanguage(), request.getStartDate());
+                    hotelItem.setFormattedAddress(hotelDetails[0]);
+                    hotelItem.setPhoneNumber(hotelDetails[1]);
+                    hotelItem.setOpeningHours(hotelDetails[2]);
+
                     finalVerifiedTimeline.add(hotelItem);
                 }
             }

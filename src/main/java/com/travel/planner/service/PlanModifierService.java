@@ -28,6 +28,7 @@ public class PlanModifierService {
     private final AiService aiService;
     private final PlanService planService;
     private final ItineraryRepository itineraryRepository; // ItineraryRepository 필요 시 생성 요망
+    private final GoogleMapsService googleMapsService;
 
     @Transactional
     public RerouteResponse modifyPlanRoute(Long planId, RerouteRequest request) {
@@ -80,14 +81,25 @@ public class PlanModifierService {
             if (simResult.isSuccess()) {
                 isSuccess = true;
 
-                // 성공 시 DB 타임라인 덮어쓰기 로직 (간략화)
-                // 실제 서비스에서는 기존 Itinerary 삭제 후 새로 save 하는 로직이 들어갑니다.
                 List<AiRouteResponse.TimelineItem> updatedTimeline = new ArrayList<>();
                 for (PlanService.SimulatedItinerary simIti : simResult.getValidRoute()) {
                     AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
                     item.setDay(request.getDayNumber());
                     item.setTime(simIti.getTime());
                     item.setPlaceName(simIti.getPlace().getName());
+                    item.setLatitude(simIti.getPlace().getLatitude());
+                    item.setLongitude(simIti.getPlace().getLongitude());
+
+                    // 기존 여행 시작일 + (수정하려는 일차 - 1) = 실제 변경 방문 날짜
+                    java.time.LocalDate targetDate = plan.getStartDate().plusDays(request.getDayNumber() - 1);
+
+                    // 계산된 날짜를 넣어 호출
+                    String[] rerouteDetails = googleMapsService.getPlaceDetailsForDisplay(simIti.getPlace().getPlaceId(), "ko", targetDate);
+
+                    item.setFormattedAddress(rerouteDetails[0]);
+                    item.setPhoneNumber(rerouteDetails[1]);
+                    item.setOpeningHours(rerouteDetails[2]);
+
                     updatedTimeline.add(item);
                 }
 

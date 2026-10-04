@@ -391,4 +391,61 @@ public class GoogleMapsService {
         }
         return recommendedHotels;
     }
+
+    // 9. 프론트엔드 표시용 상세 정보 실시간 조회 (DB 저장 안 함, DTO에만 담기 위함)
+    public String[] getPlaceDetailsForDisplay(String placeId, String lang, java.time.LocalDate targetDate) {
+        String[] details = new String[]{"주소 정보 없음", "전화번호 정보 없음", "영업시간 정보 없음"};
+
+        if (placeId == null || placeId.isEmpty() || placeId.equals("DUMMY_FREE_TIME")) {
+            return details;
+        }
+
+        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
+        String url = "https://places.googleapis.com/v1/places/" + placeId + "?languageCode=" + targetLang;
+
+        try {
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.set("X-Goog-Api-Key", googleMapsApiKey);
+            headers.set("X-Goog-FieldMask", "formattedAddress,nationalPhoneNumber,regularOpeningHours.weekdayDescriptions");
+
+            org.springframework.http.HttpEntity<Void> request = new org.springframework.http.HttpEntity<>(headers);
+            org.springframework.http.ResponseEntity<String> response = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, request, String.class);
+
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(response.getBody());
+
+            if (node != null && !node.isMissingNode()) {
+                if (node.has("formattedAddress")) details[0] = node.get("formattedAddress").asText();
+                if (node.has("nationalPhoneNumber")) details[1] = node.get("nationalPhoneNumber").asText();
+
+                com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
+                if (!weekdayText.isMissingNode() && weekdayText.isArray() && weekdayText.size() > 0) {
+
+                    // 방문할 날짜의 요일을 한국어로 구합니다.
+                    String[] koreanDays = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"};
+                    int dayOfWeekValue = targetDate.getDayOfWeek().getValue(); // 1(월) ~ 7(일)
+                    String targetDayName = koreanDays[dayOfWeekValue - 1];
+
+                    boolean isFound = false;
+                    for (com.fasterxml.jackson.databind.JsonNode descNode : weekdayText) {
+                        String desc = descNode.asText();
+                        // 구글이 준 배열 중 "토요일: 오전 9:00~오후 10:00" 처럼 해당 요일이 포함된 문장만 추출
+                        if (desc.contains(targetDayName)) {
+                            details[2] = desc;
+                            isFound = true;
+                            break;
+                        }
+                    }
+
+                    // 만약 구글 응답에 예외가 생겨 요일을 못 찾으면 일단 7일 전체를 던져줌
+                    if (!isFound) {
+                        details[2] = weekdayText.get(0).asText();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Display Details 실시간 통신 에러 (" + placeId + "): " + e.getMessage());
+        }
+
+        return details;
+    }
 }

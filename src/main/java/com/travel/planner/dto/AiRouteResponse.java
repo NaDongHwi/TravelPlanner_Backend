@@ -30,5 +30,10 @@ public class AiRouteResponse {
         // 프론트엔드 지도 렌더링을 위한 좌표 데이터
         private Double latitude;
         private Double longitude;
+
+        // 프론트엔드 텍스트 칸 표시를 위해 추가된 필드 3개
+        private String formattedAddress;
+        private String phoneNumber;
+        private String openingHours;
     }
 }

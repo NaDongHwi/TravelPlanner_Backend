@@ -101,7 +101,7 @@ public class GoogleMapsService {
                 double rating = firstResult.path("rating").asDouble(0.0);
                 int reviewCount = firstResult.path("userRatingCount").asInt(0);
 
-                if (rating < 3.5 || reviewCount < 50) {
+                if (rating < 3.5 || reviewCount < 20) {
                     System.out.println("[수질 검증 탈락] '" + placeName + "' (평점: " + rating + ", 리뷰: " + reviewCount + "개) -> 고품질 DB 기준 미달로 차단합니다.");
                     return resultPlace;
                 }
@@ -295,8 +295,8 @@ public class GoogleMapsService {
                 continue;
             }
 
-            boolean isHighQuality = (rating >= 4.0 && reviewCount >= 300);
-            boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 1500);
+            boolean isHighQuality = (rating >= 4.0 && reviewCount >= 100);
+            boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 300);
             boolean isEmergencyPass = isEmergency && (rating >= 1.5 && reviewCount >= 10);
 
             if (isHighQuality || isSuperLandmark || isEmergencyPass) {
@@ -375,7 +375,7 @@ public class GoogleMapsService {
                     double rating = node.path("rating").asDouble(0.0);
                     int reviewCount = node.path("userRatingCount").asInt(0);
 
-                    if (rating >= 3.5 && reviewCount >= 100) {
+                    if (rating >= 3.5 && reviewCount >= 50) {
                         Place hotel = new Place();
                         hotel.setName(node.path("displayName").path("text").asText());
                         hotel.setCity(city);

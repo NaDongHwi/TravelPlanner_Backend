@@ -28,10 +28,13 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         if (attributes.containsKey("kakao_account")) {
             Map<String, Object> kakaoAccount = (Map<String, Object>) attributes.get("kakao_account");
             email = (String) kakaoAccount.get("email");
+            if (email == null || email.isEmpty()) {
+                email = attributes.get("id") + "@kakao.user";
+            }
         } else if (attributes.containsKey("response")) {
             // 네이버 구조 파싱
             Map<String, Object> responseMap = (Map<String, Object>) attributes.get("response");
-            email = (String) responseMap.get("email");
+            email = (String) responseMap.get("id") + "@naver.user";
         } else {
             // 구글 등 표준 구조
             email = (String) attributes.get("email");

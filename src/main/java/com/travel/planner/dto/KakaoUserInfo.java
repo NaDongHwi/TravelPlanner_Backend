@@ -18,7 +18,14 @@ public class KakaoUserInfo implements OAuth2UserInfo {
     public String getProvider() { return "kakao"; }
 
     @Override
-    public String getEmail() { return (String) kakaoAccount.get("email"); }
+    public String getEmail() {
+        String email = (String) kakaoAccount.get("email");
+        // 비즈앱이 아니라서 이메일을 못 받아와서 고유 ID로 가짜 이메일 생성
+        if (email == null || email.isEmpty()) {
+            return getProviderId() + "@kakao.user"; // 예: 3456789012@kakao.user
+        }
+        return email;
+    }
 
     @Override
     public String getName() {

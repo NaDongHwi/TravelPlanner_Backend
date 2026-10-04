@@ -107,7 +107,9 @@ public class PlanController {
             }
 
             try {
-                String formalizedCity = googleMapsService.getFormalizedJapanCity(mainCity);
+                // 요청된 여러 도시를 번갈아가며 검색
+                String targetCity = request.getCities().get(emergencyCallCount % request.getCities().size());
+                String formalizedCity = googleMapsService.getFormalizedJapanCity(targetCity);
 
                 List<String> dynamicKeywords = new ArrayList<>();
                 if (request.getThemes() != null && !request.getThemes().isEmpty()) {
@@ -119,39 +121,25 @@ public class PlanController {
                 String baseKeyword = dynamicKeywords.get(emergencyCallCount % dynamicKeywords.size());
                 String searchKeyword = baseKeyword;
 
-                // 테마 제한 해제 & 프론트엔드 파라미터(excludeSuburbs) 연동
-                // 잉여 일수가 3일 이상이고, 유저가 '근교 제외'를 요청하지 않았다면 무조건 근교를 포함하여 스위핑
                 if (excessDays >= 3 && !request.isExcludeSuburbs()) {
                     searchKeyword = baseKeyword + " 근교 명소";
-                    System.out.println("[장기 여행자 감지] 잉여 일수 " + excessDays + "일. 근교(" + searchKeyword + ") 탐색 범위 자동 확장!");
                 }
 
                 List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword, true);
 
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
-
-                    // DB 무결성 보호: p.setCity(mainCity); 삭제
-                    // 아타미(근교) 장소의 city 값을 억지로 '시즈오카'로 덮어씌우면 DB 지리 정보가 오염됨.
-                    // Google API가 반환한 원래 도시명(또는 null)을 유지하되, 이번 여행 메모리 풀(allCityPlaces)에는 합류시켜 좌표 기반으로 동선이 짜이게 만듦.
-                    if (p.getCity() == null) {
-                        p.setCity(mainCity); // 구글이 도시를 못 줬을 때만 임시로 메인 도시 부여
-                    }
-
+                    if (p.getCity() == null) p.setCity(targetCity);
                     if (p.getCategory() == null) p.setCategory("관광지");
                     if (p.getTheme() == null) p.setTheme(baseKeyword);
                     if (p.getRecommendedDuration() == null) p.setRecommendedDuration(120);
 
-                    // DB 적재 및 현재 여행 시뮬레이션 풀에 합류
                     if (!placeRepository.existsByPlaceId(p.getPlaceId())) {
                         Place savedPlace = placeRepository.save(p);
                         allCityPlaces.add(savedPlace);
                     } else {
-                        // 이미 DB에 있는 근교 장소라도, 이번 여행 풀에 없다면 끌어옴
                         Place existingPlace = placeRepository.findByPlaceId(p.getPlaceId()).get();
-                        if (!allCityPlaces.contains(existingPlace)) {
-                            allCityPlaces.add(existingPlace);
-                        }
+                        if (!allCityPlaces.contains(existingPlace)) allCityPlaces.add(existingPlace);
                     }
                 }
             } catch (Exception e) {
@@ -262,6 +250,29 @@ public class PlanController {
         plan.setOutCity(request.getOutCity());
         plan.setInTime(request.getInTime() != null ? request.getInTime() : "미정");
         plan.setOutTime(request.getOutTime() != null ? request.getOutTime() : "미정");
+
+        if (request.isSuggestHotel() && request.getCities() != null && !request.getCities().isEmpty()) {
+            for (String city : request.getCities()) {
+                List<Place> hotels = googleMapsService.searchRecommendedHotels(city);
+                if (!hotels.isEmpty()) {
+                    Place bestHotel = hotels.get(0); // 가장 평점 좋은 호텔 1개
+                    // DB에 없으면 저장
+                    if (!placeRepository.existsByPlaceId(bestHotel.getPlaceId())) {
+                        placeRepository.save(bestHotel);
+                    }
+
+                    AiRouteResponse.TimelineItem hotelItem = new AiRouteResponse.TimelineItem();
+                    hotelItem.setDay(1); // 1일차 마지막에 추천 (원하는 로직으로 변경 가능)
+                    hotelItem.setTime("20:00");
+                    hotelItem.setPlaceName(bestHotel.getName());
+                    hotelItem.setCategory("숙소");
+                    hotelItem.setDescription("[추천 숙소] " + city + " 지역의 평점 높은 숙소입니다.");
+                    hotelItem.setLatitude(bestHotel.getLatitude());
+                    hotelItem.setLongitude(bestHotel.getLongitude());
+                    finalVerifiedTimeline.add(hotelItem);
+                }
+            }
+        }
 
         if (request.getThemes() != null) plan.setTheme(String.join(", ", request.getThemes()));
         plan.setAiReason(finalResponse.getReason());

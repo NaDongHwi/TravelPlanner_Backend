@@ -171,15 +171,15 @@ public class PlanService {
     }
 
     public List<Place> selectCandidates(List<Place> scoredPlaces, PlanRequest request, int totalDays) {
-        int totalAvailableMinutes = calculateTotalPhysicalMinutes(request, totalDays);
+        int totalAvailableMinutes = (int) (calculateTotalPhysicalMinutes(request, totalDays) * 1.5);
         int accumulatedTime = 0;
         int maxBudget = Integer.MAX_VALUE;
         int accumulatedCost = 0;
 
         List<Place> selected = new ArrayList<>();
         int foodCount = 0;
-        boolean isFoodLover = request.getThemes() != null && request.getThemes().stream().anyMatch(t -> t.contains("맛집") || t.contains("식도락"));
-        int maxFoodLimit = isFoodLover ? totalDays * 3 : totalDays * 2;
+        boolean isFoodLover = request.getThemes() != null && request.getThemes().stream().anyMatch(t -> t.contains("맛집") || t.contains("식도락") || t.contains("카페"));
+        int maxFoodLimit = isFoodLover ? totalDays * 4 : totalDays * 3;
 
         for (Place p : scoredPlaces) {
             if (p.getName().contains("공항")) {
@@ -320,6 +320,26 @@ public class PlanService {
         int currentBudgetUsed = 0;
         int maxBudget = Integer.MAX_VALUE;
         int dailyFoodCount = 0;
+        int dailyShoppingCount = 0;
+
+        // 유저가 쇼핑 테마를 선택했는지 파악하여 한도를 동적으로 부여합니다.
+        boolean isShoppingLover = request.getThemes() != null && request.getThemes().contains("쇼핑");
+        int maxShoppingLimit = isShoppingLover ? 3 : 1; // 쇼핑 테마는 하루 3번 허용, 아니면 1번
+
+        // 맛집/카페 테마를 선택한 사람은 하루 4번(아/점/저/야식or카페), 일반인은 3번(점/저/카페) 허용
+        boolean isFoodLover = request.getThemes() != null && (request.getThemes().contains("맛집") || request.getThemes().contains("카페"));
+        int maxFoodLimit = isFoodLover ? 4 : 3;
+
+        // 오늘 일정(draftRoute) 중 첫 번째 유효 장소의 좌표를 동적 기준점으로 추출
+        double baseLat = 0.0;
+        double baseLng = 0.0;
+        for (Place p : draftRoute) {
+            if (p.getLatitude() != null && p.getLatitude() != 0.0) {
+                baseLat = p.getLatitude();
+                baseLng = p.getLongitude();
+                break;
+            }
+        }
 
         for (Place p : draftRoute) {
             if (p.getName().contains("공항")) {
@@ -370,14 +390,33 @@ public class PlanService {
                 if (hasConflict) continue;
             }
 
+            // 식음 및 쇼핑 카테고리 쿼터제 적용
             if ("식음".equals(p.getCategory())) {
-                if (dailyFoodCount >= 2) continue;
-                if (prevPlace != null && "식음".equals(prevPlace.getCategory())) continue;
+                if (dailyFoodCount >= maxFoodLimit) continue;
+
+                // 연속 식음료 제한 해제 (밥->밥은 막고, 밥->카페는 허용)
+                if (prevPlace != null && "식음".equals(prevPlace.getCategory())) {
+
+                    // 현재 장소와 이전 장소가 '카페'인지 이름과 테마로 유추
+                    boolean isCurrentCafe = (p.getTheme() != null && p.getTheme().contains("카페")) || p.getName().toLowerCase().contains("cafe") || p.getName().contains("커피");
+                    boolean isPrevCafe = (prevPlace.getTheme() != null && prevPlace.getTheme().contains("카페")) || prevPlace.getName().toLowerCase().contains("cafe") || prevPlace.getName().contains("커피");
+
+                    // 식당->식당 연속이거나, 카페->카페 연속인 경우에만 컷 (식당->카페는 무사 통과)
+                    if (isCurrentCafe == isPrevCafe) {
+                        continue;
+                    }
+                }
+            }
+
+            if ("쇼핑".equals(p.getCategory())) {
+                if (dailyShoppingCount >= maxShoppingLimit) continue;
             }
 
             boolean isNightSpot = p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경"));
+
             if (isNightSpot && currentTime.isBefore(LocalTime.of(17, 0))) {
-                continue;
+                // 오후 5시 이전이면, 이 장소를 버리지 않고 일정을 강제로 오후 5시 30분으로 점프시킴
+                currentTime = LocalTime.of(17, 30);
             }
 
             LocalTime openTime = parseOpenTime(p.getOpeningHours());
@@ -398,19 +437,20 @@ public class PlanService {
             }
 
             if ("식음".equals(p.getCategory())) dailyFoodCount++;
+            if ("쇼핑".equals(p.getCategory())) dailyShoppingCount++;
 
             validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
             currentTime = finishTime;
             prevPlace = p;
         }
 
-        if (insertDummyNode && currentTime.isBefore(dayEndTime.minusHours(2))) {
+        if (validRoute.isEmpty() || (insertDummyNode && currentTime.isBefore(LocalTime.of(15, 0)))) {
             Place dummyNode = new Place();
             dummyNode.setName("[자유 시간 및 로컬 탐방]");
             dummyNode.setCategory("자유시간");
             dummyNode.setTheme("힐링,산책");
-            dummyNode.setLatitude(prevPlace != null ? prevPlace.getLatitude() : 0.0);
-            dummyNode.setLongitude(prevPlace != null ? prevPlace.getLongitude() : 0.0);
+            dummyNode.setLatitude(prevPlace != null && prevPlace.getLatitude() != null && prevPlace.getLatitude() != 0.0 ? prevPlace.getLatitude() : baseLat);
+            dummyNode.setLongitude(prevPlace != null && prevPlace.getLongitude() != null && prevPlace.getLongitude() != 0.0 ? prevPlace.getLongitude() : baseLng);
 
             validRoute.add(new SimulatedItinerary(dummyNode, currentTime.toString()));
         }

@@ -125,7 +125,7 @@ public class PlanController {
                     searchKeyword = baseKeyword + " 근교 명소";
                 }
 
-                List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, searchKeyword, true);
+                List<Place> emergencyPlaces = googleMapsService.searchNewPlacesFromGoogle(targetCity, formalizedCity, searchKeyword, true);
 
                 for (Place p : emergencyPlaces) {
                     if (p.getPlaceId() == null || p.getPlaceId().trim().isEmpty()) continue;
@@ -160,7 +160,7 @@ public class PlanController {
         if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
             // 1. 유저가 직접 입력한 숙소가 있는 경우 (구글 API로 좌표 찾기)
             PlanRequest.AccommodationInput acc = request.getAccommodations().get(0);
-            List<Place> searchResult = googleMapsService.searchNewPlacesFromGoogle(mainCity, acc.getName(), false);
+            List<Place> searchResult = googleMapsService.searchNewPlacesFromGoogle(mainCity, mainCity, acc.getName(), false);
             if (!searchResult.isEmpty()) {
                 baseCamp = searchResult.get(0);
                 baseCamp.setCategory("숙소");

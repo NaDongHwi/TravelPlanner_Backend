@@ -62,36 +62,52 @@ public class AdminController {
             return "오류 발생: 정확한 일본 지명을 찾을 수 없어 데이터 수집을 취소합니다.";
         }
 
-        // 신버전 API의 적은 응답량을 극복하기 위해 스위핑 키워드 확장
-        String[] keywordSuite = (keyword == null || keyword.trim().isEmpty())
+        // [수정 포인트 1] 무의미한 30개 문자열 대신 Type과 특수 텍스트를 혼합한 하이브리드 배열 사용
+        String[] searchSuite = (keyword == null || keyword.trim().isEmpty())
                 ? new String[]{
-                // 1. 관광 명소 세분화
-                "필수 관광지", "숨은 명소", "역사 유적지", "신사 사찰", "박물관 미술관", "대형 공원",
-                "테마파크", "가족 여행 명소", "연인 데이트 코스", "야경 명소", "일몰 명소", "전망대",
-                // 2. 식음료(F&B) 세분화
-                "현지인 추천 맛집", "로컬 맛집", "미슐랭 식당", "예약 필수 레스토랑",
-                "스시 오마카세", "야키니쿠 전문점", "라멘 맛집", "우동 소바", "가성비 식당",
-                "유명 카페", "인스타 감성 디저트", "베이커리", "전통 찻집", "이자카야", "포장마차 거리",
-                // 3. 쇼핑 세분화
-                "대형 백화점", "아울렛 쇼핑", "돈키호테", "드럭스토어", "기념품 상점", "전통 시장"
+                // 1. 구글 공식 타입 (호출 최소화, 중복 방지)
+                "[TYPE]tourist_attraction",
+                "[TYPE]restaurant",
+                "[TYPE]cafe",
+                "[TYPE]shopping_mall",
+                "[TYPE]lodging",
+                // 2. 타입으로 못 잡는 필수 핀포인트 키워드
+                "[TEXT]돈키호테",
+                "[TEXT]드럭스토어",
+                "[TEXT]기념품 상점",
+                "[TEXT]시장",
+                "[TEXT]공원"
         }
                 : new String[]{keyword};
 
         int totalInserted = 0;
         int totalSkipped = 0;
 
-        for (String kw : keywordSuite) {
-            // 구글 신버전 API를 30번 찌릅니다.
-            List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(formalizedCity, kw, false);
+        // [수정 포인트 2] 하드코딩 대신 구글 API를 이용해 해당 도시의 주요 거점(역 등) 동적 추출
+        List<String> dynamicRegions = googleMapsService.getDynamicSubRegions(formalizedCity);
+        System.out.println("[" + city + "] 동적 검색 거점 확보: " + dynamicRegions);
 
-            for (Place googlePlace : googlePlaces) {
-                googlePlace.setCity(city);
-                if (placeRepository.existsByPlaceId(googlePlace.getPlaceId())) {
-                    totalSkipped++;
-                    continue;
+        // [수정 포인트 3] 동적 거점 x 하이브리드 검색 조건 2중 for문 실행
+        for (String region : dynamicRegions) {
+            for (String searchItem : searchSuite) {
+                // 파라미터 시그니처 변경 반영: city, region, searchItem 전달
+                List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(city, region, searchItem, false);
+
+                for (Place googlePlace : googlePlaces) {
+                    if (googlePlace.getPlaceId() == null || googlePlace.getPlaceId().trim().isEmpty()) {
+                        continue;
+                    }
+
+                    googlePlace.setCity(city);
+
+                    if (placeRepository.existsByPlaceId(googlePlace.getPlaceId())) {
+                        totalSkipped++;
+                        continue;
+                    }
+
+                    placeRepository.save(googlePlace);
+                    totalInserted++;
                 }
-                placeRepository.save(googlePlace);
-                totalInserted++;
             }
         }
 

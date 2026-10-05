@@ -209,22 +209,67 @@ public class GoogleMapsService {
         return "리뷰 정보 없음";
     }
 
+    // 도시 이름을 기반으로 주요 역/거점 상위 5개를 동적으로 가져옵니다.
+    public List<String> getDynamicSubRegions(String city) {
+        List<String> subRegions = new ArrayList<>();
+        subRegions.add(city); // 도시 이름 자체로도 1회 검색하도록 추가
+
+        String url = "https://places.googleapis.com/v1/places:searchText";
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("X-Goog-Api-Key", googleMapsApiKey);
+            headers.set("X-Goog-FieldMask", "places.displayName.text"); // 과금 최소화를 위해 이름만 호출
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("textQuery", city + " 주요 기차역 지하철역");
+            body.put("languageCode", "ko");
+            body.put("regionCode", "JP");
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+            String response = restTemplate.postForObject(url, request, String.class);
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode places = root.path("places");
+
+            if (!places.isMissingNode() && places.isArray()) {
+                int count = 0;
+                for (JsonNode node : places) {
+                    String stationName = node.path("displayName").path("text").asText();
+                    subRegions.add(city + " " + stationName);
+                    count++;
+                    if (count >= 5) break; // 최대 5개 거점만 추출 (과금 방어)
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[" + city + "] 동적 하위 지역 추출 실패, 기본 지명만 사용: " + e.getMessage());
+        }
+        return subRegions;
+    }
+
     // 4. 대량 자동 수집 -> Places API (New) 및 JSON 페이징 적용
-    public List<Place> searchNewPlacesFromGoogle(String city, String keyword, boolean isEmergency) {
+    public List<Place> searchNewPlacesFromGoogle(String city, String region, String searchItem, boolean isEmergency) {
         List<Place> fetchedPlaces = new ArrayList<>();
         String url = "https://places.googleapis.com/v1/places:searchText";
 
         try {
-            String searchQuery = city + " " + keyword;
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
             headers.set("X-Goog-FieldMask", "places.id,places.displayName.text,places.formattedAddress,places.rating,places.userRatingCount,places.location,places.types,nextPageToken");
 
             Map<String, Object> body = new HashMap<>();
-            body.put("textQuery", searchQuery);
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
+
+            // [TYPE]과 [TEXT] 태그를 분기하여 쿼리(Body) 조립
+            if (searchItem != null && searchItem.startsWith("[TYPE]")) {
+                String type = searchItem.replace("[TYPE]", "");
+                body.put("textQuery", region); // 검색어는 오직 거점(예: "도쿄 신주쿠")
+                body.put("includedType", type); // 카테고리 강제 필터링 (예: "restaurant")
+            } else {
+                String text = (searchItem != null) ? searchItem.replace("[TEXT]", "") : "";
+                body.put("textQuery", region + " " + text); // 일반 텍스트 검색 (예: "도쿄 신주쿠 돈키호테")
+            }
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
             String response = restTemplate.postForObject(url, request, String.class);
@@ -238,7 +283,7 @@ public class GoogleMapsService {
 
             while (nextToken != null && !nextToken.isEmpty() && pageCount < 3) {
                 Thread.sleep(2000);
-                System.out.println("➡️ [" + keyword + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 연속 수집 중...");
+                System.out.println("➡️ [" + searchItem + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 연속 수집 중...");
 
                 // body에 pageToken 추가 후 다음 페이지 요청
                 body.put("pageToken", nextToken);

@@ -47,7 +47,7 @@ public class AdminController {
     }
 
     @PostMapping("/collect-places")
-    @Operation(summary = "구글 API 기반 특정 도시 장소 자동 대량 수집 (자체 지명 검증 엔진 탑재)")
+    @Operation(summary = "구글 API 기반 특정 도시 장소 자동 대량 수집 (Viewport 기반 동적 그리드 엔진 탑재)")
     public String collectNewPlaces(
             @RequestParam String city,
             @RequestParam(required = false) String keyword
@@ -56,61 +56,54 @@ public class AdminController {
 
         try {
             formalizedCity = googleMapsService.getFormalizedJapanCity(city);
-            System.out.println("[어드민 대량 적재 엔진] 입력 지명: [" + city + "] -> 정제 지명: [" + formalizedCity + "]");
+            System.out.println("[어드민 대량 적재 엔진] 입력 지명: [" + city + "] -> 정식 행정명: [" + formalizedCity + "]");
         } catch (RuntimeException e) {
             System.out.println("[차단됨] 쓰레기 데이터 유입을 막기 위해 수집을 취소합니다. 원인: " + e.getMessage());
             return "오류 발생: 정확한 일본 지명을 찾을 수 없어 데이터 수집을 취소합니다.";
         }
 
-        // [수정 포인트 1] 무의미한 30개 문자열 대신 Type과 특수 텍스트를 혼합한 하이브리드 배열 사용
         String[] searchSuite = (keyword == null || keyword.trim().isEmpty())
                 ? new String[]{
-                // 1. 구글 공식 타입 (호출 최소화, 중복 방지)
                 "[TYPE]tourist_attraction",
                 "[TYPE]restaurant",
                 "[TYPE]cafe",
                 "[TYPE]shopping_mall",
                 "[TYPE]lodging",
-                // 2. 타입으로 못 잡는 필수 핀포인트 키워드
                 "[TEXT]돈키호테",
                 "[TEXT]드럭스토어",
                 "[TEXT]기념품 상점",
                 "[TEXT]시장",
-                "[TEXT]공원"
+                "[TEXT]온천"
         }
                 : new String[]{keyword};
 
         int totalInserted = 0;
         int totalSkipped = 0;
 
-        // [수정 포인트 2] 하드코딩 대신 구글 API를 이용해 해당 도시의 주요 거점(역 등) 동적 추출
-        List<String> dynamicRegions = googleMapsService.getDynamicSubRegions(formalizedCity);
-        System.out.println("[" + city + "] 동적 검색 거점 확보: " + dynamicRegions);
+        List<double[]> cityGrid = googleMapsService.getCityGrid(formalizedCity);
+        System.out.println("[" + city + "] 동적 그리드(Grid) 맵핑 완료. 총 " + cityGrid.size() + "개의 그물망 투척 준비.");
 
-        // [수정 포인트 3] 동적 거점 x 하이브리드 검색 조건 2중 for문 실행
-        for (String region : dynamicRegions) {
+        for (double[] gridNode : cityGrid) {
             for (String searchItem : searchSuite) {
-                // 파라미터 시그니처 변경 반영: city, region, searchItem 전달
-                List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(city, region, searchItem, false);
+                List<Place> googlePlaces = googleMapsService.searchNewPlacesFromGoogle(
+                        city, formalizedCity, gridNode[0], gridNode[1], gridNode[2], searchItem, false
+                );
 
                 for (Place googlePlace : googlePlaces) {
                     if (googlePlace.getPlaceId() == null || googlePlace.getPlaceId().trim().isEmpty()) {
                         continue;
                     }
-
                     googlePlace.setCity(city);
 
                     if (placeRepository.existsByPlaceId(googlePlace.getPlaceId())) {
                         totalSkipped++;
                         continue;
                     }
-
                     placeRepository.save(googlePlace);
                     totalInserted++;
                 }
             }
         }
-
         return String.format("[%s] 대량 자동 수집 완료! -> 신규 명소 등록: %d건 / 기존 중복 패스: %d건", city, totalInserted, totalSkipped);
     }
 

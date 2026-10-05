@@ -209,6 +209,58 @@ public class GoogleMapsService {
         return "리뷰 정보 없음";
     }
 
+    // 구글 Viewport를 활용하여 도시 크기에 딱 맞는 5개의 그물망(Grid) 좌표와 반경을 생성합니다.
+    public List<double[]> getCityGrid(String cityInput) {
+        List<double[]> gridPoints = new ArrayList<>();
+        String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
+
+        try {
+            String response = restTemplate.getForObject(url, String.class, cityInput, googleMapsApiKey);
+            JsonNode root = objectMapper.readTree(response);
+
+            if ("OK".equals(root.path("status").asText())) {
+                JsonNode geometry = root.path("results").get(0).path("geometry");
+
+                // 1. 도시 정중앙 좌표
+                double centerLat = geometry.path("location").path("lat").asDouble();
+                double centerLng = geometry.path("location").path("lng").asDouble();
+
+                JsonNode viewport = geometry.path("viewport");
+                if (!viewport.isMissingNode()) {
+                    double neLat = viewport.path("northeast").path("lat").asDouble();
+                    double neLng = viewport.path("northeast").path("lng").asDouble();
+                    double swLat = viewport.path("southwest").path("lat").asDouble();
+                    double swLng = viewport.path("southwest").path("lng").asDouble();
+
+                    // 2. 도시 실제 크기(면적) 계산
+                    double latDiff = neLat - swLat;
+                    double lngDiff = neLng - swLng;
+                    double maxDiff = Math.max(latDiff, lngDiff);
+
+                    // 3. 그물망 하나의 반경(Radius) 동적 계산 (도쿄는 크게, 유후인은 작게)
+                    double radius = (maxDiff * 111000) / 3.0;
+                    if (radius > 50000) radius = 50000; // 구글 최대 허용치 50km
+                    if (radius < 2000) radius = 2000;   // 최소 2km 보장
+
+                    // 4. 중앙, 북, 남, 동, 서 5곳에 그물망 좌표 투척
+                    gridPoints.add(new double[]{centerLat, centerLng, radius});
+                    double latOffset = (neLat - centerLat) / 1.5;
+                    double lngOffset = (neLng - centerLng) / 1.5;
+
+                    gridPoints.add(new double[]{centerLat + latOffset, centerLng, radius});
+                    gridPoints.add(new double[]{centerLat - latOffset, centerLng, radius});
+                    gridPoints.add(new double[]{centerLat, centerLng + lngOffset, radius});
+                    gridPoints.add(new double[]{centerLat, centerLng - lngOffset, radius});
+                } else {
+                    gridPoints.add(new double[]{centerLat, centerLng, 10000}); // 뷰포트 실패 시 기본 10km
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("그리드 추출 실패: " + e.getMessage());
+        }
+        return gridPoints;
+    }
+
     // 도시 이름을 기반으로 주요 역/거점 상위 5개를 동적으로 가져옵니다.
     public List<String> getDynamicSubRegions(String city) {
         List<String> subRegions = new ArrayList<>();
@@ -219,10 +271,11 @@ public class GoogleMapsService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "places.displayName.text"); // 과금 최소화를 위해 이름만 호출
+            // 검증을 위해 주소(formattedAddress)도 함께 달라고 요청합니다.
+            headers.set("X-Goog-FieldMask", "places.displayName.text,places.formattedAddress");
 
             Map<String, Object> body = new HashMap<>();
-            body.put("textQuery", city + " 주요 기차역 지하철역");
+            body.put("textQuery", city + " 주요 전철역(駅)");
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
 
@@ -235,6 +288,13 @@ public class GoogleMapsService {
                 int count = 0;
                 for (JsonNode node : places) {
                     String stationName = node.path("displayName").path("text").asText();
+                    String address = node.path("formattedAddress").asText("");
+
+                    // 반환된 주소에 '일본'이나 'Japan'이 없으면 컷
+                    if (!address.contains("일본") && !address.contains("Japan")) {
+                        continue;
+                    }
+
                     subRegions.add(city + " " + stationName);
                     count++;
                     if (count >= 5) break; // 최대 5개 거점만 추출 (과금 방어)
@@ -246,8 +306,8 @@ public class GoogleMapsService {
         return subRegions;
     }
 
-    // 4. 대량 자동 수집 -> Places API (New) 및 JSON 페이징 적용
-    public List<Place> searchNewPlacesFromGoogle(String city, String region, String searchItem, boolean isEmergency) {
+    // 4. 대량 자동 수집
+    public List<Place> searchNewPlacesFromGoogle(String city, String formalizedCity, double lat, double lng, double radius, String searchItem, boolean isEmergency) {
         List<Place> fetchedPlaces = new ArrayList<>();
         String url = "https://places.googleapis.com/v1/places:searchText";
 
@@ -261,37 +321,45 @@ public class GoogleMapsService {
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
 
-            // [TYPE]과 [TEXT] 태그를 분기하여 쿼리(Body) 조립
+            Map<String, Object> center = new HashMap<>();
+            center.put("latitude", lat);
+            center.put("longitude", lng);
+            Map<String, Object> circle = new HashMap<>();
+            circle.put("center", center);
+            circle.put("radius", radius);
+            Map<String, Object> locationRestriction = new HashMap<>();
+            locationRestriction.put("circle", circle);
+            body.put("locationRestriction", locationRestriction);
+
             if (searchItem != null && searchItem.startsWith("[TYPE]")) {
                 String type = searchItem.replace("[TYPE]", "");
-                body.put("textQuery", region); // 검색어는 오직 거점(예: "도쿄 신주쿠")
-                body.put("includedType", type); // 카테고리 강제 필터링 (예: "restaurant")
+                body.put("includedType", type);
+                body.put("textQuery", formalizedCity); // 예: "일본 오이타현 유후시"
             } else {
                 String text = (searchItem != null) ? searchItem.replace("[TEXT]", "") : "";
-                body.put("textQuery", region + " " + text); // 일반 텍스트 검색 (예: "도쿄 신주쿠 돈키호테")
+                body.put("textQuery", formalizedCity + " " + text); // 예: "일본 오이타현 유후시 온천"
             }
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
             String response = restTemplate.postForObject(url, request, String.class);
             JsonNode root = objectMapper.readTree(response);
 
-            // 1페이지 처리
-            parsePlacesFromNode(root, fetchedPlaces, city, isEmergency);
+            // 파라미터로 formalizedCity 전달
+            parsePlacesFromNode(root, fetchedPlaces, city, formalizedCity, isEmergency);
 
             String nextToken = root.path("nextPageToken").asText(null);
             int pageCount = 1;
 
             while (nextToken != null && !nextToken.isEmpty() && pageCount < 3) {
                 Thread.sleep(2000);
-                System.out.println("➡️ [" + searchItem + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 연속 수집 중...");
+                System.out.println("➡️ [" + searchItem + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 수집 중...");
 
-                // body에 pageToken 추가 후 다음 페이지 요청
                 body.put("pageToken", nextToken);
                 HttpEntity<Map<String, Object>> nextRequest = new HttpEntity<>(body, headers);
                 String nextResponse = restTemplate.postForObject(url, nextRequest, String.class);
                 JsonNode nextRoot = objectMapper.readTree(nextResponse);
 
-                parsePlacesFromNode(nextRoot, fetchedPlaces, city, isEmergency);
+                parsePlacesFromNode(nextRoot, fetchedPlaces, city, formalizedCity, isEmergency);
                 nextToken = nextRoot.path("nextPageToken").asText(null);
                 pageCount++;
             }
@@ -302,42 +370,27 @@ public class GoogleMapsService {
         return fetchedPlaces;
     }
 
-    // 5. 수질 관리 필터 및 우편번호 트랩 방어
-    private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city, boolean isEmergency) {
-        JsonNode results = root.path("places"); // 신버전 API는 배열 이름이 'places'
+    // 5. 수질 관리 필터
+    private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city, String formalizedCity, boolean isEmergency) {
+        JsonNode results = root.path("places");
         if (results.isMissingNode() || !results.isArray()) return;
 
-        String coreCityName = city.replace("일본", "").replaceAll("〒[0-9]{3}-[0-9]{4}", "").trim();
-        if (coreCityName.contains(" ")) {
-            coreCityName = coreCityName.split(" ")[0];
-        }
-
-        String safeCityName = coreCityName;
-        if (safeCityName.length() >= 2) {
-            if (safeCityName.endsWith("도") && !safeCityName.equals("홋카이도")) {
-                safeCityName = safeCityName.substring(0, safeCityName.length() - 1);
-            } else if (safeCityName.endsWith("부") || safeCityName.endsWith("현") || safeCityName.endsWith("시")) {
-                safeCityName = safeCityName.substring(0, safeCityName.length() - 1);
-            }
-        }
+        // "일본 오이타현 유후시"에서 끝단 행정구역인 "유후시" 추출
+        String cleanFormalCity = formalizedCity.replace("일본", "").trim();
+        String[] formalParts = cleanFormalCity.split(" ");
+        String strictCityName = formalParts[formalParts.length - 1]; // "도쿄도", "유후시", "하코네마치" 등
 
         for (JsonNode node : results) {
-            // 신버전 API JSON 경로 매핑
             double rating = node.path("rating").asDouble(0.0);
             int reviewCount = node.path("userRatingCount").asInt(0);
             String placeName = node.path("displayName").path("text").asText();
-            String address = node.path("formattedAddress").asText();
+            String address = node.path("formattedAddress").asText("");
 
-            if (address == null) continue;
+            if (address.isEmpty() || address.contains("대한민국") || address.contains("한국")) continue;
 
-            String lowerAddr = address.toLowerCase();
-            if (lowerAddr.contains("대한민국") || lowerAddr.contains("한국") ||
-                    lowerAddr.contains("korea") || lowerAddr.contains("seoul") || lowerAddr.contains("서울")) {
-                continue;
-            }
-
-            if (!address.contains(safeCityName)) {
-                continue;
+            // 유저 입력어(유후인) OR 정식 행정구역명(유후시) 중 하나라도 포함되면 통과!
+            if (!address.contains(city) && !address.contains(strictCityName)) {
+                continue; // 둘 다 없으면 이웃 동네(벳푸 등)이므로 컷오프
             }
 
             boolean isHighQuality = (rating >= 4.0 && reviewCount >= 100);

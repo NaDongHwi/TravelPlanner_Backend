@@ -327,9 +327,11 @@ public class GoogleMapsService {
             Map<String, Object> circle = new HashMap<>();
             circle.put("center", center);
             circle.put("radius", radius);
-            Map<String, Object> locationRestriction = new HashMap<>();
-            locationRestriction.put("circle", circle);
-            body.put("locationRestriction", locationRestriction);
+
+            // 원형(circle) 탐색을 지원하는 locationBias(우선 탐색) 옵션으로 변경
+            Map<String, Object> locationBias = new HashMap<>();
+            locationBias.put("circle", circle);
+            body.put("locationBias", locationBias);
 
             if (searchItem != null && searchItem.startsWith("[TYPE]")) {
                 String type = searchItem.replace("[TYPE]", "");

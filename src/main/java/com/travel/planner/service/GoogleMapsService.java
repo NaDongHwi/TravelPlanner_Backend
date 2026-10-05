@@ -336,17 +336,16 @@ public class GoogleMapsService {
             if (searchItem != null && searchItem.startsWith("[TYPE]")) {
                 String type = searchItem.replace("[TYPE]", "");
                 body.put("includedType", type);
-                body.put("textQuery", formalizedCity); // 예: "일본 오이타현 유후시"
+                body.put("textQuery", formalizedCity + " " + type.replace("_", " "));
             } else {
                 String text = (searchItem != null) ? searchItem.replace("[TEXT]", "") : "";
-                body.put("textQuery", formalizedCity + " " + text); // 예: "일본 오이타현 유후시 온천"
+                body.put("textQuery", formalizedCity + " " + text);
             }
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(body, headers);
             String response = restTemplate.postForObject(url, request, String.class);
-            JsonNode root = objectMapper.readTree(response);
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response);
 
-            // 파라미터로 formalizedCity 전달
             parsePlacesFromNode(root, fetchedPlaces, city, formalizedCity, isEmergency);
 
             String nextToken = root.path("nextPageToken").asText(null);
@@ -390,9 +389,13 @@ public class GoogleMapsService {
 
             if (address.isEmpty() || address.contains("대한민국") || address.contains("한국")) continue;
 
-            // 유저 입력어(유후인) OR 정식 행정구역명(유후시) 중 하나라도 포함되면 통과!
-            if (!address.contains(city) && !address.contains(strictCityName)) {
-                continue; // 둘 다 없으면 이웃 동네(벳푸 등)이므로 컷오프
+            String addressWithoutJapan = address.replace("일본", "").trim();
+            boolean hasKorean = addressWithoutJapan.matches(".*[가-힣]+.*");
+
+            // 진짜 한글 지명(예: 오이타현 벳푸시)이 있는데 검색한 도시명(유후인/유후시)이 없으면 타지역이므로 컷오프
+            // 하지만 한글이 없는 영문 주소(예: Tokyo, Minato City)라면 그리드(Grid)의 정확도를 믿고 통과
+            if (hasKorean && !address.contains(city) && !address.contains(strictCityName)) {
+                continue;
             }
 
             boolean isHighQuality = (rating >= 4.0 && reviewCount >= 100);

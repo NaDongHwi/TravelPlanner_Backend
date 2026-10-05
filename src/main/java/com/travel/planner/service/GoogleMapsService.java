@@ -313,22 +313,26 @@ public class GoogleMapsService {
         }
     }
 
-    // 6. Geocoding API 기반 자체 지명 정제 엔진
+    // 6. Geocoding API 기반 자체 지명 정제 엔진 (에러 상세 출력 로직 추가됨)
     public String getFormalizedJapanCity(String cityInput) {
         try {
             String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
             String response = restTemplate.getForObject(url, String.class, cityInput, googleMapsApiKey);
             JsonNode root = objectMapper.readTree(response);
 
-            if ("OK".equals(root.path("status").asText())) {
+            // 구글이 반환한 실제 상태 코드 확인
+            String status = root.path("status").asText();
+
+            if ("OK".equals(status)) {
                 String formattedAddress = root.path("results").get(0).path("formatted_address").asText();
-
                 Region recognizedRegion = PrefectureMapper.getRegionFromAddress(formattedAddress);
-
                 System.out.println("[지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
                 return formattedAddress;
             } else {
-                throw new RuntimeException("구글 맵스에서 해당 지명을 식별하지 못했습니다.");
+                // 구글이 뱉어낸 진짜 이유를 콘솔에 빨간 글씨로 출력
+                String errorMessage = root.path("error_message").asText("이유 없음");
+                System.err.println("[구글 Geocoding API 에러] 상태: " + status + " / 사유: " + errorMessage);
+                throw new RuntimeException("구글 API 거부: " + status);
             }
         } catch (Exception e) {
             throw new RuntimeException("지명 정밀 검증 실패: " + e.getMessage());

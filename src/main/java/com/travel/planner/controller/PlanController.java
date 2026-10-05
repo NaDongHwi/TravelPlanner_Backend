@@ -155,6 +155,30 @@ public class PlanController {
         // ==============================================================================
         List<Place> scoredPlaces = planService.applyWeightedScoring(openPlaces, currentWeather, request);
 
+        // Step 4.5. 베이스캠프(숙소) 최우선 확보
+        Place baseCamp = null;
+        if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
+            // 1. 유저가 직접 입력한 숙소가 있는 경우 (구글 API로 좌표 찾기)
+            PlanRequest.AccommodationInput acc = request.getAccommodations().get(0);
+            List<Place> searchResult = googleMapsService.searchNewPlacesFromGoogle(mainCity, acc.getName(), false);
+            if (!searchResult.isEmpty()) {
+                baseCamp = searchResult.get(0);
+                baseCamp.setCategory("숙소");
+            }
+        } else if (request.isSuggestHotel()) {
+            // 2. AI 숙소 추천을 켠 경우
+            List<Place> hotels = googleMapsService.searchRecommendedHotels(mainCity);
+            if (!hotels.isEmpty()) {
+                baseCamp = hotels.get(0);
+                baseCamp.setCategory("숙소");
+                if (!placeRepository.existsByPlaceId(baseCamp.getPlaceId())) {
+                    baseCamp = placeRepository.save(baseCamp);
+                } else {
+                    baseCamp = placeRepository.findByPlaceId(baseCamp.getPlaceId()).get();
+                }
+            }
+        }
+
         // ==============================================================================
         // Step 10. 경로/일정 재산출 루프 및 사후 균등 재분배(Post-Load Balancing)
         // ==============================================================================
@@ -177,7 +201,7 @@ public class PlanController {
                 System.out.println("[데이터 기근 감지] 후반부 일정 비어있음 사후 재분배 및 가상 블록(Dummy Node) 삽입 트리거");
             }
 
-            List<List<Place>> dailyRoutes = planService.calculateTspWithTimeWindows(selectedCandidates, totalDays, request.getAccommodations(), forceDummyNode, request);
+            List<List<Place>> dailyRoutes = planService.calculateTspWithTimeWindows(selectedCandidates, totalDays, baseCamp, forceDummyNode, request);
             boolean dailySuccessAll = true;
             int emptyDaysCount = 0;
 
@@ -227,11 +251,11 @@ public class PlanController {
                 }
             }
 
-            if (dailySuccessAll && emptyDaysCount > 0 && !forceDummyNode) {
-                forceDummyNode = true;
-                dailySuccessAll = false;
-                continue;
-            }
+//            if (dailySuccessAll && emptyDaysCount > 0 && !forceDummyNode) {
+//                forceDummyNode = true;
+//                dailySuccessAll = false;
+//                continue;
+//            }
 
             if (dailySuccessAll) isSimulationSuccess = true;
         }
@@ -258,36 +282,6 @@ public class PlanController {
         plan.setOutCity(request.getOutCity());
         plan.setInTime(request.getInTime() != null ? request.getInTime() : "미정");
         plan.setOutTime(request.getOutTime() != null ? request.getOutTime() : "미정");
-
-        if (request.isSuggestHotel() && request.getCities() != null && !request.getCities().isEmpty()) {
-            for (String city : request.getCities()) {
-                List<Place> hotels = googleMapsService.searchRecommendedHotels(city);
-                if (!hotels.isEmpty()) {
-                    Place bestHotel = hotels.get(0); // 가장 평점 좋은 호텔 1개
-                    // DB에 없으면 저장
-                    if (!placeRepository.existsByPlaceId(bestHotel.getPlaceId())) {
-                        placeRepository.save(bestHotel);
-                    }
-
-                    AiRouteResponse.TimelineItem hotelItem = new AiRouteResponse.TimelineItem();
-                    hotelItem.setDay(1);
-                    hotelItem.setTime("20:00");
-                    hotelItem.setPlaceName(bestHotel.getName());
-                    hotelItem.setCategory("숙소");
-                    hotelItem.setDescription("[추천 숙소] " + city + " 지역의 평점 높은 숙소입니다.");
-                    hotelItem.setLatitude(bestHotel.getLatitude());
-                    hotelItem.setLongitude(bestHotel.getLongitude());
-
-                    // 숙소에도 텍스트 추가
-                    String[] hotelDetails = googleMapsService.getPlaceDetailsForDisplay(bestHotel.getPlaceId(), request.getLanguage(), request.getStartDate());
-                    hotelItem.setFormattedAddress(hotelDetails[0]);
-                    hotelItem.setPhoneNumber(hotelDetails[1]);
-                    hotelItem.setOpeningHours(hotelDetails[2]);
-
-                    finalVerifiedTimeline.add(hotelItem);
-                }
-            }
-        }
 
         if (request.getThemes() != null) plan.setTheme(String.join(", ", request.getThemes()));
         plan.setAiReason(finalResponse.getReason());

@@ -46,6 +46,28 @@ public class AdminController {
         return ResponseEntity.ok("테마 정제 작업 중지 명령을 전송했습니다. 대기 시간이 끝나면 안전하게 중지됩니다.");
     }
 
+    @PostMapping("/enrich-summaries")
+    @Operation(summary = "장소 세부 유형·한 줄 소개 채우기 (백그라운드)",
+            description = "소개가 비어 있는 장소를 30건씩 AI 에 보내 '세부 유형(라멘·신사·공원 등)'과 '한 줄 소개'를 채웁니다. "
+                    + "기본은 DB 에 있는 정보만 사용해 구글 호출이 없습니다. withReviews=true 면 장소마다 구글 리뷰를 조회해 함께 보내 정확도를 높입니다(Places 호출 비용 발생).")
+    public ResponseEntity<String> enrichSummaries(@RequestParam(defaultValue = "false") boolean withReviews) {
+        if (adminAsyncService.isDescribing()) {
+            return ResponseEntity.badRequest().body("이미 소개 채우기 작업이 실행 중입니다.");
+        }
+        adminAsyncService.runSummaryEnrichment(withReviews);
+        return ResponseEntity.ok("장소 소개 채우기 백그라운드 작업이 시작되었습니다. 진행 상황은 서버 콘솔의 [소개 인리치먼트] 로그로 확인하세요.");
+    }
+
+    @PostMapping("/enrich-summaries/stop")
+    @Operation(summary = "실행 중인 장소 소개 채우기 작업 중지")
+    public ResponseEntity<String> stopSummaries() {
+        if (!adminAsyncService.isDescribing()) {
+            return ResponseEntity.ok("현재 실행 중인 소개 채우기 작업이 없습니다.");
+        }
+        adminAsyncService.stopDescribing();
+        return ResponseEntity.ok("소개 채우기 작업 중지 명령을 전송했습니다. 현재 배치가 끝나면 중지됩니다.");
+    }
+
     @PostMapping("/collect-places")
     @Operation(summary = "구글 API 기반 특정 도시 장소 자동 대량 수집 (Viewport 기반 동적 그리드 엔진 탑재)")
     public String collectNewPlaces(

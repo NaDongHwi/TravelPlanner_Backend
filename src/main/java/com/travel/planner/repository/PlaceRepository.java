@@ -32,6 +32,12 @@ public interface PlaceRepository extends JpaRepository<Place, Long> {
             + "OR p.openingHours IS NULL OR p.openingHours = '' OR p.openingHours = '영업시간 정보 없음') ORDER BY p.id")
     List<Place> findPlacesNeedingEnrichment(Pageable pageable);
 
+    // 한 줄 소개가 비어 있는 방문 대상 장소 (숙소·교통·더미·공항 제외)
+    @Query("SELECT p FROM Place p WHERE (p.category IS NULL OR p.category NOT IN ('숙소', '교통', '자유시간', '식사', '고정일정')) "
+            + "AND p.placeId NOT LIKE 'DUMMY%' AND p.placeId NOT LIKE 'AIRPORT%' "
+            + "AND (p.summary IS NULL OR p.summary = '') ORDER BY p.id")
+    List<Place> findPlacesNeedingSummary(Pageable pageable);
+
     // 카테고리 정제가 필요한 장소만 핀포인트로 가져오기
     @Query("SELECT p FROM Place p WHERE p.category IS NULL OR p.category = '' ORDER BY p.id")
     List<Place> findPlacesNeedingCategory(Pageable pageable);

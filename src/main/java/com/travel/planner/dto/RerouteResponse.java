@@ -13,4 +13,5 @@ public class RerouteResponse {
 
     private List<String> droppedPlaces;  // 시간 부족으로 인해 드랍된 기존 장소들
     private List<AiRouteResponse.TimelineItem> updatedTimeline; // 새롭게 정렬된 타임라인
+    private AiRouteResponse.DaySummary updatedDaySummary;       // 바뀐 그 날의 개요 (성공했을 때만)
 }

@@ -128,7 +128,10 @@ public class PlanGenerationService {
         // Step 7. 응답 조립 + DB 저장
         // ------------------------------------------------------------------
         AiRouteResponse response = new AiRouteResponse();
-        response.setReason("여행자의 취향과 물리적 한계를 고려하여 자체 최적화 알고리즘으로 구성된 일정입니다.");
+        // 어떤 여행인지: 전체 요약(reason)·제목·일자별 개요. 일정 결과에서 바로 만들므로 AI 호출이 없다.
+        response.setTitle(PlanSummarizer.tripTitle(request, tripPlan.getDays()));
+        response.setReason(PlanSummarizer.tripOverview(request, tripPlan.getDays()));
+        response.setDays(PlanSummarizer.summarizeDays(tripPlan.getDays()));
         response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage()));
         response.setWarnings(warnings);
 

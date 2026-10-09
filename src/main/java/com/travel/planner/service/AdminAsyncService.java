@@ -3,6 +3,7 @@ package com.travel.planner.service;
 import com.travel.planner.entity.Place;
 import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.util.OpeningHours;
+import com.travel.planner.util.PlaceDescriber;
 import com.travel.planner.util.PlaceKind;
 import com.travel.planner.util.ThemeVocabulary;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class AdminAsyncService {
     // 확인과 설정이 따로면 버튼을 빠르게 두 번 눌렀을 때 작업이 두 개 뜬다 → compareAndSet 으로 한 번에 처리
     private final AtomicBoolean enriching = new AtomicBoolean(false);
     private final AtomicBoolean cleansing = new AtomicBoolean(false);
+    private final AtomicBoolean describing = new AtomicBoolean(false);
 
     public boolean isEnriching() { return enriching.get(); }
     public void stopEnriching() { enriching.set(false); }
@@ -36,16 +38,22 @@ public class AdminAsyncService {
     public boolean isCleansing() { return cleansing.get(); }
     public void stopCleansing() { cleansing.set(false); }
 
-    /** AI 응답 한 건("테마1,테마2|실내|90")을 해석한 결과 */
+    public boolean isDescribing() { return describing.get(); }
+    public void stopDescribing() { describing.set(false); }
+
+    /** AI 응답 한 건("테마1,테마2|실내|90|세부유형|한 줄 소개")을 해석한 결과 */
     static class ParsedAttributes {
         String theme;
         String placeType;
         Integer duration;
+        String subType;   // 없으면 null (앞 3칸만 온 응답도 받아들인다)
+        String summary;   // 없으면 null
     }
 
     /**
      * AI 응답 해석.
-     * 프롬프트는 "테마|속성|체류시간" 3칸을 요구하지만, 모델이 체류시간을 빼먹어도(2칸) 테마와 속성은 살린다.
+     * 프롬프트는 "테마|속성|체류시간|세부유형|한 줄 소개" 5칸을 요구하지만, 모델이 뒤 칸을 빼먹어도 앞 칸은 살린다.
+     * 체류시간까지 없으면(2칸) 테마와 속성만 쓰고 체류시간은 기본값으로 둔다.
      * (이전에는 프롬프트가 2칸을 요구하고 파서는 3칸만 받아서 단 한 건도 저장되지 않았다)
      */
     static ParsedAttributes parseAttributes(String aiResult, Place place) {
@@ -68,7 +76,30 @@ public class AdminAsyncService {
         }
         if (duration == null || duration < 15 || duration > 720) duration = defaultDuration(place);
         parsed.duration = duration;
+
+        if (parts.length >= 4) parsed.subType = PlaceDescriber.cleanSubType(parts[3]);
+        if (parts.length >= 5) {
+            // 소개 문장 안에 '|' 가 들어간 경우를 대비해 뒤쪽은 모두 이어 붙인다
+            parsed.summary = PlaceDescriber.cleanSummary(String.join(" ", java.util.Arrays.copyOfRange(parts, 4, parts.length)));
+        }
         return parsed;
+    }
+
+    /** 소개 전용 응답 한 건("세부유형|한 줄 소개") 해석. 소개가 없으면 null. */
+    static String[] parseDescription(String aiResult) {
+        if (aiResult == null) return null;
+        String[] parts = aiResult.split("\\|");
+        String subType;
+        String summary;
+        if (parts.length >= 2) {
+            subType = PlaceDescriber.cleanSubType(parts[0]);
+            summary = PlaceDescriber.cleanSummary(String.join(" ", java.util.Arrays.copyOfRange(parts, 1, parts.length)));
+        } else {
+            subType = null;                                     // 구분자 없이 문장만 온 경우: 소개로만 쓴다
+            summary = PlaceDescriber.cleanSummary(parts[0]);
+        }
+        if (summary == null) return null;
+        return new String[]{subType, summary};
     }
 
     private static int defaultDuration(Place place) {
@@ -183,6 +214,9 @@ public class AdminAsyncService {
                     place.setTheme(parsed.theme);
                     place.setPlaceType(parsed.placeType);
                     place.setRecommendedDuration(parsed.duration);
+                    // 세부 유형·소개는 같이 왔을 때만 채운다 (이미 있는 값은 덮어쓰지 않는다)
+                    if (parsed.subType != null && isBlank(place.getSubType())) place.setSubType(parsed.subType);
+                    if (parsed.summary != null && isBlank(place.getSummary())) place.setSummary(parsed.summary);
                     placeRepository.save(place);
                     successCount++;
                 }
@@ -199,6 +233,80 @@ public class AdminAsyncService {
             enriching.set(false);
         }
         System.out.println("[테마 인리치먼트 종료] 백그라운드 스레드가 안전하게 정지되었습니다.");
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    /**
+     * 세부 유형·한 줄 소개 채우기.
+     * 테마 인리치먼트가 끝난 기존 장소에는 소개가 없으므로, 소개가 빈 장소만 골라 30건씩 AI 에 보낸다.
+     * 기본은 DB 에 있는 정보(이름·도시·분류·테마·주소)만 보내 구글 호출이 없다.
+     * withReviews=true 면 장소마다 구글 리뷰를 한 번 조회해 함께 보낸다(정확도는 올라가지만 Places 호출 비용이 든다).
+     */
+    @Async("adminTaskExecutor")
+    public void runSummaryEnrichment(boolean withReviews) {
+        if (!describing.compareAndSet(false, true)) return;
+
+        System.out.println("[소개 인리치먼트] 장소 세부 유형·한 줄 소개 채우기를 시작합니다. (리뷰 참조: " + (withReviews ? "사용" : "미사용") + ")");
+        Set<Long> failedThisSession = new HashSet<>();
+        int total = 0;
+
+        try {
+            while (describing.get()) {
+                List<Place> targets = new ArrayList<>();
+                int pageNum = 0;
+                while (targets.isEmpty()) {
+                    org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(pageNum, 100);
+                    List<Place> raw = placeRepository.findPlacesNeedingSummary(pageable);
+                    if (raw.isEmpty()) break;
+                    targets = raw.stream().filter(p -> !failedThisSession.contains(p.getId())).limit(30).collect(Collectors.toList());
+                    if (targets.isEmpty()) pageNum++;   // 이번 100건이 모두 실패 목록이면 다음 100건
+                }
+                if (targets.isEmpty()) {
+                    System.out.println("[소개 인리치먼트 완료] 소개가 비어 있는 장소가 더 없거나, 남은 장소는 이번 실행에서 처리하지 못했습니다.");
+                    break;
+                }
+
+                Map<String, String> reviewsMap = new HashMap<>();
+                if (withReviews) {
+                    for (Place p : targets) {
+                        if (!describing.get()) break;
+                        String reviews = googleMapsService.getPlaceReviewsById(p.getPlaceId());
+                        if (reviews != null && !reviews.isBlank() && !reviews.startsWith("리뷰 정보 없음")) reviewsMap.put(p.getPlaceId(), reviews);
+                    }
+                    if (!describing.get()) break;
+                }
+
+                Map<String, String> described = aiService.describePlacesBulk(targets, reviewsMap);
+                if (described == null || described.isEmpty()) {
+                    System.out.println("[경고] AI 응답이 비었습니다(429 한도 초과 등). 1분(60초) 대기 후 재시도합니다...");
+                    try { Thread.sleep(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                    continue;
+                }
+
+                int saved = 0;
+                for (Place place : targets) {
+                    String[] parsed = parseDescription(described.get(place.getPlaceId()));
+                    if (parsed == null) {
+                        failedThisSession.add(place.getId());   // 응답 누락·형식 오류: 이번 실행에서는 다시 보내지 않는다
+                        continue;
+                    }
+                    if (parsed[0] != null && isBlank(place.getSubType())) place.setSubType(parsed[0]);
+                    place.setSummary(parsed[1]);
+                    placeRepository.save(place);
+                    saved++;
+                }
+                total += saved;
+                System.out.println("[소개 인리치먼트] " + targets.size() + "건 중 " + saved + "건 저장 (누적 " + total + "건).");
+
+                try { Thread.sleep(10000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+            }
+        } finally {
+            describing.set(false);
+        }
+        System.out.println("[소개 인리치먼트 종료] 백그라운드 스레드가 정지되었습니다. (이번 실행 저장 " + total + "건)");
     }
 
     @Async("adminTaskExecutor")

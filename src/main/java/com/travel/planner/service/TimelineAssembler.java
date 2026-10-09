@@ -5,6 +5,7 @@ import com.travel.planner.entity.Place;
 import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.service.PlanService.SimulatedItinerary;
 import com.travel.planner.util.OpeningHours;
+import com.travel.planner.util.PlaceDescriber;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -78,6 +79,15 @@ public class TimelineAssembler {
                     }
                 }
 
+                // 어떤 곳인지: 세부 유형·한 줄 소개·테마·평점 (DB 값, 없으면 이름·분류로 만든 기본 문구)
+                item.setSubType(PlaceDescriber.subTypeOf(place));
+                item.setSummary(PlaceDescriber.summaryOf(place));
+                if (sim.getType() == SimulatedItinerary.Type.VISIT) {
+                    item.setThemes(PlaceDescriber.themeListOf(place));
+                    item.setRating(place.getRating());
+                    item.setUserRatingCount(place.getUserRatingCount());
+                }
+
                 if (source.getAddress() != null) item.setFormattedAddress(source.getAddress());
                 if (source.getPhone() != null) item.setPhoneNumber(source.getPhone());
                 item.setOpeningHours(OpeningHours.describe(source, date));
@@ -100,9 +110,13 @@ public class TimelineAssembler {
                 return "근처에서 자유롭게 식사";
             case FIXED:
                 return "사용자 고정 일정";
-            default:
+            default: {
+                // 방문지는 "무엇을 하는 곳인지"를 적는다. (이전에는 "힐링,자연 일정"처럼 테마만 적혀 목록만 봐서는 어떤 곳인지 알 수 없었다)
+                String summary = PlaceDescriber.summaryOf(place);
+                if (summary != null && !summary.isBlank()) return summary;
                 return place != null && place.getTheme() != null && !place.getTheme().isBlank()
                         ? place.getTheme() + " 일정" : "추천 일정";
+            }
         }
     }
 }

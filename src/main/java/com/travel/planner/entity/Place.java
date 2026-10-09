@@ -81,6 +81,13 @@ public class Place {
     @Column
     private Integer recommendedDuration; // 평균 체류 시간 (분 단위)
 
+    // 목록만 보고도 어떤 곳인지 알 수 있게 하는 정보 (AI 인리치먼트가 채운다. 비어 있으면 PlaceDescriber 가 기본 문구를 만든다)
+    @Column(length = 50)
+    private String subType;   // 세부 유형: "라멘", "스시", "신사", "공원", "전망대" 등
+
+    @Column(length = 300)
+    private String summary;   // 한 줄 소개: "에도 시대 정원을 재현한 일본식 정원" 등
+
     public Integer getRecommendedDuration() { return recommendedDuration; }
     public void setRecommendedDuration(Integer recommendedDuration) { this.recommendedDuration = recommendedDuration; }
 }

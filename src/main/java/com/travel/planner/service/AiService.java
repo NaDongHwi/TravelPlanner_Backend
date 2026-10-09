@@ -108,13 +108,17 @@ public class AiService {
     // ============================================================================
     public Map<String, String> classifyPlaceAttributesBulk(List<Place> places, Map<String, String> reviewsMap) {
         StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 장소들의 이름과 구글 리뷰를 분석해서, 테마·장소 속성·평균 체류 시간을 한 번에 분류해.\n\n");
+        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 장소들의 이름과 구글 리뷰를 분석해서, 테마·장소 속성·평균 체류 시간·세부 유형·한 줄 소개를 한 번에 정리해.\n\n");
         promptBuilder.append("【 분류 절대 규칙 】\n");
         promptBuilder.append("1. 테마: 반드시 [").append(String.join(", ", ThemeVocabulary.THEMES)).append("] 이 12개 단어 안에서만 1~3개를 선택해. 절대 다른 단어를 창조하지 마!\n");
         promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 무조건 [실내] 또는 [실외] 중 하나만 고정해서 적어.\n");
         promptBuilder.append("3. 체류 시간: 일반 여행자가 머무는 평균 시간을 분 단위 정수로 적어. (식당 60, 카페 45, 박물관 90, 테마파크 480 처럼)\n");
-        promptBuilder.append("4. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성|체류시간' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지.\n");
-        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내|90\", \"ChIJ5678\": \"온천,힐링|실외|120\"}\n\n[분류 대상 목록]\n");
+        promptBuilder.append("4. 세부 유형: 이 장소가 무엇인지 2~10자의 한국어 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
+        promptBuilder.append("5. 한 줄 소개: 처음 보는 여행자가 '무엇을 하는 곳인지' 알 수 있게 한국어 한 문장(15~60자)으로 적어. ")
+                .append(DESCRIPTION_RULES).append("\n");
+        promptBuilder.append("6. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성|체류시간|세부유형|한 줄 소개' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지. 값 안에 '|' 는 구분자로만 써.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내|90|애니메이션 굿즈점|애니메이션·만화 굿즈를 층별로 파는 전문 매장\", ")
+                .append("\"ChIJ5678\": \"온천,힐링|실외|120|온천|노천탕에서 바다를 보며 쉴 수 있는 당일 온천\"}\n\n[분류 대상 목록]\n");
 
         for (Place p : places) {
             String reviews = reviewsMap.get(p.getPlaceId());
@@ -145,6 +149,67 @@ public class AiService {
 
                 if (retryCount >= maxRetries) {
                     System.out.println("Gemini 전처리(테마) 최종 실패! [OpenAI] 백업 모델 전환");
+                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
+                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
+                }
+                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        }
+        return new HashMap<>();
+    }
+
+    // 소개 문구 공통 규칙. 모델이 모르는 장소를 그럴듯하게 꾸며 쓰지 않게 하는 것이 핵심이다.
+    private static final String DESCRIPTION_RULES =
+            "주어진 정보(이름·분류·테마·리뷰)와 네가 확실히 아는 사실만 써. 잘 모르는 곳이면 '○○을 파는 가게', '산책하기 좋은 공원'처럼 유형 수준으로만 적고, "
+                    + "연도·가격·순위·수상 경력 같은 수치나 확인되지 않은 유래는 쓰지 마. '~입니다' 없이 명사형으로 끝내고, 장소 이름을 반복하지 마.";
+
+    // ============================================================================
+    // 2-1. 관리자용 오프라인 전처리 (세부 유형·한 줄 소개만 채우기)
+    //      이미 테마가 분류된 기존 장소에 소개만 추가할 때 쓴다. 구글 호출 없이 DB 정보만 보낸다.
+    //      reviewsMap 에 리뷰가 있으면(선택) 함께 보내 정확도를 높인다.
+    // ============================================================================
+    public Map<String, String> describePlacesBulk(List<Place> places, Map<String, String> reviewsMap) {
+        StringBuilder promptBuilder = new StringBuilder();
+        promptBuilder.append("너는 일본 여행 가이드북 편집자야. 아래 장소마다 '세부 유형'과 '한 줄 소개'를 한국어로 써.\n\n");
+        promptBuilder.append("【 작성 규칙 】\n");
+        promptBuilder.append("1. 세부 유형: 이 장소가 무엇인지 2~10자의 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
+        promptBuilder.append("2. 한 줄 소개: 처음 보는 여행자가 '무엇을 하는 곳인지' 알 수 있게 한 문장(15~60자)으로 적어. ").append(DESCRIPTION_RULES).append("\n");
+        promptBuilder.append("3. 결과는 반드시 장소 ID를 키로, '세부유형|한 줄 소개' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지. 값 안에 '|' 는 구분자로만 써.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"라멘|진한 돈코츠 국물의 라멘을 내는 현지 인기 식당\", \"ChIJ5678\": \"일본식 정원|연못을 따라 산책로가 이어지는 일본식 정원\"}\n\n[대상 목록]\n");
+
+        for (Place p : places) {
+            promptBuilder.append("- ID: ").append(p.getPlaceId())
+                    .append(" / 이름: ").append(p.getName())
+                    .append(" / 도시: ").append(p.getCity() != null ? p.getCity() : "미상")
+                    .append(" / 분류: ").append(p.getCategory() != null ? p.getCategory() : "미분류")
+                    .append(" / 테마: ").append(p.getTheme() != null && !p.getTheme().isBlank() ? p.getTheme() : "미분류");
+            if (p.getAddress() != null && !p.getAddress().isBlank()) promptBuilder.append(" / 주소: ").append(p.getAddress());
+            String reviews = reviewsMap == null ? null : reviewsMap.get(p.getPlaceId());
+            if (reviews != null && !reviews.isBlank()) promptBuilder.append(" / 리뷰: ").append(reviews);
+            promptBuilder.append("\n");
+        }
+
+        String prompt = promptBuilder.toString();
+        Map<String, Object> requestBody = buildGeminiRequest(prompt);
+        String url = geminiUrl();
+
+        int maxRetries = 3;
+        int retryCount = 0;
+
+        while (retryCount < maxRetries) {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
+            } catch (Exception e) {
+                retryCount++;
+                saveErrorLog("AI_DESCRIBE_FAIL_" + retryCount, e.getMessage());
+
+                if (retryCount >= maxRetries) {
+                    System.out.println("Gemini 전처리(소개) 최종 실패! [OpenAI] 백업 모델 전환");
                     Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
                     return fallbackResponse != null ? fallbackResponse : new HashMap<>();
                 }
@@ -311,6 +376,8 @@ public class AiService {
     private void saveErrorLog(String errorType, String message) {
         try {
             String actualMessage = message != null ? message : "Unknown Error";
+            // 요청 주소가 오류 문구에 그대로 실리는 경우가 있어 API 키는 가린다 (콘솔·로그 테이블에 남지 않도록)
+            actualMessage = actualMessage.replaceAll("key=[^&\\s\"]+", "key=***");
 
             // 인텔리제이 콘솔창에 빨간 글씨로 출력합니다.
             System.err.println("\n[AI 통신 장애 리포트]");

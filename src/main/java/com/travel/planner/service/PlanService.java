@@ -187,6 +187,8 @@ public class PlanService {
         private final LocalDate date;
         private final String city;
         private final List<SimulatedItinerary> items = new ArrayList<>();
+        /** 그 날의 비·눈 예보. true=비·눈, false=맑음·흐림, null=예보 범위 밖(알 수 없음) */
+        private Boolean badWeather;
 
         DayPlan(int dayNumber, LocalDate date, String city) {
             this.dayNumber = dayNumber;
@@ -198,6 +200,7 @@ public class PlanService {
         public LocalDate getDate() { return date; }
         public String getCity() { return city; }
         public List<SimulatedItinerary> getItems() { return items; }
+        public Boolean getBadWeather() { return badWeather; }
     }
 
     /** 타임라인 한 줄 */
@@ -895,7 +898,9 @@ public class PlanService {
                 plan.warnings.add("날짜(date)나 일차(dayNumber)가 없는 고정 일정은 매일 적용했습니다. 특정 날에만 넣으려면 date 또는 dayNumber 를 함께 보내 주세요.");
                 warnedUndatedFixed = true;
             }
-            plan.days.add(planDay(ctx, st, plan.warnings));
+            DayPlan dayPlan = planDay(ctx, st, plan.warnings);
+            dayPlan.badWeather = in.badWeatherByDate.get(ctx.date);   // 일자별 개요에 예보 여부를 적기 위해 남긴다
+            plan.days.add(dayPlan);
         }
 
         plan.themeCounts.putAll(st.themeCounts);

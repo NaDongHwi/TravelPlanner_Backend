@@ -424,7 +424,10 @@ class PlanServiceTest {
         for (DayPlan day : plan.getDays()) {
             for (SimulatedItinerary v : visits(day)) {
                 Place p = v.getPlace();
-                boolean outdoorNature = "관광지".equals(p.getCategory()) && p.getTheme() != null && p.getTheme().contains("자연");
+                // 테마에 '자연'이 있거나, 테마와 상관없이 이름이 공원·신사인 24시간 개방 장소 (실제 DB 의 Smile Park·오구시 신사)
+                boolean nature = p.getTheme() != null && p.getTheme().contains("자연");
+                boolean openAir = com.travel.planner.util.PlaceKind.looksLikeOpenAir(p.getName()) && TestPlaces.H_24.equals(p.getOpeningHours());
+                boolean outdoorNature = "관광지".equals(p.getCategory()) && (nature || openAir);
                 if (!outdoorNature) continue;
                 checked++;
                 assertTrue(v.getEndMin() <= sunset, "Day " + day.getDayNumber() + " " + p.getName() + " " + v.getTime() + "~" + v.getEndTime() + " (해 진 뒤)");
@@ -440,6 +443,13 @@ class PlanServiceTest {
         Place onsen = TestPlaces.find(in.candidates, "아오이 온천 쿠사나기노유");
         assertTrue(planService.calculateDwellTime(park, in.request) <= 60, "공원 체류 " + planService.calculateDwellTime(park, in.request));
         assertTrue(planService.calculateDwellTime(onsen, in.request) >= 90);
+
+        // DB 에 90분으로 들어가 있어도 리뷰가 적은 작은 공원은 60분(힐링 테마 1.2배 → 75분)까지만
+        Place small = TestPlaces.find(in.candidates, "Kiyomizuyama Park");
+        assertEquals(75, planService.calculateDwellTime(small, in.request));
+        // 리뷰가 많은 큰 공원은 DB 값 그대로
+        small.setUserRatingCount(8000);
+        assertEquals(110, planService.calculateDwellTime(small, in.request));
     }
 
     @Test

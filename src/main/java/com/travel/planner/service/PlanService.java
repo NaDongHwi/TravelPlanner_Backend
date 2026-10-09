@@ -75,6 +75,9 @@ public class PlanService {
     static final double NEAR_SEED_KM = 25.0;
     /** 하루 이동 시간이 이 값을 넘으면 warnings 로 알린다 */
     static final int LONG_TRAVEL_DAY_MIN = 240;
+    /** 리뷰 수가 이보다 적은 공원·정원은 "작은 공원"으로 보고 체류 시간을 제한한다 */
+    static final int LARGE_PARK_REVIEW_COUNT = 2000;
+    static final int SMALL_PARK_DWELL_MAX_MIN = 60;
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
@@ -440,7 +443,10 @@ public class PlanService {
                 time = clamp(hasRecommended ? recommended : 90, 30, 180);
                 break;
             default:
-                time = clamp(hasRecommended ? recommended : defaultAttractionDwell(p), 20, 300);
+                int base = hasRecommended ? recommended : defaultAttractionDwell(p);
+                // DB(인리치먼트)에 90분으로 들어간 동네 공원이 많다. 리뷰가 적은 작은 공원·정원은 60분까지만 잡는다.
+                if (isSmallPark(p)) base = Math.min(base, SMALL_PARK_DWELL_MAX_MIN);
+                time = clamp(base, 20, 300);
         }
 
         List<String> themes = ThemeVocabulary.normalizeAll(request.getThemes());
@@ -448,6 +454,12 @@ public class PlanService {
             time = (int) (time * 1.2);
         }
         return TimeUtil.roundUpTo5(time);
+    }
+
+    private static boolean isSmallPark(Place p) {
+        if (!PlaceKind.looksLikePark(p.getName())) return false;
+        Integer reviews = p.getUserRatingCount();
+        return reviews == null || reviews < LARGE_PARK_REVIEW_COUNT;
     }
 
     /** 체류 시간 정보가 없는 관광지의 기본값. 동네 공원·광장에 90분씩 잡히지 않도록 이름으로 나눈다. */
@@ -1208,9 +1220,14 @@ public class PlanService {
         });
     }
 
+    /**
+     * 해가 있을 때만 의미가 있는 야외 명소인가.
+     * 테마에 '자연'이 있거나, 테마와 상관없이 이름이 공원·정원·해변·신사 같은 곳 (야경·온천·실내는 제외).
+     */
     private static boolean isDaylightOnly(Cand c) {
-        return c.kind == PlaceKind.ATTRACTION && !"실내".equals(c.place.getPlaceType())
-                && c.themes.contains("자연") && !c.themes.contains("야경") && !c.themes.contains("온천");
+        if (c.kind != PlaceKind.ATTRACTION || "실내".equals(c.place.getPlaceType())) return false;
+        if (c.themes.contains("야경") || c.themes.contains("온천")) return false;
+        return c.themes.contains("자연") || PlaceKind.looksLikeOpenAir(c.place.getName());
     }
 
     private static List<int[]> defaultIntervals(Cand c, LocalDate date) {
@@ -1225,7 +1242,7 @@ public class PlanService {
                 // 구글에 영업시간이 없는 관광지는 대부분 거리·공원 같은 개방 공간이다.
                 if ("실내".equals(c.place.getPlaceType())) {
                     iv.add(new int[]{9 * 60, 18 * 60});
-                } else if (c.themes.contains("자연") && !c.themes.contains("야경")) {
+                } else if (isDaylightOnly(c)) {
                     iv.add(new int[]{7 * 60, nightViewFrom(date)});   // 공원·산책로는 해 지기 전까지만
                 } else {
                     iv.add(new int[]{7 * 60, 22 * 60});

@@ -174,6 +174,9 @@ final class TestPlaces {
         add(out, c, "도키와 공원", 34.9702, 138.3803, "관광지", "자연,힐링", null, H_24, null);
         add(out, c, "슨푸성 모미지야마 정원", 34.9800, 138.3849, "관광지", "자연,힐링", "실외", week("오전 9:00 ~ 오후 4:00"), null);
         add(out, c, "시즈오카 센겐 신사", 34.9836, 138.3757, "관광지", "문화,힐링", "실외", H_9_17, null);
+        add(out, c, "오구시 신사", 34.9735, 138.3863, "관광지", "문화,힐링", null, H_24, 30);
+        Place kiyomizu = add(out, c, "Kiyomizuyama Park", 34.9801, 138.3958, "관광지", "자연,액티비티,힐링", null, H_24, 90);
+        kiyomizu.setUserRatingCount(350);
         add(out, c, "시즈오카 시립 미술관", 34.9725, 138.3880, "관광지", "문화", "실내", H_9_17, null);
         add(out, c, "사누키우동 마루도", 34.9762, 138.3873, "식음", "맛집", "실내", week("오전 11:00 ~ 오후 3:00"), null);
         add(out, c, "시즈오카오뎅 미카와야", 34.9723, 138.3818, "식음", "맛집", "실내", week("오후 5:00 ~ 10:00"), null);
@@ -183,7 +186,8 @@ final class TestPlaces {
 
         // 히가시시즈오카 / 구사나기
         add(out, c, "아오이 온천 쿠사나기노유", 35.0054, 138.4442, "관광지", "온천,힐링", "실내", week("오전 9:00 ~ 오후 11:00"), null);
-        add(out, c, "Higashishizuoka Smile Park", 34.9880, 138.4157, "관광지", "자연", null, H_24, null);
+        Place smile = add(out, c, "Higashishizuoka Smile Park", 34.9880, 138.4157, "관광지", "액티비티,힐링", null, H_24, 90);
+        smile.setUserRatingCount(400);
         add(out, c, "도로 공원", 34.9560, 138.4088, "관광지", "자연,문화", null, H_24, null);
         add(out, c, "스시로 히가시 시즈오카점", 34.9913, 138.4195, "식음", "맛집", "실내", week("오전 10:30 ~ 오후 11:00"), null);
         add(out, c, "Valor Fujimidai Shop", 34.9620, 138.4156, "식음", null, null, week("오전 9:30 ~ 오후 9:00"), null);

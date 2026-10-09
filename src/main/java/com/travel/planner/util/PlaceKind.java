@@ -16,6 +16,10 @@ public enum PlaceKind {
     private static final Pattern LODGING_NAME = Pattern.compile(
             "호텔|hotel|ホテル|료칸|旅館|\\binn\\b|게스트하우스|guest ?house|호스텔|hostel|민박|펜션|도요코인|toyoko|apa ");
     private static final Pattern STATION_NAME = Pattern.compile("(?<![구지유])역$|駅$|\\bstation$");
+    // 해가 있을 때 가야 의미가 있는 야외 장소 (공원·정원·해변·신사 등)
+    private static final Pattern PARK_NAME = Pattern.compile("공원|\\bpark\\b|公園|정원|\\bgarden\\b|庭園|광장");
+    private static final Pattern OPEN_AIR_NAME = Pattern.compile(
+            "해변|\\bbeach\\b|해안|호수|폭포|산책로|신사|神社|\\bshrine\\b|신궁|\\btemple\\b|寺$");
     private static final Pattern BAR_NAME = Pattern.compile(
             "이자카야|居酒屋|술집|\\b(bar|pub|beer)\\b|펍|비어|야타이|스탠딩바|하이볼");
     private static final Pattern THEME_PARK_NAME = Pattern.compile(
@@ -49,6 +53,18 @@ public enum PlaceKind {
     /** 이름으로 본 역 여부 ("누마즈역", "Shizuoka Station"). "역사박물관"처럼 '역'으로 끝나지 않는 이름은 해당하지 않는다. */
     public static boolean looksLikeStation(String name) {
         return name != null && STATION_NAME.matcher(name.trim().toLowerCase()).find();
+    }
+
+    /** 이름으로 본 공원·정원 여부 */
+    public static boolean looksLikePark(String name) {
+        return name != null && PARK_NAME.matcher(name.toLowerCase()).find();
+    }
+
+    /** 이름으로 본 야외 명소 여부 (공원·정원·해변·호수·신사 등). 테마에 '자연'이 없어도 해 진 뒤에는 넣지 않기 위해 쓴다. */
+    public static boolean looksLikeOpenAir(String name) {
+        if (name == null) return false;
+        String n = name.trim().toLowerCase();
+        return PARK_NAME.matcher(n).find() || OPEN_AIR_NAME.matcher(n).find();
     }
 
     public boolean isFood() {

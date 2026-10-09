@@ -44,15 +44,10 @@ public class AdminAsyncService {
         Set<Long> failedPlaceIdsThisSession = new HashSet<>();
 
         while (isEnriching) {
-            List<Place> allPlaces = placeRepository.findAll();
-            List<Place> targetPlaces = allPlaces.stream()
-                    // 이번 세션에서 실패한 전적이 있는 장소는 필터링에서 제외 (무한 루프 방어)
+            // DB에게 문제가 있는 데이터 30개만 줘라고 요청합니다.
+            org.springframework.data.domain.Pageable limit30 = org.springframework.data.domain.PageRequest.of(0, 30);
+            List<Place> targetPlaces = placeRepository.findPlacesNeedingEnrichment(limit30).stream()
                     .filter(p -> !failedPlaceIdsThisSession.contains(p.getId()))
-                    .filter(p -> p.getTheme() == null || p.getTheme().trim().isEmpty()
-                            || p.getPlaceType() == null || p.getPlaceType().trim().isEmpty()
-                            || p.getRecommendedDuration() == null
-                            || p.getOpeningHours() == null || p.getOpeningHours().contains("없음") || p.getOpeningHours().isEmpty())
-                    .limit(30)
                     .collect(Collectors.toList());
 
             if (targetPlaces.isEmpty()) {
@@ -167,11 +162,9 @@ public class AdminAsyncService {
         System.out.println("[자동 정제 시작] AI 카테고리 자동 분류를 시작합니다...");
 
         while (isCleansing) {
-            List<Place> allPlaces = placeRepository.findAll();
-            List<Place> targetPlaces = allPlaces.stream()
-                    .filter(p -> p.getCategory() == null)
-                    .limit(30)
-                    .collect(Collectors.toList());
+            // DB에게 카테고리가 빈 데이터 30개만 줘라고 요청합니다.
+            org.springframework.data.domain.Pageable limit30 = org.springframework.data.domain.PageRequest.of(0, 30);
+            List<Place> targetPlaces = placeRepository.findPlacesNeedingCategory(limit30);
 
             if (targetPlaces.isEmpty()) {
                 System.out.println("[자동 정제 완료] 모든 데이터의 카테고리 분류가 100% 완료되었습니다!");

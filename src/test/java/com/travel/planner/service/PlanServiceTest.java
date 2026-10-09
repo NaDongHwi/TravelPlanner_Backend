@@ -709,6 +709,28 @@ class PlanServiceTest {
     // ------------------------------------------------------------------ 입력 생성
 
     /** 실제로 문제가 보고된 조건: 시즈오카 6일, 혼자, 힐링·온천·자연, 10월, 09:00~21:00 */
+    @Test
+    void parkTaggedAsNightViewIsVisitedInDaylightUnlessNightViewWasRequested() {
+        // planId 58: '야경' 태그가 붙은 꽃 정원을 야경 테마를 고르지 않은 사람에게 해 진 뒤(17:55~19:10)에 넣었다
+        TripInput in = shizuokaTrip();   // 힐링·온천·자연, 10월(일몰 기준 17:30)
+        Place garden = TestPlaces.place("T_FLOWER", "Maruyama Flower Garden", "시즈오카", 34.9622, 138.3522, "관광지", "사진,자연,야경", TestPlaces.H_24);
+        garden.setUserRatingCount(5000);
+        in.candidates.add(garden);
+        for (Place p : in.candidates) {
+            if ("도키와 공원".equals(p.getName())) p.setTheme("힐링,자연,야경");
+        }
+        TripPlan plan = planService.planTrip(in);
+        for (DayPlan day : plan.getDays()) {
+            for (SimulatedItinerary v : day.getItems()) {
+                if (v.getType() != SimulatedItinerary.Type.VISIT) continue;
+                String name = v.getPlace().getName();
+                if (name.equals("Maruyama Flower Garden") || name.equals("도키와 공원")) {
+                    assertTrue(v.getEndMin() <= 17 * 60 + 30, name + " 이(가) 해 진 뒤까지 이어진다: " + v.getTime() + "~" + v.getEndTime() + "\n" + describe(plan));
+                }
+            }
+        }
+    }
+
     static TripInput shizuokaTrip() {
         PlanRequest req = new PlanRequest();
         req.setStartDate(LocalDate.of(2026, 10, 10));

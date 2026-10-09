@@ -32,8 +32,15 @@ public class AiService {
     @Value("${ai.openai.api-key:}")
     private String openAiApiKey;
 
-    @Value("${ai.openai.model:gpt-3.5-turbo}") // GPT 기본 모델 지정
+    @Value("${ai.openai.model:gpt-4o-mini}") // 설정 파일에 ai.openai.model 이 있으면 그 값이 쓰인다
     private String openAiModel;
+
+    // 먼저 부를 AI. openai(기본) 또는 gemini. 실패하면 다른 쪽으로 넘어간다.
+    // Gemini 무료 티어는 분당 호출 한도(429)에 자주 걸려 배치가 멈추므로 유료인 OpenAI 를 주 모델로 쓴다.
+    @Value("${ai.primary:openai}")
+    private String primaryProvider;
+
+    private static final int PRIMARY_ATTEMPTS = 2;   // 주 모델 시도 횟수 (그 뒤 보조 모델 1회)
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final LogRepository logRepository;
@@ -74,33 +81,8 @@ public class AiService {
                 "  \"reason\": \"자체 알고리즘 동선에 대한 총평 1줄\"\n" +
                 "}";
 
-        Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = geminiUrl();
-
-        int maxRetries = 3;
-        int retryCount = 0;
-
-        while (retryCount < maxRetries) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody(), AiRouteResponse.class);
-            } catch (Exception e) {
-                retryCount++;
-                saveErrorLog("AI_GEMINI_STORYTELLING_FAIL_" + retryCount, e.getMessage());
-
-                if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 스토리텔링 최종 실패! [OpenAI] 백업 모델 전환");
-                    AiRouteResponse fallbackResponse = callFallbackOpenAi(prompt, AiRouteResponse.class);
-                    return fallbackResponse != null ? fallbackResponse : createEmergencyFallbackResponse(verifiedItineraries, totalDays);
-                }
-                try { Thread.sleep(1000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            }
-        }
-        return createEmergencyFallbackResponse(verifiedItineraries, totalDays);
+        AiRouteResponse result = callAi(prompt, AiRouteResponse.class, "STORYTELLING");
+        return result != null ? result : createEmergencyFallbackResponse(verifiedItineraries, totalDays);
     }
 
     // ============================================================================
@@ -113,7 +95,7 @@ public class AiService {
         promptBuilder.append("1. 테마: 반드시 [").append(String.join(", ", ThemeVocabulary.THEMES)).append("] 이 12개 단어 안에서만 1~3개를 선택해. 절대 다른 단어를 창조하지 마!\n");
         promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 무조건 [실내] 또는 [실외] 중 하나만 고정해서 적어.\n");
         promptBuilder.append("3. 체류 시간: 일반 여행자가 머무는 평균 시간을 분 단위 정수로 적어. (식당 60, 카페 45, 박물관 90, 테마파크 480 처럼)\n");
-        promptBuilder.append("4. 세부 유형: 이 장소가 무엇인지 2~10자의 한국어 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
+        promptBuilder.append("4. 세부 유형: 이 장소가 무엇인지 2~10자의 한국어 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 식사가 아닌 가게는 그대로: 젤라토, 디저트, 베이커리, 찻집 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
         promptBuilder.append("5. 한 줄 소개: 처음 보는 여행자가 '무엇을 하는 곳인지' 알 수 있게 한국어 한 문장(15~60자)으로 적어. ")
                 .append(DESCRIPTION_RULES).append("\n");
         promptBuilder.append("6. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성|체류시간|세부유형|한 줄 소개' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지. 값 안에 '|' 는 구분자로만 써.\n");
@@ -129,33 +111,8 @@ public class AiService {
         }
 
         String prompt = promptBuilder.toString();
-        Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = geminiUrl();
-
-        int maxRetries = 3;
-        int retryCount = 0;
-
-        while (retryCount < maxRetries) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
-            } catch (Exception e) {
-                retryCount++;
-                saveErrorLog("AI_ENRICHMENT_FAIL_" + retryCount, e.getMessage());
-
-                if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 전처리(테마) 최종 실패! [OpenAI] 백업 모델 전환");
-                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
-                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
-                }
-                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            }
-        }
-        return new HashMap<>();
+        Map<String, String> result = callAi(prompt, new TypeReference<Map<String, String>>(){}, "ENRICHMENT");
+        return result != null ? result : new HashMap<>();
     }
 
     // 소개 문구 공통 규칙. 모델이 모르는 장소를 그럴듯하게 꾸며 쓰지 않게 하는 것이 핵심이다.
@@ -172,7 +129,7 @@ public class AiService {
         StringBuilder promptBuilder = new StringBuilder();
         promptBuilder.append("너는 일본 여행 가이드북 편집자야. 아래 장소마다 '세부 유형'과 '한 줄 소개'를 한국어로 써.\n\n");
         promptBuilder.append("【 작성 규칙 】\n");
-        promptBuilder.append("1. 세부 유형: 이 장소가 무엇인지 2~10자의 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
+        promptBuilder.append("1. 세부 유형: 이 장소가 무엇인지 2~10자의 명사로 적어. (식당은 음식 종류: 라멘, 스시, 장어, 이자카야 / 식사가 아닌 가게는 그대로: 젤라토, 디저트, 베이커리, 찻집 / 그 외: 신사, 공원, 전망대, 미술관, 쇼핑몰 처럼)\n");
         promptBuilder.append("2. 한 줄 소개: 처음 보는 여행자가 '무엇을 하는 곳인지' 알 수 있게 한 문장(15~60자)으로 적어. ").append(DESCRIPTION_RULES).append("\n");
         promptBuilder.append("3. 결과는 반드시 장소 ID를 키로, '세부유형|한 줄 소개' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지. 값 안에 '|' 는 구분자로만 써.\n");
         promptBuilder.append("예시: {\"ChIJ1234\": \"라멘|진한 돈코츠 국물의 라멘을 내는 현지 인기 식당\", \"ChIJ5678\": \"일본식 정원|연못을 따라 산책로가 이어지는 일본식 정원\"}\n\n[대상 목록]\n");
@@ -190,33 +147,8 @@ public class AiService {
         }
 
         String prompt = promptBuilder.toString();
-        Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = geminiUrl();
-
-        int maxRetries = 3;
-        int retryCount = 0;
-
-        while (retryCount < maxRetries) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
-            } catch (Exception e) {
-                retryCount++;
-                saveErrorLog("AI_DESCRIBE_FAIL_" + retryCount, e.getMessage());
-
-                if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 전처리(소개) 최종 실패! [OpenAI] 백업 모델 전환");
-                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
-                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
-                }
-                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            }
-        }
-        return new HashMap<>();
+        Map<String, String> result = callAi(prompt, new TypeReference<Map<String, String>>(){}, "DESCRIBE");
+        return result != null ? result : new HashMap<>();
     }
 
     // ============================================================================
@@ -235,33 +167,8 @@ public class AiService {
         }
 
         String prompt = promptBuilder.toString();
-        Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = geminiUrl();
-
-        int maxRetries = 3;
-        int retryCount = 0;
-
-        while (retryCount < maxRetries) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-                return parseGeminiResponse(response.getBody(), new TypeReference<Map<String, String>>(){});
-            } catch (Exception e) {
-                retryCount++;
-                saveErrorLog("AI_CLEANSING_FAIL_" + retryCount, e.getMessage());
-
-                if (retryCount >= maxRetries) {
-                    System.out.println("Gemini 정제(카테고리) 최종 실패! [OpenAI] 백업 모델 전환");
-                    Map<String, String> fallbackResponse = callFallbackOpenAi(prompt, new TypeReference<Map<String, String>>(){});
-                    return fallbackResponse != null ? fallbackResponse : new HashMap<>();
-                }
-                try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            }
-        }
-        return new HashMap<>();
+        Map<String, String> result = callAi(prompt, new TypeReference<Map<String, String>>(){}, "CLEANSING");
+        return result != null ? result : new HashMap<>();
     }
 
     // ============================================================================
@@ -273,77 +180,152 @@ public class AiService {
         return "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
     }
 
-    private Map<String, Object> buildGeminiRequest(String prompt) {
+    /** 주 모델이 OpenAI 인가 (배치 사이 대기 시간을 정할 때 쓴다) */
+    public boolean isOpenAiPrimary() {
+        return !"gemini".equalsIgnoreCase(primaryProvider == null ? "" : primaryProvider.trim());
+    }
+
+    /** 배치 한 묶음을 보낸 뒤 쉬는 시간. 유료 OpenAI 는 분당 한도가 넉넉해 짧게, 무료 Gemini 는 기존 값대로 길게 쉰다. */
+    public long batchPauseMillis(long geminiPauseMillis) {
+        return isOpenAiPrimary() ? Math.min(2000L, geminiPauseMillis) : geminiPauseMillis;
+    }
+
+    private boolean hasOpenAiKey() { return openAiApiKey != null && !openAiApiKey.isBlank(); }
+    private boolean hasGeminiKey() { return geminiApiKey != null && !geminiApiKey.isBlank(); }
+
+    /**
+     * 모든 AI 호출이 지나는 한 곳.
+     * 주 모델(ai.primary, 기본 openai)을 먼저 부르고, 계속 실패하면 다른 모델을 한 번 부른다. 둘 다 실패하면 null.
+     * @param typeOrClass 결과 형식 (Class 또는 TypeReference)
+     * @param tag         오류 로그 구분용 이름
+     */
+    private <T> T callAi(String prompt, Object typeOrClass, String tag) {
+        String[] order = isOpenAiPrimary() ? new String[]{"openai", "gemini"} : new String[]{"gemini", "openai"};
+        for (int i = 0; i < order.length; i++) {
+            String provider = order[i];
+            boolean available = "openai".equals(provider) ? hasOpenAiKey() : hasGeminiKey();
+            if (!available) {
+                if (i == 0) System.out.println("[AI] 주 모델(" + provider + ")의 API 키가 설정되지 않아 다른 모델로 호출합니다.");
+                continue;
+            }
+            int attempts = i == 0 ? PRIMARY_ATTEMPTS : 1;
+            for (int attempt = 1; attempt <= attempts; attempt++) {
+                try {
+                    T result = "openai".equals(provider) ? callOpenAi(prompt, typeOrClass) : callGemini(prompt, typeOrClass);
+                    if (result != null) return result;
+                } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                    // RestTemplate 이 감춘 실제 오류 본문(한도 초과·모델명 오류 등)을 남긴다
+                    saveErrorLog("AI_" + tag + "_" + provider.toUpperCase() + "_FAIL_" + attempt,
+                            "HTTP " + e.getStatusCode() + " | 상세: " + e.getResponseBodyAsString());
+                } catch (Exception e) {
+                    saveErrorLog("AI_" + tag + "_" + provider.toUpperCase() + "_FAIL_" + attempt, e.getMessage());
+                }
+                if (attempt < attempts) {
+                    try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return null; }
+                }
+            }
+            if (i == 0) System.out.println("[AI] " + provider + " 호출 실패(" + tag + ") → 보조 모델로 전환합니다.");
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T readAs(String json, Object typeOrClass) throws Exception {
+        String text = json.replace("```json", "").replace("```", "").trim();
+        if (typeOrClass instanceof Class) return (T) objectMapper.readValue(text, (Class<?>) typeOrClass);
+        return (T) objectMapper.readValue(text, (TypeReference<?>) typeOrClass);
+    }
+
+    private <T> T callGemini(String prompt, Object typeOrClass) throws Exception {
         Map<String, Object> requestBody = new HashMap<>();
         Map<String, Object> contents = new HashMap<>();
         Map<String, Object> parts = new HashMap<>();
         parts.put("text", prompt);
         contents.put("parts", Collections.singletonList(parts));
         requestBody.put("contents", Collections.singletonList(contents));
-        return requestBody;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        ResponseEntity<String> response = restTemplate.postForEntity(geminiUrl(), new HttpEntity<>(requestBody, headers), String.class);
+
+        JsonNode rootNode = objectMapper.readTree(response.getBody());
+        String aiText = rootNode.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("");
+        if (aiText.isBlank()) throw new IllegalStateException("Gemini 응답에 본문이 없습니다.");
+        return readAs(aiText, typeOrClass);
     }
 
-    // Class 타입(객체) 파싱
-    private <T> T parseGeminiResponse(String responseBody, Class<T> valueType) throws Exception {
-        JsonNode rootNode = objectMapper.readTree(responseBody);
-        String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-        aiText = aiText.replace("```json", "").replace("```", "").trim();
-        return objectMapper.readValue(aiText, valueType);
-    }
+    private <T> T callOpenAi(String prompt, Object typeOrClass) throws Exception {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", openAiModel);
 
-    // TypeReference 타입(Map, List 등 제네릭) 파싱
-    private <T> T parseGeminiResponse(String responseBody, TypeReference<T> valueTypeRef) throws Exception {
-        JsonNode rootNode = objectMapper.readTree(responseBody);
-        String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-        aiText = aiText.replace("```json", "").replace("```", "").trim();
-        return objectMapper.readValue(aiText, valueTypeRef);
-    }
+        // JSON 모드: 응답이 항상 JSON 객체 하나로 온다 (프롬프트에 "JSON" 이라는 말이 있어야 한다 → 시스템 메시지에 넣어 둔다)
+        Map<String, String> system = new HashMap<>();
+        system.put("role", "system");
+        system.put("content", "You are a careful data-processing assistant. Always answer with a single valid JSON object and nothing else.");
+        Map<String, String> message = new HashMap<>();
+        message.put("role", "user");
+        message.put("content", prompt);
+        requestBody.put("messages", Arrays.asList(system, message));
 
-    // 모든 API에서 공통으로 사용할 수 있는 범용 GPT 백업 호출 메서드
-    private <T> T callFallbackOpenAi(String prompt, Object typeOrClass) {
-        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
-            System.err.println("[오류] OpenAI API 키가 yml 파일에 설정되지 않았습니다!");
-            return null;
-        }
+        Map<String, Object> responseFormat = new HashMap<>();
+        responseFormat.put("type", "json_object");
+        requestBody.put("response_format", responseFormat);
 
-        try {
-            String gptUrl = "https://api.openai.com/v1/chat/completions";
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", openAiModel);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(openAiApiKey);
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "https://api.openai.com/v1/chat/completions", new HttpEntity<>(requestBody, headers), String.class);
 
-            Map<String, String> message = new HashMap<>();
-            message.put("role", "user");
-            message.put("content", prompt);
-            requestBody.put("messages", Collections.singletonList(message));
+        JsonNode rootNode = objectMapper.readTree(response.getBody());
+        String gptText = rootNode.path("choices").path(0).path("message").path("content").asText("").trim();
+        if (gptText.isBlank()) throw new IllegalStateException("OpenAI 응답에 본문이 없습니다.");
 
-            Map<String, Object> responseFormat = new HashMap<>();
-            responseFormat.put("type", "json_object");
-            requestBody.put("response_format", responseFormat);
-
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(openAiApiKey);
-
-            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(requestBody, headers);
-            org.springframework.http.ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
-
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
-
-            if (typeOrClass instanceof Class) {
-                return (T) objectMapper.readValue(gptText, (Class<?>) typeOrClass);
-            } else if (typeOrClass instanceof TypeReference) {
-                return (T) objectMapper.readValue(gptText, (TypeReference<?>) typeOrClass);
+        // {"result": {...}} 처럼 한 겹 더 감싸서 주는 경우가 있다. 'ID → 문자열' 표를 기대할 때는 안쪽 객체를 꺼내 쓴다.
+        if (typeOrClass instanceof TypeReference) {
+            JsonNode root = objectMapper.readTree(gptText.replace("```json", "").replace("```", "").trim());
+            if (root.isObject() && root.size() == 1 && root.elements().next().isObject()) {
+                gptText = root.elements().next().toString();
             }
         }
-        // RestTemplate이 숨겨버린 진짜 OpenAI 에러 바디(JSON)를 강제로 뜯어냅니다
-        catch (org.springframework.web.client.HttpStatusCodeException e) {
-            String realErrorBody = e.getResponseBodyAsString();
-            saveErrorLog("AI_FATAL_GPT_FAIL", "HTTP " + e.getStatusCode() + " | 상세: " + realErrorBody);
-        } catch (Exception e) {
-            saveErrorLog("AI_FATAL_GPT_FAIL", e.getMessage());
+        return readAs(gptText, typeOrClass);
+    }
+
+    /**
+     * 설정 확인용: 두 모델을 아주 짧은 질문으로 한 번씩 불러 보고 결과를 글로 돌려준다 (키 값은 내보내지 않는다).
+     * GET /api/test/ai 에서 쓴다.
+     */
+    public String selfTest() {
+        StringBuilder out = new StringBuilder();
+        out.append("주 모델: ").append(isOpenAiPrimary() ? "openai" : "gemini").append(" (설정 ai.primary)\n");
+        String prompt = "다음 JSON 을 그대로 돌려줘. 다른 말은 쓰지 마. {\"ok\": \"yes\"}";
+        String[][] providers = {{"openai", openAiModel}, {"gemini", geminiModel}};
+        for (String[] provider : providers) {
+            boolean openai = "openai".equals(provider[0]);
+            out.append("- ").append(provider[0]).append(" [모델 ").append(provider[1]).append("]: ");
+            if (!(openai ? hasOpenAiKey() : hasGeminiKey())) {
+                out.append("API 키가 설정되지 않았습니다.\n");
+                continue;
+            }
+            long started = System.currentTimeMillis();
+            try {
+                Map<String, String> answer = openai
+                        ? callOpenAi(prompt, new TypeReference<Map<String, String>>(){})
+                        : callGemini(prompt, new TypeReference<Map<String, String>>(){});
+                out.append("응답 성공 ").append(answer).append(" (").append(System.currentTimeMillis() - started).append("ms)\n");
+            } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                out.append("실패 HTTP ").append(e.getStatusCode()).append(" → ").append(maskKeys(e.getResponseBodyAsString())).append("\n");
+            } catch (Exception e) {
+                out.append("실패 → ").append(maskKeys(String.valueOf(e.getMessage()))).append("\n");
+            }
         }
-        return null;
+        return out.toString();
+    }
+
+    /** 오류 문구에 요청 주소가 그대로 실리는 경우가 있어 API 키는 가린다 */
+    private static String maskKeys(String message) {
+        if (message == null) return "";
+        return message.replaceAll("key=[^&\\s\"]+", "key=***").replaceAll("sk-[A-Za-z0-9_\\-]{8,}", "sk-***");
     }
 
     private AiRouteResponse createEmergencyFallbackResponse(List<PlanService.SimulatedItinerary> routes, int totalDays) {
@@ -376,13 +358,12 @@ public class AiService {
     private void saveErrorLog(String errorType, String message) {
         try {
             String actualMessage = message != null ? message : "Unknown Error";
-            // 요청 주소가 오류 문구에 그대로 실리는 경우가 있어 API 키는 가린다 (콘솔·로그 테이블에 남지 않도록)
-            actualMessage = actualMessage.replaceAll("key=[^&\\s\"]+", "key=***");
+            actualMessage = maskKeys(actualMessage);   // API 키가 콘솔·로그 테이블에 남지 않도록 가린다
 
             // 인텔리제이 콘솔창에 빨간 글씨로 출력합니다.
             System.err.println("\n[AI 통신 장애 리포트]");
             System.err.println("▶ 발생 위치 (타입): " + errorType);
-            System.err.println("▶ 구글/오픈AI 진짜 응답: " + actualMessage);
+            System.err.println("▶ AI 서버 응답: " + actualMessage);
             System.err.println("=========================================\n");
 
             Log errorLog = new Log();
@@ -403,19 +384,8 @@ public class AiService {
                 "{\"theme\":\"관광,사진\", \"type\":\"실내\", \"duration\":90}";
 
         try {
-            Map<String, Object> requestBody = buildGeminiRequest(prompt);
-            String url = geminiUrl();
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response.getBody());
-            String aiText = rootNode.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
-            aiText = aiText.replace("```json", "").replace("```", "").trim();
-
-            JsonNode resultNode = objectMapper.readTree(aiText);
+            JsonNode resultNode = callAi(prompt, JsonNode.class, "REALTIME");
+            if (resultNode == null) throw new IllegalStateException("AI 응답 없음");
             // 12개 어휘에 없는 값("기본 명소" 등)은 저장하지 않는다. 비어 있으면 엔진이 이름·분류로 추정한다.
             java.util.List<String> themes = ThemeVocabulary.normalizeList(resultNode.path("theme").asText(""));
             place.setTheme(themes.isEmpty() ? null : String.join(",", themes));

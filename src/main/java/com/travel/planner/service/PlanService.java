@@ -1338,7 +1338,7 @@ public class PlanService {
     private List<int[]> intervals(Cand c, LocalDate date, TripState st) {
         return c.intervalCache.computeIfAbsent(date, d -> {
             List<int[]> iv = OpeningHours.intervalsOn(c.place, d);
-            if (iv == null) iv = defaultIntervals(c, d);
+            if (iv == null) iv = defaultIntervals(c, d, st.nightViewLover);
 
             // 야외 명소는 문이 열려 있어도 해가 있을 때만 의미가 있다.
             // "24시간 영업"뿐 아니라 "06:00~21:00"처럼 밤까지 개방하는 공원도 일몰까지만 잡는다 (저녁 7시의 해안 공원 방지)
@@ -1346,7 +1346,7 @@ public class PlanService {
             boolean alwaysOpen = iv.stream().anyMatch(range -> range[1] - range[0] >= 20 * 60);
             boolean openAirAlways = alwaysOpen && c.kind == PlaceKind.ATTRACTION && !"실내".equals(c.place.getPlaceType())
                     && !c.themes.contains("야경") && !c.themes.contains("온천");
-            if (isDaylightOnly(c) || openAirAlways) {
+            if (isDaylightOnly(c, st.nightViewLover) || openAirAlways) {
                 int sunset = nightViewFrom(d);
                 List<int[]> daylight = new ArrayList<>();
                 for (int[] range : iv) {
@@ -1370,15 +1370,20 @@ public class PlanService {
 
     /**
      * 해가 있을 때만 의미가 있는 야외 명소인가.
-     * 테마에 '자연'이 있거나, 테마와 상관없이 이름이 공원·정원·해변·신사 같은 곳 (야경·온천·실내는 제외).
+     * 테마에 '자연'이 있거나, 테마와 상관없이 이름이 공원·정원·해변·신사 같은 곳 (온천·실내, 그리고 야경 명소는 제외).
      */
-    private static boolean isDaylightOnly(Cand c) {
+    private static boolean isDaylightOnly(Cand c, boolean nightViewLover) {
         if (c.kind != PlaceKind.ATTRACTION || "실내".equals(c.place.getPlaceType())) return false;
-        if (c.themes.contains("야경") || c.themes.contains("온천")) return false;
+        if (c.themes.contains("온천")) return false;
+        if (c.themes.contains("야경")) {
+            // '야경' 태그가 붙은 공원·정원(조명·분수 등)은 야경 테마를 고른 사람에게만 밤 방문을 허용한다.
+            // 고르지 않은 사람에게는 그냥 공원이므로 해 지기 전에 간다. (전망대·타워 같은 야경 명소는 그대로 밤에도 간다)
+            return !nightViewLover && PlaceKind.looksLikePark(c.place.getName());
+        }
         return c.themes.contains("자연") || PlaceKind.looksLikeOpenAir(c.place.getName());
     }
 
-    private static List<int[]> defaultIntervals(Cand c, LocalDate date) {
+    private static List<int[]> defaultIntervals(Cand c, LocalDate date, boolean nightViewLover) {
         List<int[]> iv = new ArrayList<>();
         switch (c.kind) {
             case RESTAURANT: iv.add(new int[]{11 * 60, 22 * 60}); break;
@@ -1390,7 +1395,7 @@ public class PlanService {
                 // 구글에 영업시간이 없는 관광지는 대부분 거리·공원 같은 개방 공간이다.
                 if ("실내".equals(c.place.getPlaceType())) {
                     iv.add(new int[]{9 * 60, 18 * 60});
-                } else if (isDaylightOnly(c)) {
+                } else if (isDaylightOnly(c, nightViewLover)) {
                     iv.add(new int[]{7 * 60, nightViewFrom(date)});   // 공원·산책로는 해 지기 전까지만
                 } else {
                     iv.add(new int[]{7 * 60, 22 * 60});

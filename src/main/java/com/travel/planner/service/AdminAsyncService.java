@@ -199,7 +199,7 @@ public class AdminAsyncService {
                 Map<String, String> enrichedDataMap = aiService.classifyPlaceAttributesBulk(validPlacesForBulk, reviewsMap);
 
                 if (enrichedDataMap == null || enrichedDataMap.isEmpty()) {
-                    System.out.println("[경고] AI 응답이 비었습니다(429 한도 초과 등). 1분(60초) 대기 후 재시도합니다...");
+                    System.out.println("[경고] AI 응답이 비었습니다(두 모델 모두 실패. 서버 로그의 [AI 통신 장애 리포트] 확인). 1분(60초) 대기 후 재시도합니다...");
                     try { Thread.sleep(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                     continue;
                 }
@@ -223,7 +223,7 @@ public class AdminAsyncService {
                 System.out.println("[벌크 인리치먼트] " + validPlacesForBulk.size() + "건 중 " + successCount + "건 테마/속성 적재 완료.");
 
                 try {
-                    Thread.sleep(10000);
+                    Thread.sleep(aiService.batchPauseMillis(10000));   // OpenAI 가 주 모델이면 2초, Gemini 면 10초
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -281,7 +281,7 @@ public class AdminAsyncService {
 
                 Map<String, String> described = aiService.describePlacesBulk(targets, reviewsMap);
                 if (described == null || described.isEmpty()) {
-                    System.out.println("[경고] AI 응답이 비었습니다(429 한도 초과 등). 1분(60초) 대기 후 재시도합니다...");
+                    System.out.println("[경고] AI 응답이 비었습니다(두 모델 모두 실패. 서버 로그의 [AI 통신 장애 리포트] 확인). 1분(60초) 대기 후 재시도합니다...");
                     try { Thread.sleep(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                     continue;
                 }
@@ -301,7 +301,7 @@ public class AdminAsyncService {
                 total += saved;
                 System.out.println("[소개 인리치먼트] " + targets.size() + "건 중 " + saved + "건 저장 (누적 " + total + "건).");
 
-                try { Thread.sleep(10000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                try { Thread.sleep(aiService.batchPauseMillis(10000)); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
             }
         } finally {
             describing.set(false);
@@ -335,7 +335,7 @@ public class AdminAsyncService {
                 Map<String, String> categorizedMap = aiService.cleansePlaceCategories(targetPlaces);
 
                 if (categorizedMap == null || categorizedMap.isEmpty()) {
-                    System.out.println("[경고] AI API 요청 제한(429) 감지! 1분(60s) 동안 대기합니다...");
+                    System.out.println("[경고] AI 응답이 비었습니다(두 모델 모두 실패. 서버 로그의 [AI 통신 장애 리포트] 확인). 1분(60s) 대기 후 재시도합니다...");
                     try { Thread.sleep(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                     continue;
                 }
@@ -354,8 +354,9 @@ public class AdminAsyncService {
                 System.out.println(targetPlaces.size() + "건 중 " + updateCount + "건 업데이트 완료.");
 
                 try {
-                    System.out.println("API 한도 누적을 방지하기 위해 30초간 안전 휴식을 취합니다...");
-                    Thread.sleep(30000);
+                    long pause = aiService.batchPauseMillis(30000);   // OpenAI 가 주 모델이면 2초, Gemini 면 30초
+                    if (pause >= 10000) System.out.println("API 한도 누적을 방지하기 위해 " + (pause / 1000) + "초간 안전 휴식을 취합니다...");
+                    Thread.sleep(pause);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;

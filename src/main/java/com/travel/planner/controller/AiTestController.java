@@ -13,6 +13,13 @@ import lombok.RequiredArgsConstructor;
 public class AiTestController {
 
     private final RestTemplate restTemplate;
+    private final com.travel.planner.service.AiService aiService;
+
+    /** 주 모델(ai.primary)이 무엇이고, OpenAI·Gemini 가 각각 응답하는지 확인한다. API 키는 출력하지 않는다. */
+    @GetMapping("/ai")
+    public String testAi() {
+        return aiService.selfTest();
+    }
 
     // 1. API 키 불러오기
     @Value("${ai.gemini.api-key}")

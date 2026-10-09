@@ -156,7 +156,14 @@ public final class PlanSummarizer {
             String arrive = lastItem.getType() != SimulatedItinerary.Type.END ? " 종료" : departure ? " 공항 도착" : " 숙소 도착";
             sentences.add(count + ", 이동 약 " + duration(travel) + ", " + summary.getStartTime() + " 출발 · " + summary.getEndTime() + arrive + ".");
         }
-        if (Boolean.TRUE.equals(badWeather)) sentences.add("비·눈 예보가 있어 실내 장소를 우선했습니다.");
+        if (Boolean.TRUE.equals(badWeather)) {
+            // 실내를 우선해도 야외 일정이 남을 수 있다. 남아 있으면 숨기지 않고 알려 준다.
+            List<String> outdoor = sights.stream().map(SimulatedItinerary::getPlace)
+                    .filter(p -> "실외".equals(p.getPlaceType())).map(Place::getName).distinct().limit(3).collect(Collectors.toList());
+            sentences.add(outdoor.isEmpty()
+                    ? "비·눈 예보가 있어 실내 위주로 구성했습니다."
+                    : "비·눈 예보가 있는 날입니다. 실내 장소를 우선했지만 야외 방문지(" + String.join(", ", outdoor) + ")가 있으니 우산을 챙기세요.");
+        }
 
         summary.setSummary(String.join(" ", sentences));
         return summary;

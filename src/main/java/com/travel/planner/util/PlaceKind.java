@@ -20,6 +20,10 @@ public enum PlaceKind {
     private static final Pattern PARK_NAME = Pattern.compile("공원|\\bpark\\b|公園|정원|\\bgarden\\b|庭園|광장");
     private static final Pattern OPEN_AIR_NAME = Pattern.compile(
             "해변|\\bbeach\\b|해안|호수|폭포|산책로|신사|神社|\\bshrine\\b|신궁|\\btemple\\b|寺$|동상|\\s상$|像$|\\bstatue\\b|기념비|\\bmonument\\b");
+    // AI 가 채운 세부 유형(Place.subType)으로 본 디저트·음료 가게
+    private static final Pattern DESSERT_TYPE = Pattern.compile(
+            "카페|커피|디저트|젤라토|아이스크림|베이커리|빵집|제과|찻집|티룸|파르페|빙수|크레페|도넛|케이크|스위츠|화과자|과자|푸딩|타르트|주스|버블티");
+    private static final Pattern MEAL_TYPE = Pattern.compile("식당|레스토랑|정식|런치|브런치|다이닝");
     private static final Pattern BAR_NAME = Pattern.compile(
             "이자카야|居酒屋|술집|\\b(bar|pub|beer)\\b|펍|비어|야타이|스탠딩바|하이볼");
     private static final Pattern THEME_PARK_NAME = Pattern.compile(
@@ -36,6 +40,10 @@ public enum PlaceKind {
         if (attractionLike && THEME_PARK_NAME.matcher(name).find()) return THEME_PARK;
         if ("식음".equals(category)) {
             if (CAFE_NAME.matcher(name).find()) return CAFE;
+            // 이름에는 단서가 없지만 AI 가 채운 세부 유형이 디저트·젤라토·빵집인 가게는 끼니를 해결하는 식당이 아니다
+            // (예: 말차 젤라토 가게가 '맛집' 테마로 분류돼 점심 식당으로 들어가던 문제)
+            String subType = p.getSubType() == null ? "" : p.getSubType().toLowerCase();
+            if (DESSERT_TYPE.matcher(subType).find() && !MEAL_TYPE.matcher(subType).find()) return CAFE;
             if (GROCERY_NAME.matcher(name).find()) return SHOPPING;
             if (BAR_NAME.matcher(name).find()) return BAR;
             if (theme.contains("카페") && !theme.contains("맛집")) return CAFE;

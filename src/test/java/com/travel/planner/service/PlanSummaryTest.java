@@ -44,6 +44,44 @@ class PlanSummaryTest {
         assertEquals("온천", PlaceDescriber.subTypeOf(place("아오이 온천 쿠사나기노유", "관광지")));
         assertEquals("쇼핑몰", PlaceDescriber.subTypeOf(place("덴포잔 쇼핑몰", "쇼핑")));
         assertEquals("관광 명소", PlaceDescriber.subTypeOf(place("어딘가", "관광지")));
+        assertEquals("전망대", PlaceDescriber.subTypeOf(place("시즈오카 현청 별관 21층 후지산 전망 로비", "관광지")));
+    }
+
+    @Test
+    void dessertShopIsNotAMealRestaurantOnceItsTypeIsKnown() {
+        // planId 58: 말차 젤라토 가게("나나야")가 '맛집' 테마라서 점심 식당으로 들어갔다
+        Place gelato = place("나나야 시즈오카점", "식음");
+        gelato.setTheme("맛집,카페");
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(gelato), "이름·테마만으로는 식당으로 본다");
+        gelato.setSubType("말차 젤라토");
+        assertEquals(PlaceKind.CAFE, PlaceKind.of(gelato), "세부 유형이 채워지면 디저트 가게로 본다");
+
+        Place ramen = place("멘야 어딘가", "식음");
+        ramen.setSubType("라멘");
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(ramen));
+        Place brunch = place("어딘가 키친", "식음");
+        brunch.setSubType("카페 레스토랑");
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(brunch), "식사가 되는 곳은 식당으로 남긴다");
+    }
+
+    @Test
+    void rainyDayOverviewAdmitsOutdoorStops() {
+        TripInput in = PlanServiceTest.osakaTrip(3, "오전", "오후", "자연", "힐링");
+        in.badWeatherByDate.put(in.request.getStartDate().plusDays(1), true);
+        TripPlan plan = planService.planTrip(in);
+        DayPlan rainy = plan.getDays().get(1);
+        AiRouteResponse.DaySummary summary = PlanSummarizer.summarizeDays(plan.getDays()).get(1);
+        assertEquals(Boolean.TRUE, summary.getBadWeather());
+
+        boolean hasOutdoor = rainy.getItems().stream().anyMatch(it -> it.getType() == SimulatedItinerary.Type.VISIT
+                && !PlaceKind.of(it.getPlace()).isFood() && "실외".equals(it.getPlace().getPlaceType()));
+        if (hasOutdoor) {
+            assertTrue(summary.getSummary().contains("야외 방문지("), summary.getSummary());
+            assertFalse(summary.getSummary().contains("실내 위주로 구성했습니다"), "야외 일정이 있는데 실내 위주라고 쓰지 않는다");
+        } else {
+            assertTrue(summary.getSummary().contains("실내 위주로 구성했습니다"), summary.getSummary());
+        }
+        assertEquals(null, PlanSummarizer.summarizeDays(plan.getDays()).get(0).getBadWeather());   // 예보가 없는 날
     }
 
     @Test

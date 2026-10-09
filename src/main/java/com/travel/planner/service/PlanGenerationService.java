@@ -233,7 +233,8 @@ public class PlanGenerationService {
                     .filter(p -> planService.themesOf(p).contains(theme))
                     .count();
             if (count >= minPerTheme) continue;
-            String city = cities.get(calls % cities.size());
+            // 여러 도시면 그 테마 후보가 가장 적은 도시에서 수집한다 (이전에는 호출 순번대로 도시를 돌았다)
+            String city = neediestCity(cities, allPlaces, theme);
             emergencyCollect(city, ThemeVocabulary.searchQueryFor(theme), theme, allPlaces);
             calls++;
         }
@@ -255,6 +256,24 @@ public class PlanGenerationService {
             emergencyCollect(city, expandToSuburbs ? keyword + " 근교" : keyword, null, allPlaces);
             calls++;
         }
+    }
+
+    /** 그 테마의 방문 후보가 가장 적은 도시 */
+    private String neediestCity(List<String> cities, List<Place> allPlaces, String theme) {
+        String best = cities.get(0);
+        long bestCount = Long.MAX_VALUE;
+        for (String city : cities) {
+            long count = allPlaces.stream()
+                    .filter(p -> city.equals(p.getCity()))
+                    .filter(planService::isVisitCandidate)
+                    .filter(p -> planService.themesOf(p).contains(theme))
+                    .count();
+            if (count < bestCount) {
+                bestCount = count;
+                best = city;
+            }
+        }
+        return best;
     }
 
     private void emergencyCollect(String city, String query, String provisionalTheme, List<Place> allPlaces) {

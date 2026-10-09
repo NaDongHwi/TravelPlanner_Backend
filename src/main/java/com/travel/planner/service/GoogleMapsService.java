@@ -479,7 +479,20 @@ public class GoogleMapsService {
     }
 
     // 9. 숙소 역제안용 구글 맵스 숙소 검색기
+    /**
+     * 도시의 추천 숙소. 먼저 유형을 숙박 시설(lodging)로 제한해 찾고, 결과가 없거나 요청이 거부되면 제한 없이 한 번 더 찾는다.
+     * (제한 없이 "○○ 유명 호텔"로만 찾으면 호텔이 아닌 장소가 섞여 올 수 있다)
+     */
     public List<Place> searchRecommendedHotels(String city) {
+        List<Place> hotels = searchHotels(city, true);
+        if (hotels.isEmpty()) {
+            System.out.println("[숙소] " + city + ": 숙박 유형 제한 검색 결과가 없어 제한 없이 다시 검색합니다.");
+            hotels = searchHotels(city, false);
+        }
+        return hotels;
+    }
+
+    private List<Place> searchHotels(String city, boolean lodgingOnly) {
         List<Place> recommendedHotels = new ArrayList<>();
 
         try {
@@ -487,6 +500,10 @@ public class GoogleMapsService {
             body.put("textQuery", city + " 유명 호텔");
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
+            if (lodgingOnly) {
+                body.put("includedType", "lodging");
+                body.put("strictTypeFiltering", true);
+            }
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(body,
                     placesHeaders("places.id,places.displayName.text,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.nationalPhoneNumber"));

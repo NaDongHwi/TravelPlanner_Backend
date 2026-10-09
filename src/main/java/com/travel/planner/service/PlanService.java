@@ -448,7 +448,7 @@ public class PlanService {
                 time = clamp(hasRecommended ? recommended : 60, 45, 120);
                 break;
             case CAFE:
-                time = clamp(hasRecommended ? recommended : 45, 30, 90);
+                time = clamp(hasRecommended ? recommended : 45, 30, 60);   // 카페에 90분씩 잡지 않는다
                 break;
             case BAR:
                 time = clamp(hasRecommended ? recommended : 75, 45, 120);
@@ -1534,7 +1534,8 @@ public class PlanService {
             }
         } else {
             if (pending != null && ds.cur >= mustFrom(ds, pending)) return null;        // 식사가 먼저 (테마파크도 식사 뒤에 간다)
-            // 이 방문 때문에 식사 시간을 놓치면 안 된다. 간식·야식은 "다음 식사"일 때만 지킨다.
+            // 이 방문 때문에 식사 시간을 놓치면 안 된다. 사용자가 고른 식사 횟수가 우선이므로 간식·야식 자리도 지킨다.
+            // (자리를 지키지 않으면 식사 5회를 골라도 방문에 밀려 2~3회만 들어간다)
             Meal guard = pending != null && pending.optional ? pending : pendingMandatoryMeal(ds);
             if (guard != null && !longStay && finish > guard.latestStart) return null;
             if (pending != null && pending.optional && !longStay) {

@@ -474,6 +474,41 @@ class PlanServiceTest {
         assertTrue(dinners >= 1, describe(plan));
     }
 
+    @Test
+    void onsenIsOncePerDayAndPreferablyInTheAfternoon() {
+        // 온천이 도심에 여러 곳 있을 때: 하루에 두 곳을 연달아 가지 않고, 아침 첫 일정으로 잡지 않는다
+        TripInput in = osakaTrip(4, "오전", "오후", "온천", "힐링", "자연");
+        in.candidates.add(extraOnsen("난바 천연온천", 34.6650, 135.5040));
+        in.candidates.add(extraOnsen("우메다 스파", 34.7040, 135.4980));
+        in.candidates.add(extraOnsen("모리노미야 온천", 34.6850, 135.5320));
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+
+        int total = 0;
+        for (DayPlan day : plan.getDays()) {
+            List<SimulatedItinerary> onsens = visits(day).stream()
+                    .filter(v -> v.getPlace().getTheme() != null && v.getPlace().getTheme().contains("온천")).collect(Collectors.toList());
+            assertTrue(onsens.size() <= 1, "Day " + day.getDayNumber() + " 온천 " + onsens.size() + "곳\n" + describe(plan));
+            total += onsens.size();
+            boolean fullDay = day.getDayNumber() > 1 && day.getDayNumber() < plan.getDays().size();
+            for (SimulatedItinerary o : onsens) {
+                // 선호 규칙(감점)이라 13:00 정각을 보장하지는 않는다. 그날 첫 일정이 아니고 정오 이후면 된다.
+                if (fullDay) assertTrue(o != visits(day).get(0) && o.getStartMin() >= 12 * 60,
+                        "Day " + day.getDayNumber() + " 온천이 아침 첫 일정(" + o.getTime() + ")으로 잡힘\n" + describe(plan));
+            }
+        }
+        assertTrue(total >= 2, "온천 테마인데 온천 방문 " + total + "회\n" + describe(plan));
+    }
+
+    private static Place extraOnsen(String name, double lat, double lng) {
+        Place p = TestPlaces.place("T_ONSEN_" + name.replace(' ', '_'), name, "오사카", lat, lng, "관광지", "온천,힐링", TestPlaces.H_ONSEN);
+        p.setPlaceType("실내");
+        p.setRecommendedDuration(120);
+        p.setRating(4.2);
+        p.setUserRatingCount(1500);
+        return p;
+    }
+
     // ------------------------------------------------------------------ 불변식
 
     void checkInvariants(TripPlan plan, TripInput in) {

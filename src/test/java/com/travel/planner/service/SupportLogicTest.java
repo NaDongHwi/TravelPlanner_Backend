@@ -129,6 +129,13 @@ class SupportLogicTest {
         assertTrue(planService.isVisitCandidate(located(place("난바 역사 박물관", "관광지"))));
         assertTrue(planService.isVisitCandidate(located(place("기온 전통 보존 지역", "관광지"))));
         assertTrue(planService.isVisitCandidate(located(place("호텔 뉴오타니 레스토랑", "식음"))));
+
+        // 해가 있을 때만 넣는 야외 명소 판정 (테마와 무관하게 이름으로)
+        for (String name : new String[]{"Higashishizuoka Smile Park", "오구시 신사", "도쿠가와 이에야스 상", "히로노 해안공원"}) {
+            assertTrue(PlaceKind.looksLikeOpenAir(name), name);
+        }
+        assertFalse(PlaceKind.looksLikeOpenAir("시즈오카 시립 미술관"));
+        assertFalse(PlaceKind.looksLikeOpenAir("고급 일식당 상상"));
     }
 
     private static Place located(Place p) {

@@ -19,7 +19,7 @@ public enum PlaceKind {
     // 해가 있을 때 가야 의미가 있는 야외 장소 (공원·정원·해변·신사 등)
     private static final Pattern PARK_NAME = Pattern.compile("공원|\\bpark\\b|公園|정원|\\bgarden\\b|庭園|광장");
     private static final Pattern OPEN_AIR_NAME = Pattern.compile(
-            "해변|\\bbeach\\b|해안|호수|폭포|산책로|신사|神社|\\bshrine\\b|신궁|\\btemple\\b|寺$");
+            "해변|\\bbeach\\b|해안|호수|폭포|산책로|신사|神社|\\bshrine\\b|신궁|\\btemple\\b|寺$|동상|\\s상$|像$|\\bstatue\\b|기념비|\\bmonument\\b");
     private static final Pattern BAR_NAME = Pattern.compile(
             "이자카야|居酒屋|술집|\\b(bar|pub|beer)\\b|펍|비어|야타이|스탠딩바|하이볼");
     private static final Pattern THEME_PARK_NAME = Pattern.compile(

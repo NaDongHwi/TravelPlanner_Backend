@@ -81,6 +81,11 @@ public class PlanService {
     /** 온천 체류 상한: 온천 테마를 골랐을 때 / 고르지 않았을 때 */
     static final int ONSEN_DWELL_MAX_WITH_THEME_MIN = 180;
     static final int ONSEN_DWELL_MAX_MIN = 90;
+    /** 온천은 하루 1곳, 가능하면 이 시각 이후에 (아침마다 온천부터 가는 일정 방지) */
+    static final int ONSEN_PREFERRED_FROM_MIN = 13 * 60;
+    static final double ONSEN_MORNING_PENALTY = 40.0;
+    /** 외딴 장소까지 가서 테마를 채우는 것은 그 테마 방문이 이 횟수 미만일 때만 */
+    static final int REMOTE_RESCUE_BELOW_COUNT = 2;
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
@@ -501,6 +506,8 @@ public class PlanService {
         double distFromCenter;
         /** 도심에서 멀고(25km 초과) 주변 5km 안에 함께 볼 곳이 3곳 미만인 외딴 장소 */
         boolean remoteLone;
+        /** 온천 시설 (식당·카페가 아닌 곳 중 테마에 온천이 있는 곳) */
+        boolean onsen;
         String brandKey;
         int dwell;
         final Map<LocalDate, List<int[]>> intervalCache = new HashMap<>();
@@ -627,6 +634,7 @@ public class PlanService {
             Set<String> explicit = ThemeVocabulary.explicitThemes(p);
             c.explicitThemes = !explicit.isEmpty();
             c.themes = c.explicitThemes ? explicit : ThemeVocabulary.inferredThemes(p);
+            c.onsen = c.kind == PlaceKind.ATTRACTION && c.themes.contains("온천");
 
             // 제외 테마: 테마 또는 카테고리에 걸리면 후보에서 뺀다.
             boolean isExcluded = c.themes.stream().anyMatch(excluded::contains)
@@ -853,6 +861,7 @@ public class PlanService {
         int bars;
         int shopping;
         boolean themeParkDone;
+        boolean onsenDone;
         PlaceKind lastKind;
         Cand seed;
         /** 고정 일정 등으로 그날의 중심 권역을 벗어나면 true: 이후에는 현재 위치 기준으로만 고른다 */
@@ -1292,6 +1301,7 @@ public class PlanService {
             default:
                 break;
         }
+        if (c.onsen && ds.onsenDone) return null;      // 온천은 하루 한 곳
         // 외딴 장소는 그날의 중심이 바로 그곳(또는 그 5km 안)일 때만 간다
         if (c.remoteLone && ds.seed != c) {
             if (ds.seed == null || ds.leftSeedArea
@@ -1413,9 +1423,13 @@ public class PlanService {
         u -= TRAVEL_WEIGHT * travel;
         e.waitPenalty = (waitIsFree ? 0.5 : WAIT_WEIGHT) * wait;
         u -= e.waitPenalty;
+        // 온천은 걸어 다닌 뒤 오후에 가는 편이 자연스럽다. 오전에는 중심 장소 가산점을 주지 않고 감점해서
+        // 주변을 먼저 돌게 한다. (멀리 다녀오는 외딴 온천은 도착하자마자 들어가야 하므로 예외)
+        boolean morningOnsen = c.onsen && !c.remoteLone && start < ONSEN_PREFERRED_FROM_MIN;
+        if (morningOnsen) u -= ONSEN_MORNING_PENALTY;
         if (ds.seed != null && !ds.leftSeedArea) {
             if (ds.seed == c) {
-                u += SEED_BONUS;
+                if (!morningOnsen) u += SEED_BONUS;
             } else {
                 double km = DistanceUtil.calculateDistance(c.lat, c.lng, ds.seed.lat, ds.seed.lng);
                 u -= Math.min(180.0, SEED_DISTANCE_WEIGHT * km);
@@ -1478,6 +1492,7 @@ public class PlanService {
             case THEME_PARK: ds.themeParkDone = true; break;
             default: break;
         }
+        if (c.onsen) ds.onsenDone = true;
         if (e.fills != null) {
             ds.mealsDone.add(e.fills);
             ds.lastMealEnd = e.end;
@@ -1539,7 +1554,9 @@ public class PlanService {
             double bestScore = Double.NEGATIVE_INFINITY;
             // 1차: 도심·근교의 자격 있는 곳. 2차: 그 테마를 시내에서 더 채울 수 없을 때만 외딴 곳 하나를 허용.
             for (int pass = 0; pass < 2 && best == null; pass++) {
-                if (pass == 1 && (theme == null || !remoteAllowed)) break;
+                // 2차는 그 테마를 아직 거의 못 간 경우에만 (이미 여러 번 갔으면 멀리까지 가서 채우지 않는다)
+                if (pass == 1 && (theme == null || !remoteAllowed
+                        || st.themeCounts.getOrDefault(theme, 0) >= REMOTE_RESCUE_BELOW_COUNT)) break;
                 final boolean remotePass = pass == 1;
                 List<Cand> options = st.pool.stream()
                         .filter(c -> !st.visited.contains(c.place.getPlaceId()))

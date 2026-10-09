@@ -32,6 +32,15 @@ public class Itinerary {
     @Column(nullable = false)
     private String time;
 
+    // 방문 종료 시각 ("HH:mm"). 숙소/공항 같은 앵커는 null.
+    @Column
+    private String endTime;
+
+    // 자유시간·식사·고정 일정처럼 실제 장소가 아닌 항목의 표시 이름.
+    // (이런 항목은 place 에 공용 더미 Place 가 연결되므로, 화면에는 이 값을 우선 보여준다.)
+    @Column
+    private String customTitle;
+
     // AI가 생성해 준 동선 배치 사유
     @Column(columnDefinition = "TEXT")
     private String aiComment;

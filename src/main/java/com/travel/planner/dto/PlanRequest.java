@@ -51,12 +51,29 @@ public class PlanRequest {
         private String name;
         private java.time.LocalTime startTime;
         private java.time.LocalTime endTime;
+
+        // 고정 일정이 있는 날. date 또는 dayNumber 중 하나를 보내면 그 날에만 적용된다.
+        // 둘 다 없으면 기존 동작대로 매일 적용되고, 응답 warnings 에 안내가 붙는다.
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
+        @Schema(description = "고정 일정 날짜 (선택)", example = "2026-07-03")
+        private LocalDate date;
+
+        @Schema(description = "고정 일정 일차 (선택, 1부터)", example = "2")
+        private Integer dayNumber;
+
+        // 장소 좌표를 알면 앞뒤 이동 시간을 계산에 반영한다 (선택).
+        private Double latitude;
+        private Double longitude;
     }
 
+    @Schema(description = "입국 도시 또는 공항명", example = "오사카")
     private String inCity;
+    @Schema(description = "출국 도시 또는 공항명 (입국과 달라도 됨)", example = "오사카")
     private String outCity;
 
+    @Schema(description = "입국편 도착 시각. \"HH:mm\" 권장, \"오전/오후/저녁/미정\"도 허용", example = "10:30")
     private String inTime;
+    @Schema(description = "출국편 출발 시각. \"HH:mm\" 권장, \"오전/오후/저녁/미정\"도 허용", example = "18:20")
     private String outTime;
 
     @Schema(description = "사용자 앱/단말기 언어 설정", example = "ko")

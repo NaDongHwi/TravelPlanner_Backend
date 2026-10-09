@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
@@ -19,7 +20,12 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private final JwtUtil jwtUtil;
 
+    // 프론트엔드 콜백 주소 (배포 환경에 맞게 설정에서 바꾼다)
+    @Value("${app.oauth2.redirect-uri:http://localhost:3000/oauth2/callback}")
+    private String redirectUri;
+
     @Override
+    @SuppressWarnings("unchecked")
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException, ServletException {
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
 
@@ -43,8 +49,10 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         // 기존 시스템의 JWT 토큰 발급
         String token = jwtUtil.generateToken(email);
 
-        // 프론트엔드 리다이렉트 주소로 토큰 전달 (프론트 서버 포트에 맞게 수정 필요)
-        String targetUrl = "http://localhost:3000/oauth2/callback?token=" + token;
+        // 토큰을 쿼리스트링(?token=)이 아니라 URL 프래그먼트(#token=)로 넘긴다.
+        // 프래그먼트는 서버로 전송되지 않아 서버 접근 로그·Referer 헤더에 토큰이 남지 않는다.
+        // 프론트에서는 location.hash 에서 token 을 읽은 뒤 주소창에서 지우면 된다.
+        String targetUrl = redirectUri + "#token=" + token;
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
 }

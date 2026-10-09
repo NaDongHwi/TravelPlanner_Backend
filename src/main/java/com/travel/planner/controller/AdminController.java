@@ -63,17 +63,26 @@ public class AdminController {
         }
 
         String[] searchSuite = (keyword == null || keyword.trim().isEmpty())
+                // 기본 검색 세트.
+                // 이전 세트는 10개 중 7개가 식음·쇼핑이라 DB 가 그쪽으로 쏠렸고, 문화·자연·야경·서브컬쳐·액티비티 테마는
+                // 후보 자체가 부족했다. 12개 테마가 고르게 채워지도록 관광 계열 검색을 늘렸다.
                 ? new String[]{
                 "[TYPE]tourist_attraction",
+                "[TYPE]museum",
+                "[TYPE]park",
+                "[TYPE]amusement_park",
+                "[TEXT]신사 사원",
+                "[TEXT]전망대 야경",
+                "[TEXT]정원 자연 명소",
+                "[TEXT]체험 액티비티",
+                "[TEXT]애니메이션 굿즈 성지",
+                "[TEXT]온천",
                 "[TYPE]restaurant",
                 "[TYPE]cafe",
                 "[TYPE]shopping_mall",
-                "[TYPE]lodging",
-                "[TEXT]돈키호테",
-                "[TEXT]드럭스토어",
-                "[TEXT]기념품 상점",
                 "[TEXT]시장",
-                "[TEXT]온천"
+                "[TEXT]기념품 상점",
+                "[TYPE]lodging"
         }
                 : new String[]{keyword};
 
@@ -95,7 +104,11 @@ public class AdminController {
                     }
                     googlePlace.setCity(city);
 
-                    if (placeRepository.existsByPlaceId(googlePlace.getPlaceId())) {
+                    Place existing = placeRepository.findByPlaceId(googlePlace.getPlaceId()).orElse(null);
+                    if (existing != null) {
+                        // 이미 있는 장소라도 예전에 수집해 비어 있는 값(구조화 영업시간·주소·평점)은 이번 응답으로 채운다.
+                        // 추가 API 호출 없이 기존 DB 를 보강할 수 있다.
+                        if (backfill(existing, googlePlace)) placeRepository.save(existing);
                         totalSkipped++;
                         continue;
                     }
@@ -105,6 +118,25 @@ public class AdminController {
             }
         }
         return String.format("[%s] 대량 자동 수집 완료! -> 신규 명소 등록: %d건 / 기존 중복 패스: %d건", city, totalInserted, totalSkipped);
+    }
+
+    /** 기존 장소에 비어 있는 필드만 새 응답 값으로 채운다. 바뀐 것이 있으면 true. */
+    private boolean backfill(Place existing, Place fetched) {
+        boolean changed = false;
+        if (existing.getOpeningPeriods() == null && fetched.getOpeningPeriods() != null) {
+            existing.setOpeningPeriods(fetched.getOpeningPeriods());
+            if (fetched.getOpeningHours() != null) existing.setOpeningHours(fetched.getOpeningHours());
+            changed = true;
+        }
+        if (existing.getAddress() == null && fetched.getAddress() != null) { existing.setAddress(fetched.getAddress()); changed = true; }
+        if (existing.getPhone() == null && fetched.getPhone() != null) { existing.setPhone(fetched.getPhone()); changed = true; }
+        if (existing.getRating() == null && fetched.getRating() != null) { existing.setRating(fetched.getRating()); changed = true; }
+        if (existing.getUserRatingCount() == null && fetched.getUserRatingCount() != null) {
+            existing.setUserRatingCount(fetched.getUserRatingCount());
+            changed = true;
+        }
+        if (changed) existing.setLastUpdated(java.time.LocalDateTime.now());
+        return changed;
     }
 
     @PostMapping("/cleanse-categories")

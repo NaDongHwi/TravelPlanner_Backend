@@ -1,9 +1,14 @@
 package com.travel.planner.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.travel.planner.util.DistanceUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -42,15 +47,30 @@ public class EmergencyController {
     @GetMapping("/nearby")
     @Operation(summary = "5km 반경 긴급 시설 검색", description = "현재 GPS 좌표 기반으로 주변 응급실/경찰서를 검색합니다.")
     public ResponseEntity<String> getNearbyEmergency(@RequestParam double lat, @RequestParam double lng) {
+        // Nearby Search 의 type 은 한 번에 하나만 받는다("hospital|police" 는 첫 번째만 적용된다).
+        // 병원과 경찰서를 각각 조회해 results 를 합친 뒤, 기존과 같은 {"results":[...], "status":"OK"} 형태로 돌려준다.
+        ObjectMapper mapper = new ObjectMapper();
+        ArrayNode merged = mapper.createArrayNode();
+        Set<String> seen = new HashSet<>();
+        String url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={location}&radius=5000&type={type}&key={key}&language=ko";
 
-        String url = String.format(
-                "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=%f,%f&radius=5000&type=hospital|police&key=%s&language=ko",
-                lat, lng, googleApiKey
-        );
+        for (String type : new String[]{"hospital", "police"}) {
+            try {
+                String response = restTemplate.getForObject(url, String.class, lat + "," + lng, type, googleApiKey);
+                JsonNode results = mapper.readTree(response).path("results");
+                if (!results.isArray()) continue;
+                for (JsonNode place : results) {
+                    if (seen.add(place.path("place_id").asText())) merged.add(place);
+                }
+            } catch (Exception e) {
+                System.out.println("긴급 시설 검색 실패(" + type + "): " + e.getMessage());
+            }
+        }
 
-        String response = restTemplate.getForObject(url, String.class);
-
-        return ResponseEntity.ok(response);
+        ObjectNode body = mapper.createObjectNode();
+        body.set("results", merged);
+        body.put("status", merged.isEmpty() ? "ZERO_RESULTS" : "OK");
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(body.toString());
     }
 
     // 2. 비상연락망 제공 로직

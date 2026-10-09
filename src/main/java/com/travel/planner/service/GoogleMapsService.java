@@ -4,29 +4,80 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Region;
+import com.travel.planner.util.OpeningHours;
 import com.travel.planner.util.PrefectureMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import lombok.RequiredArgsConstructor;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
 public class GoogleMapsService {
+
+    private static final String TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
+
+    /**
+     * 대량 수집 시 요청하는 필드.
+     * 영업시간(구조화 periods 포함)·전화번호·평점을 여기서 같이 받아 DB 에 저장해 두면,
+     * 일정 생성 때 타임라인 항목마다 Place Details 를 다시 부를 필요가 없다.
+     * (rating/userRatingCount 를 이미 요청하고 있어 과금 등급은 그대로일 가능성이 높지만, 콘솔의 SKU 표로 한 번 확인할 것)
+     */
+    private static final String COLLECT_FIELD_MASK = String.join(",",
+            "places.id", "places.displayName.text", "places.formattedAddress", "places.rating",
+            "places.userRatingCount", "places.location", "places.types", "places.primaryType",
+            "places.nationalPhoneNumber", "places.regularOpeningHours.weekdayDescriptions",
+            "places.regularOpeningHours.periods", "nextPageToken");
+
+    private static final String DETAIL_FIELD_MASK = String.join(",",
+            "id", "displayName.text", "location", "formattedAddress", "nationalPhoneNumber", "rating", "userRatingCount",
+            "regularOpeningHours.weekdayDescriptions", "regularOpeningHours.periods");
 
     @Value("${google.maps.api-key}")
     private String googleMapsApiKey;
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // 지오코딩 결과는 도시 이름이 같으면 바뀌지 않으므로 서버가 떠 있는 동안 재사용한다.
+    private final Map<String, String> formalizedCityCache = new ConcurrentHashMap<>();
+    private final Map<String, List<double[]>> cityGridCache = new ConcurrentHashMap<>();
+
+    private HttpHeaders placesHeaders(String fieldMask) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Goog-Api-Key", googleMapsApiKey);
+        headers.set("X-Goog-FieldMask", fieldMask);
+        return headers;
+    }
+
+    /** regularOpeningHours 노드 → 표시용 문자열 + 구조화 periods JSON */
+    private void applyOpeningHours(JsonNode regularOpeningHours, Place target) {
+        if (regularOpeningHours == null || regularOpeningHours.isMissingNode()) return;
+
+        JsonNode weekdayText = regularOpeningHours.path("weekdayDescriptions");
+        if (weekdayText.isArray() && !weekdayText.isEmpty()) {
+            List<String> hoursList = new ArrayList<>();
+            for (JsonNode node : weekdayText) hoursList.add(node.asText());
+            target.setOpeningHours(String.join(" | ", hoursList));
+        }
+        JsonNode periods = regularOpeningHours.path("periods");
+        if (periods.isArray() && !periods.isEmpty()) {
+            target.setOpeningPeriods(periods.toString());
+        }
+    }
 
     // 1. 이동 시간 정보
     public String getRealTravelTimes(List<Place> route) {
@@ -42,12 +93,8 @@ public class GoogleMapsService {
                 if (i < route.size() - 2) waypoints.append("|");
             }
 
-            String url = String.format(
-                    "https://maps.googleapis.com/maps/api/directions/json?origin=%s&destination=%s&waypoints=%s&key=%s&language=ko",
-                    origin, destination, waypoints.toString(), googleMapsApiKey
-            );
-
-            String response = restTemplate.getForObject(url, String.class);
+            String url = "https://maps.googleapis.com/maps/api/directions/json?origin={origin}&destination={destination}&waypoints={waypoints}&key={key}&language=ko";
+            String response = restTemplate.getForObject(url, String.class, origin, destination, waypoints.toString(), googleMapsApiKey);
             JsonNode rootNode = objectMapper.readTree(response);
 
             JsonNode legs = rootNode.path("routes").get(0).path("legs");
@@ -57,7 +104,7 @@ public class GoogleMapsService {
                 String duration = legs.get(i).path("duration").path("text").asText();
                 timeInfo.append("- ").append(route.get(i).getName())
                         .append(" -> ")
-                        .append(route.get(i+1).getName())
+                        .append(route.get(i + 1).getName())
                         .append(" (실제 소요 시간: ").append(duration).append(")\n");
             }
 
@@ -68,135 +115,129 @@ public class GoogleMapsService {
         }
     }
 
-    // 2. 영업시간 및 좌표 수집
-    public Place getPlaceDetails(String city, String placeName, String lang) {
-        Place resultPlace = new Place();
-        resultPlace.setLatitude(0.0);
-        resultPlace.setLongitude(0.0);
-        resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
+    /**
+     * 2. 이름으로 장소 한 곳 찾기 (평점·리뷰 수 필터 없음).
+     * 사용자가 직접 입력한 숙소처럼 "품질과 무관하게 반드시 찾아야 하는" 장소에 쓴다.
+     * 이전에는 대량 수집용 검색(평점 4.0·리뷰 100건 필터)을 그대로 써서 사용자 숙소가 탈락하곤 했다.
+     */
+    public Place findPlaceByText(String query, String lang) {
+        if (query == null || query.isBlank()) return null;
+        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
+
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("textQuery", query);
+            body.put("languageCode", targetLang);
+            body.put("regionCode", "JP");
+            body.put("pageSize", 1);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body,
+                    placesHeaders("places.id,places.displayName.text,places.location,places.formattedAddress,places.nationalPhoneNumber"));
+            String response = restTemplate.postForObject(TEXT_SEARCH_URL, request, String.class);
+            JsonNode places = objectMapper.readTree(response).path("places");
+
+            if (places.isArray() && !places.isEmpty()) {
+                JsonNode node = places.get(0);
+                if (node.path("location").isMissingNode()) return null;
+                Place place = new Place();
+                place.setPlaceId(node.path("id").asText());
+                place.setName(node.path("displayName").path("text").asText(query));
+                place.setLatitude(node.path("location").path("latitude").asDouble());
+                place.setLongitude(node.path("location").path("longitude").asDouble());
+                place.setAddress(node.path("formattedAddress").asText(null));
+                place.setPhone(node.path("nationalPhoneNumber").asText(null));
+                place.setLastUpdated(LocalDateTime.now());
+                return place;
+            }
+        } catch (Exception e) {
+            System.out.println("장소 검색 실패 (" + query + "): " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 3. 고유 Place ID 로 상세 정보 조회.
+     * 통신 실패 시 null, 성공 시 조회된 값만 채운 Place 를 돌려준다 (없는 값은 null).
+     */
+    public Place getPlaceDetailsById(String placeId, String lang) {
+        if (placeId == null || placeId.isBlank() || placeId.startsWith("DUMMY_") || placeId.startsWith("AIRPORT_")) return null;
 
         String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
-        String url = "https://places.googleapis.com/v1/places:searchText";
+        String url = "https://places.googleapis.com/v1/places/{placeId}?languageCode={lang}";
 
         try {
             HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "places.id,places.location,places.regularOpeningHours.weekdayDescriptions,places.rating,places.userRatingCount");
+            headers.set("X-Goog-FieldMask", DETAIL_FIELD_MASK);
 
-            Map<String, Object> body = new HashMap<>();
-            body.put("textQuery", placeName + " " + city);
-            body.put("languageCode", targetLang);
-            body.put("regionCode", "JP");
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<Void>(headers), String.class, placeId, targetLang);
+            JsonNode node = objectMapper.readTree(response.getBody());
+            if (node == null || node.isMissingNode() || node.path("id").isMissingNode()) return null;
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-            String response = restTemplate.postForObject(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response);
-            JsonNode places = rootNode.path("places");
-
-            if (!places.isMissingNode() && places.isArray() && places.size() > 0) {
-                JsonNode firstResult = places.get(0);
-
-                double rating = firstResult.path("rating").asDouble(0.0);
-                int reviewCount = firstResult.path("userRatingCount").asInt(0);
-
-                if (rating < 3.5 || reviewCount < 20) {
-                    System.out.println("[수질 검증 탈락] '" + placeName + "' (평점: " + rating + ", 리뷰: " + reviewCount + "개) -> 고품질 DB 기준 미달로 차단합니다.");
-                    return resultPlace;
-                }
-
-                resultPlace.setLatitude(firstResult.path("location").path("latitude").asDouble());
-                resultPlace.setLongitude(firstResult.path("location").path("longitude").asDouble());
-                resultPlace.setPlaceId(firstResult.path("id").asText());
-
-                JsonNode weekdayText = firstResult.path("regularOpeningHours").path("weekdayDescriptions");
-                if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
-                    List<String> hoursList = new ArrayList<>();
-                    for (JsonNode node : weekdayText) {
-                        hoursList.add(node.asText());
-                    }
-                    resultPlace.setOpeningHours(String.join(" | ", hoursList));
-                }
-            } else {
-                System.out.println("장소 검색 실패 (" + placeName + " " + city + ") - 원인: 결과 없음");
+            Place result = new Place();
+            result.setPlaceId(placeId);
+            if (!node.path("location").isMissingNode()) {
+                result.setLatitude(node.path("location").path("latitude").asDouble());
+                result.setLongitude(node.path("location").path("longitude").asDouble());
             }
-        } catch (Exception e) {
-            System.out.println("네트워크 에러 (" + placeName + "): " + e.getMessage());
-        }
-
-        return resultPlace;
-    }
-
-    // 이름 검색 대신, 고유 Place ID를 사용해 100% 정확하게 장소 상세 정보를 가져오는 메서드
-    public Place getPlaceDetailsById(String placeId, String lang) {
-        Place resultPlace = new Place();
-        resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
-
-        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
-        String url = "https://places.googleapis.com/v1/places/" + placeId + "?languageCode=" + targetLang;
-
-        try {
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "id,location,regularOpeningHours.weekdayDescriptions,rating,userRatingCount,displayName");
-
-            org.springframework.http.HttpEntity<Void> request = new org.springframework.http.HttpEntity<>(headers);
-            org.springframework.http.ResponseEntity<String> response = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, request, String.class);
-
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(response.getBody());
-
-            if (node != null && !node.isMissingNode()) {
-                resultPlace.setLatitude(node.path("location").path("latitude").asDouble(0.0));
-                resultPlace.setLongitude(node.path("location").path("longitude").asDouble(0.0));
-
-                com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
-                if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
-                    List<String> hoursList = new ArrayList<>();
-                    for (com.fasterxml.jackson.databind.JsonNode desc : weekdayText) {
-                        hoursList.add(desc.asText());
-                    }
-                    resultPlace.setOpeningHours(String.join(" | ", hoursList));
-                }
-            }
+            result.setAddress(node.path("formattedAddress").asText(null));
+            result.setPhone(node.path("nationalPhoneNumber").asText(null));
+            if (node.has("rating")) result.setRating(node.path("rating").asDouble());
+            if (node.has("userRatingCount")) result.setUserRatingCount(node.path("userRatingCount").asInt());
+            applyOpeningHours(node.path("regularOpeningHours"), result);
+            return result;
         } catch (Exception e) {
             System.out.println("Place Details (ID) 통신 에러 (" + placeId + "): " + e.getMessage());
+            return null;
         }
-
-        return resultPlace;
     }
 
-    // 3. 리뷰 수집 도구
-    public String getPlaceReviews(String city, String placeName) {
-        String url = "https://places.googleapis.com/v1/places:searchText";
+    /**
+     * 상세 조회 결과를 기존 장소에 반영한다. 좌표는 덮어쓰지 않는다.
+     * (이전 갱신 배치는 "이름 검색 1순위 결과"의 좌표로 덮어써서 다른 장소로 바뀌는 일이 있었다)
+     * @return 조회에 성공해 반영했으면 true
+     */
+    public boolean refreshPlace(Place place, String lang) {
+        Place details = getPlaceDetailsById(place.getPlaceId(), lang);
+        if (details == null) return false;
+
+        if (details.getOpeningHours() != null) {
+            place.setOpeningHours(details.getOpeningHours());
+        } else if (OpeningHours.isUnknownText(place.getOpeningHours())) {
+            place.setOpeningHours(OpeningHours.CHECKED_NO_DATA);   // 조회했지만 구글에도 없음 → 다시 조회하지 않도록 표시
+        }
+        if (details.getOpeningPeriods() != null) place.setOpeningPeriods(details.getOpeningPeriods());
+        if (details.getAddress() != null) place.setAddress(details.getAddress());
+        if (details.getPhone() != null) place.setPhone(details.getPhone());
+        if (details.getRating() != null) place.setRating(details.getRating());
+        if (details.getUserRatingCount() != null) place.setUserRatingCount(details.getUserRatingCount());
+        place.setLastUpdated(LocalDateTime.now());
+        return true;
+    }
+
+    // 4. 리뷰 수집 (Place ID 기준: 이름 검색은 동명의 다른 가게 리뷰를 가져올 수 있다)
+    public String getPlaceReviewsById(String placeId) {
+        if (placeId == null || placeId.isBlank()) return null;
+        String url = "https://places.googleapis.com/v1/places/{placeId}?languageCode=ko";
         try {
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            HttpHeaders headers = new HttpHeaders();
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "places.reviews"); // 리뷰만 타겟팅
+            headers.set("X-Goog-FieldMask", "reviews");
 
-            Map<String, Object> body = new HashMap<>();
-            body.put("textQuery", placeName + " " + city);
-            body.put("languageCode", "ko");
-            body.put("regionCode", "JP");
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<Void>(headers), String.class, placeId);
+            JsonNode reviews = objectMapper.readTree(response.getBody()).path("reviews");
 
-            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(body, headers);
-            String response = restTemplate.postForObject(url, request, String.class);
-            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response);
-            com.fasterxml.jackson.databind.JsonNode places = rootNode.path("places");
-
-            if (!places.isMissingNode() && places.isArray() && places.size() > 0) {
-                com.fasterxml.jackson.databind.JsonNode reviews = places.get(0).path("reviews");
+            if (reviews.isArray() && !reviews.isEmpty()) {
                 StringBuilder reviewText = new StringBuilder();
-
-                if (!reviews.isMissingNode() && reviews.isArray()) {
-                    for (com.fasterxml.jackson.databind.JsonNode review : reviews) {
-                        reviewText.append(review.path("text").path("text").asText()).append("\n");
-                    }
-                    return reviewText.toString();
+                for (JsonNode review : reviews) {
+                    String text = review.path("text").path("text").asText("");
+                    if (text.length() > 300) text = text.substring(0, 300);   // 프롬프트 길이 관리
+                    if (!text.isBlank()) reviewText.append(text.replace('\n', ' ')).append("\n");
                 }
+                return reviewText.toString();
             }
         } catch (Exception e) {
-            System.out.println("[" + placeName + "] 리뷰 수집 실패: " + e.getMessage());
+            System.out.println("[" + placeId + "] 리뷰 수집 실패: " + e.getMessage());
             return null;
         }
         return "리뷰 정보 없음";
@@ -204,6 +245,9 @@ public class GoogleMapsService {
 
     // 구글 Viewport를 활용하여 도시 크기에 딱 맞는 5개의 그물망(Grid) 좌표와 반경을 생성합니다.
     public List<double[]> getCityGrid(String cityInput) {
+        List<double[]> cached = cityGridCache.get(cityInput);
+        if (cached != null) return cached;
+
         List<double[]> gridPoints = new ArrayList<>();
         String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
 
@@ -243,6 +287,7 @@ public class GoogleMapsService {
                 } else {
                     gridPoints.add(new double[]{centerLat, centerLng, 10000});
                 }
+                cityGridCache.put(cityInput, gridPoints);
             }
         } catch (Exception e) {
             System.out.println("그리드 추출 실패: " + e.getMessage());
@@ -250,16 +295,17 @@ public class GoogleMapsService {
         return gridPoints;
     }
 
-    // 4. 대량 자동 수집
+    /**
+     * 5. 대량 자동 수집.
+     * 긴급 수집(isEmergency=true)은 일정 생성 요청 중에 도는 것이라 1페이지만 받는다.
+     * (이전에는 페이지마다 2초씩 쉬면서 3페이지를 받아 요청 한 번에 수십 초가 걸렸다)
+     */
     public List<Place> searchNewPlacesFromGoogle(String city, String formalizedCity, double lat, double lng, double radius, String searchItem, boolean isEmergency) {
         List<Place> fetchedPlaces = new ArrayList<>();
-        String url = "https://places.googleapis.com/v1/places:searchText";
+        int maxPages = isEmergency ? 1 : 3;
 
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "places.id,places.displayName.text,places.formattedAddress,places.rating,places.userRatingCount,places.location,places.types,nextPageToken");
+            HttpHeaders headers = placesHeaders(COLLECT_FIELD_MASK);
 
             Map<String, Object> body = new HashMap<>();
             body.put("languageCode", "ko");
@@ -286,22 +332,20 @@ public class GoogleMapsService {
                 body.put("textQuery", formalizedCity + " " + text);
             }
 
-            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(body, headers);
-            String response = restTemplate.postForObject(url, request, String.class);
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(response);
+            String response = restTemplate.postForObject(TEXT_SEARCH_URL, new HttpEntity<>(body, headers), String.class);
+            JsonNode root = objectMapper.readTree(response);
 
             parsePlacesFromNode(root, fetchedPlaces, city, formalizedCity, isEmergency);
 
             String nextToken = root.path("nextPageToken").asText(null);
             int pageCount = 1;
 
-            while (nextToken != null && !nextToken.isEmpty() && pageCount < 3) {
+            while (nextToken != null && !nextToken.isEmpty() && pageCount < maxPages) {
                 Thread.sleep(2000);
                 System.out.println("➡️ [" + searchItem + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 수집 중...");
 
                 body.put("pageToken", nextToken);
-                HttpEntity<Map<String, Object>> nextRequest = new HttpEntity<>(body, headers);
-                String nextResponse = restTemplate.postForObject(url, nextRequest, String.class);
+                String nextResponse = restTemplate.postForObject(TEXT_SEARCH_URL, new HttpEntity<>(body, headers), String.class);
                 JsonNode nextRoot = objectMapper.readTree(nextResponse);
 
                 parsePlacesFromNode(nextRoot, fetchedPlaces, city, formalizedCity, isEmergency);
@@ -309,13 +353,15 @@ public class GoogleMapsService {
                 pageCount++;
             }
 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } catch (Exception e) {
             System.out.println("구글 장소 크롤링 실패: " + e.getMessage());
         }
         return fetchedPlaces;
     }
 
-    // 5. 수질 관리 필터
+    // 6. 수질 관리 필터
     private void parsePlacesFromNode(JsonNode root, List<Place> fetchedPlaces, String city, String formalizedCity, boolean isEmergency) {
         JsonNode results = root.path("places");
         if (results.isMissingNode() || !results.isArray()) return;
@@ -332,6 +378,7 @@ public class GoogleMapsService {
             String address = node.path("formattedAddress").asText("");
 
             if (address.isEmpty() || address.contains("대한민국") || address.contains("한국")) continue;
+            if (node.path("location").isMissingNode()) continue;
 
             // 영문 주소 컷오프 문제 방어 (일본 텍스트 제거 후 한글 검사)
             String addressWithoutJapan = address.replace("일본", "").trim();
@@ -343,7 +390,8 @@ public class GoogleMapsService {
 
             boolean isHighQuality = (rating >= 4.0 && reviewCount >= 100);
             boolean isSuperLandmark = (rating >= 3.6 && reviewCount >= 300);
-            boolean isEmergencyPass = isEmergency && (rating >= 1.5 && reviewCount >= 10);
+            // 긴급 수집이라도 최소한의 품질은 지킨다 (이전 기준 1.5점/10건은 사실상 무필터였다)
+            boolean isEmergencyPass = isEmergency && (rating >= 3.5 && reviewCount >= 30);
 
             if (isHighQuality || isSuperLandmark || isEmergencyPass) {
                 Place place = new Place();
@@ -352,15 +400,25 @@ public class GoogleMapsService {
                 place.setCity(city);
                 place.setLatitude(node.path("location").path("latitude").asDouble());
                 place.setLongitude(node.path("location").path("longitude").asDouble());
-                place.setCategory(determineCategoryFromTypes(node.path("types")));
+                place.setCategory(determineCategory(node.path("primaryType").asText(""), node.path("types")));
+                place.setAddress(address);
+                place.setPhone(node.path("nationalPhoneNumber").asText(null));
+                place.setRating(rating);
+                place.setUserRatingCount(reviewCount);
+                applyOpeningHours(node.path("regularOpeningHours"), place);
+                // 수집 시각을 남겨야 30일 갱신 배치가 "한 번도 갱신 안 된 데이터"로 보고 전부 재조회하지 않는다.
+                place.setLastUpdated(LocalDateTime.now());
 
                 fetchedPlaces.add(place);
             }
         }
     }
 
-    // 6. Geocoding API 기반 자체 지명 정제 엔진
+    // 7. Geocoding API 기반 자체 지명 정제 엔진
     public String getFormalizedJapanCity(String cityInput) {
+        String cached = formalizedCityCache.get(cityInput);
+        if (cached != null) return cached;
+
         try {
             String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
             String response = restTemplate.getForObject(url, String.class, cityInput, googleMapsApiKey);
@@ -372,6 +430,7 @@ public class GoogleMapsService {
                 String formattedAddress = root.path("results").get(0).path("formatted_address").asText();
                 Region recognizedRegion = PrefectureMapper.getRegionFromAddress(formattedAddress);
                 System.out.println("[지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
+                formalizedCityCache.put(cityInput, formattedAddress);
                 return formattedAddress;
             } else {
                 String errorMessage = root.path("error_message").asText("이유 없음");
@@ -383,55 +442,75 @@ public class GoogleMapsService {
         }
     }
 
-    // 7. 자동 분류 엔진
-    private String determineCategoryFromTypes(JsonNode typesNode) {
-        if (typesNode == null || !typesNode.isArray()) return "관광지"; // 기본값
+    /**
+     * 8. 자동 분류 엔진.
+     * primaryType(대표 유형)을 먼저 보고, 없으면 types 배열을 본다.
+     * 테마파크·놀이공원은 "테마파크"로 분류해 체류 시간(8시간)이 제대로 잡히게 한다.
+     */
+    private String determineCategory(String primaryType, JsonNode typesNode) {
+        String byPrimary = categoryOf(primaryType == null ? "" : primaryType.toLowerCase());
+        if (byPrimary != null) return byPrimary;
 
-        for (JsonNode typeNode : typesNode) {
-            String type = typeNode.asText().toLowerCase();
-            if (type.equals("lodging") || type.contains("hotel")) return "숙소";
-            if (type.equals("train_station") || type.equals("transit_station") || type.equals("airport") || type.equals("subway_station") || type.equals("bus_station")) return "교통";
-            if (type.equals("restaurant") || type.equals("cafe") || type.equals("food") || type.equals("bakery") || type.equals("bar") || type.equals("meal_takeaway")) return "식음";
-            if (type.equals("shopping_mall") || type.equals("department_store") || type.equals("supermarket") || type.equals("clothing_store") || type.equals("store")) return "쇼핑";
+        if (typesNode != null && typesNode.isArray()) {
+            for (JsonNode typeNode : typesNode) {
+                if ("amusement_park".equals(typeNode.asText().toLowerCase())) return "테마파크";
+            }
+            for (JsonNode typeNode : typesNode) {
+                String category = categoryOf(typeNode.asText().toLowerCase());
+                if (category != null) return category;
+            }
         }
         return "관광지";
     }
 
-    // 8. 숙소 역제안용 구글 맵스 숙소 검색기
+    private String categoryOf(String type) {
+        if (type.isEmpty()) return null;
+        if (type.equals("amusement_park") || type.equals("water_park")) return "테마파크";
+        if (type.equals("lodging") || type.contains("hotel") || type.equals("hostel") || type.equals("guest_house") || type.equals("japanese_inn")) return "숙소";
+        if (type.equals("train_station") || type.equals("transit_station") || type.equals("airport") || type.equals("international_airport")
+                || type.equals("subway_station") || type.equals("bus_station")) return "교통";
+        if (type.endsWith("restaurant") || type.equals("cafe") || type.equals("coffee_shop") || type.equals("food") || type.equals("bakery")
+                || type.equals("bar") || type.equals("meal_takeaway") || type.equals("izakaya_restaurant")) return "식음";
+        if (type.equals("shopping_mall") || type.equals("department_store") || type.equals("supermarket") || type.equals("clothing_store")
+                || type.equals("store") || type.endsWith("_store") || type.equals("market")) return "쇼핑";
+        if (type.equals("tourist_attraction") || type.equals("museum") || type.equals("park") || type.equals("art_gallery")
+                || type.equals("zoo") || type.equals("aquarium") || type.equals("historical_landmark")) return "관광지";
+        return null;
+    }
+
+    // 9. 숙소 역제안용 구글 맵스 숙소 검색기
     public List<Place> searchRecommendedHotels(String city) {
         List<Place> recommendedHotels = new ArrayList<>();
-        String url = "https://places.googleapis.com/v1/places:searchText";
 
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            // DB 저장 시 무조건 필요한 places.id(고유 ID)를 가져오도록 추가
-            headers.set("X-Goog-FieldMask", "places.id,places.displayName.text,places.location,places.rating,places.userRatingCount");
-
             Map<String, Object> body = new HashMap<>();
             body.put("textQuery", city + " 유명 호텔");
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-            String response = restTemplate.postForObject(url, request, String.class);
-            JsonNode root = objectMapper.readTree(response);
-            JsonNode places = root.path("places");
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body,
+                    placesHeaders("places.id,places.displayName.text,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.nationalPhoneNumber"));
+            String response = restTemplate.postForObject(TEXT_SEARCH_URL, request, String.class);
+            JsonNode places = objectMapper.readTree(response).path("places");
 
             if (!places.isMissingNode() && places.isArray()) {
                 for (JsonNode node : places) {
                     double rating = node.path("rating").asDouble(0.0);
                     int reviewCount = node.path("userRatingCount").asInt(0);
 
-                    if (rating >= 3.5 && reviewCount >= 50) {
+                    if (rating >= 3.5 && reviewCount >= 50 && !node.path("location").isMissingNode()) {
                         Place hotel = new Place();
-                        // place_id가 텅 비어서 터지는 1048 에러 방지
                         hotel.setPlaceId(node.path("id").asText());
                         hotel.setName(node.path("displayName").path("text").asText());
                         hotel.setCity(city);
+                        hotel.setCategory("숙소");
                         hotel.setLatitude(node.path("location").path("latitude").asDouble());
                         hotel.setLongitude(node.path("location").path("longitude").asDouble());
+                        hotel.setAddress(node.path("formattedAddress").asText(null));
+                        hotel.setPhone(node.path("nationalPhoneNumber").asText(null));
+                        hotel.setRating(rating);
+                        hotel.setUserRatingCount(reviewCount);
+                        hotel.setLastUpdated(LocalDateTime.now());
                         recommendedHotels.add(hotel);
                     }
                     if (recommendedHotels.size() >= 5) break;
@@ -441,59 +520,5 @@ public class GoogleMapsService {
             System.out.println("구글 숙소 추천 검색 실패: " + e.getMessage());
         }
         return recommendedHotels;
-    }
-
-    // 9. 프론트엔드 표시용 상세 정보 실시간 조회 (DB 저장 안 함, DTO에만 담기 위함)
-    public String[] getPlaceDetailsForDisplay(String placeId, String lang, java.time.LocalDate targetDate) {
-        String[] details = new String[]{"주소 정보 없음", "전화번호 정보 없음", "영업시간 정보 없음"};
-
-        if (placeId == null || placeId.isEmpty() || placeId.equals("DUMMY_FREE_TIME")) {
-            return details;
-        }
-
-        String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
-        String url = "https://places.googleapis.com/v1/places/" + placeId + "?languageCode=" + targetLang;
-
-        try {
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "formattedAddress,nationalPhoneNumber,regularOpeningHours.weekdayDescriptions");
-
-            org.springframework.http.HttpEntity<Void> request = new org.springframework.http.HttpEntity<>(headers);
-            org.springframework.http.ResponseEntity<String> response = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, request, String.class);
-
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(response.getBody());
-
-            if (node != null && !node.isMissingNode()) {
-                if (node.has("formattedAddress")) details[0] = node.get("formattedAddress").asText();
-                if (node.has("nationalPhoneNumber")) details[1] = node.get("nationalPhoneNumber").asText();
-
-                com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
-                if (!weekdayText.isMissingNode() && weekdayText.isArray() && weekdayText.size() > 0) {
-
-                    String[] koreanDays = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"};
-                    int dayOfWeekValue = targetDate.getDayOfWeek().getValue();
-                    String targetDayName = koreanDays[dayOfWeekValue - 1];
-
-                    boolean isFound = false;
-                    for (com.fasterxml.jackson.databind.JsonNode descNode : weekdayText) {
-                        String desc = descNode.asText();
-                        if (desc.contains(targetDayName)) {
-                            details[2] = desc;
-                            isFound = true;
-                            break;
-                        }
-                    }
-
-                    if (!isFound) {
-                        details[2] = weekdayText.get(0).asText();
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.out.println("Display Details 실시간 통신 에러 (" + placeId + "): " + e.getMessage());
-        }
-
-        return details;
     }
 }

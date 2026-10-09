@@ -36,9 +36,28 @@ public class Place {
     @Column(length = 20)
     private String placeType; // 예: "실내", "실외", "복합"
 
-    // 구글 API로 미리 긁어올 영업시간 (예: "09:00-21:00")
+    // 구글 weekdayDescriptions 를 " | " 로 이은 표시용 문자열 (예: "월요일: 오전 9:00 ~ 오후 5:00 | ...")
     @Column(columnDefinition = "TEXT")
     private String openingHours;
+
+    // 구글 regularOpeningHours.periods 원본 JSON (요일·시·분 구조).
+    // 일정 엔진은 이 값을 우선 쓰고, 없을 때만 위 문자열을 해석한다.
+    @Column(columnDefinition = "TEXT")
+    private String openingPeriods;
+
+    // 타임라인 표시용 주소/전화. 일정 생성 때마다 Place Details 를 부르지 않도록 수집 시 함께 저장한다.
+    @Column(length = 500)
+    private String address;
+
+    @Column(length = 50)
+    private String phone;
+
+    // 구글 평점/리뷰 수. 테마가 같은 후보 사이의 우선순위(인지도)에 쓴다.
+    @Column
+    private Double rating;
+
+    @Column
+    private Integer userRatingCount;
 
     // 30일마다 갱신하기 위한 마지막 업데이트 시간 기록
     @Column
@@ -49,7 +68,7 @@ public class Place {
     private String placeId;
 
     @Column(name = "category")
-    private String category; // 역할 분류: 관광지, 식음, 쇼핑, 숙소, 교통
+    private String category; // 역할 분류: 관광지, 식음, 쇼핑, 숙소, 교통, 테마파크
 
     public String getCategory() {
         return category;

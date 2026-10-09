@@ -100,11 +100,18 @@ public class PlanValidationService {
     public ValidationResult validateAccommodations(List<PlanRequest.AccommodationInput> accommodations, LocalDate tripStart, LocalDate tripEnd) {
         if (accommodations == null || accommodations.isEmpty()) return new ValidationResult(false, "OK");
 
-        // 1. 체크인 날짜순으로 정렬
-        accommodations.sort(Comparator.comparing(PlanRequest.AccommodationInput::getCheckIn));
+        for (PlanRequest.AccommodationInput acc : accommodations) {
+            if (acc.getCheckIn() == null || acc.getCheckOut() == null) {
+                return new ValidationResult(true, "[" + acc.getName() + "] 숙소의 체크인/체크아웃 날짜를 입력해주세요.");
+            }
+        }
 
-        for (int i = 0; i < accommodations.size(); i++) {
-            PlanRequest.AccommodationInput current = accommodations.get(i);
+        // 1. 체크인 날짜순으로 정렬 (요청 객체의 리스트는 건드리지 않는다)
+        List<PlanRequest.AccommodationInput> sorted = new java.util.ArrayList<>(accommodations);
+        sorted.sort(Comparator.comparing(PlanRequest.AccommodationInput::getCheckIn));
+
+        for (int i = 0; i < sorted.size(); i++) {
+            PlanRequest.AccommodationInput current = sorted.get(i);
 
             // [검증 1] 숙소 날짜가 전체 여행 기간을 벗어나는지 확인
             if (current.getCheckIn().isBefore(tripStart) || current.getCheckOut().isAfter(tripEnd)) {
@@ -112,8 +119,8 @@ public class PlanValidationService {
             }
 
             // [검증 2] 다음 숙소와 날짜가 겹치는지 확인 (가장 중요!)
-            if (i < accommodations.size() - 1) {
-                PlanRequest.AccommodationInput next = accommodations.get(i + 1);
+            if (i < sorted.size() - 1) {
+                PlanRequest.AccommodationInput next = sorted.get(i + 1);
                 // 현재 숙소의 체크아웃 날짜가 다음 숙소의 체크인 날짜보다 늦다면? (오버랩 발생)
                 if (current.getCheckOut().isAfter(next.getCheckIn())) {
                     return new ValidationResult(true, "숙소 일정이 겹칩니다! [" + current.getName() + "]와 [" + next.getName() + "]의 날짜를 다시 확인해주세요.");
@@ -123,21 +130,42 @@ public class PlanValidationService {
         return new ValidationResult(false, "OK");
     }
 
-    public ValidationResult validateFixedSchedules(List<PlanRequest.FixedScheduleInput> fixedSchedules) {
+    /**
+     * 고정 일정끼리 시간이 겹치는지 검사한다.
+     * 같은 날에 적용되는 일정끼리만 비교한다. (날짜·일차가 없는 일정은 매일 적용되므로 모든 일정과 비교)
+     */
+    public ValidationResult validateFixedSchedules(List<PlanRequest.FixedScheduleInput> fixedSchedules, LocalDate tripStart) {
         if (fixedSchedules == null || fixedSchedules.size() < 2) return new ValidationResult(false, "OK");
 
-        fixedSchedules.sort(java.util.Comparator.comparing(PlanRequest.FixedScheduleInput::getStartTime));
+        List<PlanRequest.FixedScheduleInput> sorted = new java.util.ArrayList<>(fixedSchedules);
+        sorted.sort(java.util.Comparator.comparing(PlanRequest.FixedScheduleInput::getStartTime));
 
-        for (int i = 0; i < fixedSchedules.size() - 1; i++) {
-            PlanRequest.FixedScheduleInput current = fixedSchedules.get(i);
-            PlanRequest.FixedScheduleInput next = fixedSchedules.get(i + 1);
-
-            // 현재 고정 일정의 끝나는 시간이 다음 일정의 시작 시간보다 늦다면 충돌
-            if (current.getEndTime().isAfter(next.getStartTime())) {
-                return new ValidationResult(true,
-                        String.format("고정 일정 충돌: [%s]와 [%s]의 시간이 겹칩니다.", current.getName(), next.getName()));
+        for (int i = 0; i < sorted.size(); i++) {
+            for (int j = i + 1; j < sorted.size(); j++) {
+                PlanRequest.FixedScheduleInput a = sorted.get(i);
+                PlanRequest.FixedScheduleInput b = sorted.get(j);
+                if (!sameDay(a, b, tripStart)) continue;
+                // 앞 일정의 끝나는 시간이 뒤 일정의 시작 시간보다 늦다면 충돌
+                if (a.getEndTime().isAfter(b.getStartTime())) {
+                    return new ValidationResult(true,
+                            String.format("고정 일정 충돌: [%s]와 [%s]의 시간이 겹칩니다.", a.getName(), b.getName()));
+                }
             }
         }
         return new ValidationResult(false, "OK");
+    }
+
+    private static Integer dayIndex(PlanRequest.FixedScheduleInput f, LocalDate tripStart) {
+        if (f.getDayNumber() != null) return f.getDayNumber();
+        if (f.getDate() != null && tripStart != null) {
+            return (int) java.time.temporal.ChronoUnit.DAYS.between(tripStart, f.getDate()) + 1;
+        }
+        return null;   // 매일 적용
+    }
+
+    private static boolean sameDay(PlanRequest.FixedScheduleInput a, PlanRequest.FixedScheduleInput b, LocalDate tripStart) {
+        Integer da = dayIndex(a, tripStart);
+        Integer db = dayIndex(b, tripStart);
+        return da == null || db == null || da.equals(db);
     }
 }

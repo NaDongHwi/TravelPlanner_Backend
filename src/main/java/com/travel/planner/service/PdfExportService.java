@@ -102,13 +102,17 @@ public class PdfExportService {
                 table.addHeaderCell(new Cell().add(descHeader).setBackgroundColor(ColorConstants.LIGHT_GRAY).setTextAlignment(TextAlignment.CENTER));
 
                 // 테이블 내용 채우기 (시간 순 정렬)
-                List<Itinerary> dayItineraries = groupedItineraries.get(day);
+                List<Itinerary> dayItineraries = new java.util.ArrayList<>(groupedItineraries.get(day));
                 dayItineraries.sort(java.util.Comparator.comparing(Itinerary::getSequence));
 
                 for (Itinerary iti : dayItineraries) {
-                    Paragraph timeP = new Paragraph(iti.getTime());
-                    Paragraph placeP = new Paragraph(iti.getPlace().getName());
-                    Paragraph descP = new Paragraph(iti.getAiComment());
+                    // 종료 시각이 있으면 "09:00~10:30" 으로, 자유시간·식사·고정 일정은 저장된 표시 이름으로 출력
+                    String time = iti.getEndTime() != null ? iti.getTime() + "~" + iti.getEndTime() : iti.getTime();
+                    String placeName = iti.getCustomTitle() != null ? iti.getCustomTitle()
+                            : (iti.getPlace() != null ? iti.getPlace().getName() : "-");
+                    Paragraph timeP = new Paragraph(time);
+                    Paragraph placeP = new Paragraph(placeName);
+                    Paragraph descP = new Paragraph(iti.getAiComment() != null ? iti.getAiComment() : "");
 
                     table.addCell(new Cell().add(timeP).setTextAlignment(TextAlignment.CENTER));
                     table.addCell(new Cell().add(placeP).setTextAlignment(TextAlignment.CENTER));

@@ -7,12 +7,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -39,12 +40,15 @@ public class JwtFilter extends OncePerRequestFilter {
         // 4. 문지기가 토큰이 진짜인지 확인합니다.
         if (jwtUtil.isTokenValid(token)) {
             String email = jwtUtil.extractEmail(token);
+            // 토큰의 권한(USER/ADMIN)을 시큐리티 권한으로 옮긴다. 관리자 API 는 ROLE_ADMIN 만 통과한다.
+            String role = jwtUtil.extractRole(token);
             UsernamePasswordAuthenticationToken authenticationToken =
-                    new UsernamePasswordAuthenticationToken(email, null, Collections.emptyList());
+                    new UsernamePasswordAuthenticationToken(email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
             SecurityContextHolder.getContext().setAuthentication(authenticationToken);
         } else {
             // 토큰이 유효하지 않으면 401 에러를 프론트엔드로 확실하게 쏴주고 여기서 끝냄
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("토큰이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.");
             return; // 다음 필터로 안 넘어가게 강제 종료!
         }

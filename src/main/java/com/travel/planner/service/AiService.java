@@ -7,6 +7,7 @@ import com.travel.planner.dto.AiRouteResponse;
 import com.travel.planner.entity.Log;
 import com.travel.planner.entity.Place;
 import com.travel.planner.repository.LogRepository;
+import com.travel.planner.util.ThemeVocabulary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -48,7 +49,7 @@ public class AiService {
         StringBuilder rigidTimeline = new StringBuilder();
         int currentDay = 1;
         int count = 0;
-        int placesPerDay = verifiedItineraries.size() / totalDays;
+        int placesPerDay = Math.max(1, verifiedItineraries.size() / Math.max(1, totalDays));
 
         for (PlanService.SimulatedItinerary iti : verifiedItineraries) {
             count++;
@@ -56,7 +57,7 @@ public class AiService {
                 currentDay++;
                 count = 1;
             }
-            rigidTimeline.append(String.format("Day %d - %s : %s\n", currentDay, iti.getTime(), iti.getPlace().getName()));
+            rigidTimeline.append(String.format("Day %d - %s : %s\n", currentDay, iti.getTime(), iti.getDisplayName()));
         }
 
         String prompt = "너는 여행 가이드야. 아래 일정은 [백엔드 자체 최적화 알고리즘]을 통해 검증이 완료된 완벽한 최종 타임라인이야.\n\n" +
@@ -74,7 +75,7 @@ public class AiService {
                 "}";
 
         Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String url = geminiUrl();
 
         int maxRetries = 3;
         int retryCount = 0;
@@ -107,23 +108,25 @@ public class AiService {
     // ============================================================================
     public Map<String, String> classifyPlaceAttributesBulk(List<Place> places, Map<String, String> reviewsMap) {
         StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 장소들의 이름과 구글 리뷰를 분석해서, 테마와 장소 속성을 한 번에 분류해.\n\n");
+        promptBuilder.append("너는 여행 데이터 정제 전문가야. 아래 나열된 장소들의 이름과 구글 리뷰를 분석해서, 테마·장소 속성·평균 체류 시간을 한 번에 분류해.\n\n");
         promptBuilder.append("【 분류 절대 규칙 】\n");
-        promptBuilder.append("1. 테마: 반드시 [맛집, 쇼핑, 관광, 힐링, 사진, 서브컬쳐, 문화, 자연, 야경, 온천, 액티비티, 카페] 이 12개 단어 안에서만 1~3개를 선택해. 절대 다른 단어를 창조하지 마!\n");
+        promptBuilder.append("1. 테마: 반드시 [").append(String.join(", ", ThemeVocabulary.THEMES)).append("] 이 12개 단어 안에서만 1~3개를 선택해. 절대 다른 단어를 창조하지 마!\n");
         promptBuilder.append("2. 장소 속성: 이 장소의 '메인 활동'이 이루어지는 곳을 기준으로 무조건 [실내] 또는 [실외] 중 하나만 고정해서 적어.\n");
-        promptBuilder.append("3. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지.\n");
-        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내\", \"ChIJ5678\": \"온천,힐링|실외\"}\n\n[분류 대상 목록]\n");
+        promptBuilder.append("3. 체류 시간: 일반 여행자가 머무는 평균 시간을 분 단위 정수로 적어. (식당 60, 카페 45, 박물관 90, 테마파크 480 처럼)\n");
+        promptBuilder.append("4. 결과는 반드시 장소 ID를 키로, '테마1,테마2|장소속성|체류시간' 문자열을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지.\n");
+        promptBuilder.append("예시: {\"ChIJ1234\": \"쇼핑,서브컬쳐|실내|90\", \"ChIJ5678\": \"온천,힐링|실외|120\"}\n\n[분류 대상 목록]\n");
 
         for (Place p : places) {
             String reviews = reviewsMap.get(p.getPlaceId());
             promptBuilder.append("- ID: ").append(p.getPlaceId())
                     .append(" / 이름: ").append(p.getName())
+                    .append(" / 분류: ").append(p.getCategory() != null ? p.getCategory() : "미분류")
                     .append(" / 리뷰: ").append(reviews != null ? reviews : "리뷰 없음").append("\n");
         }
 
         String prompt = promptBuilder.toString();
         Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String url = geminiUrl();
 
         int maxRetries = 3;
         int retryCount = 0;
@@ -157,7 +160,8 @@ public class AiService {
     public Map<String, String> cleansePlaceCategories(List<Place> places) {
         StringBuilder promptBuilder = new StringBuilder();
         promptBuilder.append("너는 여행 데이터 분류 전문가야. 다음 주어진 일본 장소들의 이름(한국/일어/영어 혼재)을 보고, ");
-        promptBuilder.append("해당 장소가 다음 5가지 카테고리 중 어디에 속하는지 추론해: [관광지, 식음, 쇼핑, 숙소, 교통].\n");
+        promptBuilder.append("해당 장소가 다음 6가지 카테고리 중 어디에 속하는지 추론해: [관광지, 식음, 쇼핑, 숙소, 교통, 테마파크]. ");
+        promptBuilder.append("유니버설 스튜디오·디즈니랜드 같은 놀이공원만 '테마파크'로 분류해.\n");
         promptBuilder.append("결과는 반드시 장소 ID를 키(key)로, 카테고리를 값(value)으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운 기호(```json)는 절대 넣지 마.\n");
         promptBuilder.append("예시: {\"ChIJ1234\": \"교통\", \"ChIJ5678\": \"식음\", \"ChIJ9012\": \"숙소\"}\n\n[분류 대상 목록]\n");
 
@@ -167,7 +171,7 @@ public class AiService {
 
         String prompt = promptBuilder.toString();
         Map<String, Object> requestBody = buildGeminiRequest(prompt);
-        String url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String url = geminiUrl();
 
         int maxRetries = 3;
         int retryCount = 0;
@@ -198,6 +202,12 @@ public class AiService {
     // ============================================================================
     // 유틸리티 메서드 (제미나이 파싱, 오픈AI 호출, 에러 로그)
     // ============================================================================
+    // Gemini 호출 주소는 한 곳에서만 만든다.
+    // (복사 과정에서 "[https://...](https://...)" 마크다운 링크가 문자열에 섞여 두 메서드가 항상 실패하고 있었다)
+    private String geminiUrl() {
+        return "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+    }
+
     private Map<String, Object> buildGeminiRequest(String prompt) {
         Map<String, Object> requestBody = new HashMap<>();
         Map<String, Object> contents = new HashMap<>();
@@ -277,7 +287,7 @@ public class AiService {
         List<AiRouteResponse.TimelineItem> fallbackTimeline = new ArrayList<>();
         int currentDay = 1;
         int count = 0;
-        int placesPerDay = routes.size() / totalDays;
+        int placesPerDay = Math.max(1, routes.size() / Math.max(1, totalDays));
 
         for (PlanService.SimulatedItinerary iti : routes) {
             count++;
@@ -288,7 +298,7 @@ public class AiService {
             AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
             item.setDay(currentDay);
             item.setTime(iti.getTime());
-            item.setPlaceName(iti.getPlace().getName());
+            item.setPlaceName(iti.getDisplayName());
             item.setCategory("시스템 분류");
             item.setDescription("자체 알고리즘에 의해 자동 생성된 기본 경로입니다. (AI 설명 지연)");
             fallbackTimeline.add(item);
@@ -327,7 +337,7 @@ public class AiService {
 
         try {
             Map<String, Object> requestBody = buildGeminiRequest(prompt);
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+            String url = geminiUrl();
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -339,18 +349,22 @@ public class AiService {
             aiText = aiText.replace("```json", "").replace("```", "").trim();
 
             JsonNode resultNode = objectMapper.readTree(aiText);
-            place.setTheme(resultNode.path("theme").asText("기본 명소"));
-            place.setPlaceType(resultNode.path("type").asText("실내"));
-            place.setCategory("관광지");
-            place.setRecommendedDuration(resultNode.path("duration").asInt(90));
+            // 12개 어휘에 없는 값("기본 명소" 등)은 저장하지 않는다. 비어 있으면 엔진이 이름·분류로 추정한다.
+            java.util.List<String> themes = ThemeVocabulary.normalizeList(resultNode.path("theme").asText(""));
+            place.setTheme(themes.isEmpty() ? null : String.join(",", themes));
+            String type = resultNode.path("type").asText("");
+            place.setPlaceType(type.contains("실외") ? "실외" : "실내");
+            if (place.getCategory() == null) place.setCategory("관광지");
+            int duration = resultNode.path("duration").asInt(90);
+            place.setRecommendedDuration(duration >= 15 && duration <= 600 ? duration : 90);
 
             System.out.println("[AI 실시간 추론 완료] " + place.getName() + " -> " + place.getRecommendedDuration() + "분 소요 예상");
 
         } catch (Exception e) {
             System.out.println("[AI 실시간 추론 실패 - 기본값 부여] " + e.getMessage());
-            place.setTheme("기본 명소");
-            place.setPlaceType("실내");
-            place.setCategory("관광지");
+            place.setTheme(null);
+            place.setPlaceType(null);       // 비워 두면 관리자 인리치먼트 배치가 나중에 다시 채운다
+            if (place.getCategory() == null) place.setCategory("관광지");
             place.setRecommendedDuration(90); // 실패 시 90분 기본 할당
         }
     }

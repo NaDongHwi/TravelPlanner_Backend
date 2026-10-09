@@ -27,7 +27,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    @io.swagger.v3.oas.annotations.Operation(summary = "로그인 요청", description = "이메일과 비밀번호를 확인한 후, 성공 시 로그인 증명서(JWT 토큰)를 발급합니다.")
+    @io.swagger.v3.oas.annotations.Operation(summary = "로그인 요청", description = "이메일과 비밀번호를 확인한 후, 성공 시 로그인 증명서(JWT 토큰)를 본문으로 돌려줍니다. 실패 시 401.")
     public String login(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.travel.planner.dto.LoginRequest request) {
         return userService.login(request);
     }

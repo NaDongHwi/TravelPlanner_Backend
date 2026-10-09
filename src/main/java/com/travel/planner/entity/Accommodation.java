@@ -23,7 +23,10 @@ public class Accommodation {
     private String name; // 숙소 이름 (예: "도쿄 프린스 호텔")
 
     @Column
-    private String address; // 숙소 주소 또는 구글 placeId
+    private String address; // 숙소 주소
+
+    @Column
+    private String placeId; // 좌표를 찾은 경우 구글 place_id
 
     @Column(nullable = false)
     private LocalDate checkIn; // 체크인 날짜

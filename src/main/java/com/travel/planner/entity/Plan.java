@@ -49,7 +49,33 @@ public class Plan {
     @Column
     private String outTime; // 출국 시간 (오전/오후/저녁/미정)
 
+    // ---- 재탐색(reroute) 때 원래 요청 조건을 복원하기 위한 값들 ----
+    @Column(length = 500)
+    private String cities;              // "오사카, 교토"
+
+    @Column
+    private String companion;
+
+    @Column
+    private String transportation;
+
+    @Column
+    private java.time.LocalTime preferredStartTime;
+
+    @Column
+    private java.time.LocalTime preferredEndTime;
+
+    @Column(length = 500)
+    private String excludedThemes;
+
+    @Column(columnDefinition = "TEXT")
+    private String fixedSchedulesJson;  // 고정 일정 목록(JSON)
+
+    @Column(length = 10)
+    private String language;
+
     @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("dayNumber ASC, sequence ASC")
     private List<Itinerary> itineraries = new ArrayList<>();
 
     public void addItinerary(Itinerary itinerary) {

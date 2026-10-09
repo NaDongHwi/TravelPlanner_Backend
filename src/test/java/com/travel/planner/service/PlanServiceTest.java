@@ -595,6 +595,30 @@ class PlanServiceTest {
         }
     }
 
+    @Test
+    void lateEveningVisitsStayNearTheLodging() {
+        // planId 57 의 21:25 산 위 전망대: 야경 테마에 맞는 곳이 그곳뿐이어도, 밤 8시 이후에는 숙소에서 30분 넘게 떨어진 곳으로 가지 않는다
+        TripInput in = osakaTrip(3, "오전", "오후", "야경", "맛집");
+        in.request.setPreferredEndTime(LocalTime.of(22, 30));
+        in.candidates.removeIf(p -> p.getTheme() != null && p.getTheme().contains("야경"));
+        Place peak = TestPlaces.place("T_PEAK", "이코마 산 전망대", "오사카", 34.6660, 135.5900, "관광지", "야경",
+                TestPlaces.week("오후 8:00 ~ 오후 11:30"));     // 밤에만 갈 수 있는 곳
+        peak.setRating(4.8);
+        peak.setUserRatingCount(5000);
+        peak.setRecommendedDuration(45);
+        in.candidates.add(peak);
+        Place near = TestPlaces.place("T_NEAR_NIGHT", "난바 야경 테라스", "오사카", 34.6680, 135.5030, "관광지", "야경",
+                TestPlaces.week("오후 8:00 ~ 오후 11:30"));
+        near.setRecommendedDuration(45);
+        in.candidates.add(near);
+
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        List<String> names = plan.getDays().stream().flatMap(d -> visits(d).stream()).map(SimulatedItinerary::getDisplayName).collect(Collectors.toList());
+        assertFalse(names.contains("이코마 산 전망대"), "밤 8시 이후에 숙소에서 먼 전망대를 넣음\n" + describe(plan));
+        assertTrue(names.contains("난바 야경 테라스"), "숙소 근처 야경 명소는 밤에도 들어가야 한다\n" + describe(plan));
+    }
+
     // ------------------------------------------------------------------ 불변식
 
     void checkInvariants(TripPlan plan, TripInput in) {

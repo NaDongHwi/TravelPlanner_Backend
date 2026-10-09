@@ -92,6 +92,9 @@ public class PlanService {
     static final int MAX_HOP_MIN = 60;
     /** 하루에 같은 종류의 음식(스시·라멘 등)을 또 고를 때의 감점 */
     static final double CUISINE_REPEAT_PENALTY = 60.0;
+    /** 이 시각 이후에 시작하는 일정은 숙소까지 이 시간 안에 돌아올 수 있는 곳만 */
+    static final int LATE_VISIT_FROM_MIN = 20 * 60;
+    static final int LATE_MAX_RETURN_MIN = 30;
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
@@ -1495,6 +1498,8 @@ public class PlanService {
             } else if (end + back > ctx.endMin + RETURN_GRACE_MIN) {
                 return null;
             }
+            // 밤 8시 이후에는 숙소에서 30분 넘게 떨어진 곳으로 가지 않는다 (밤 9시 반에 산 위 전망대 방지)
+            if (start >= LATE_VISIT_FROM_MIN && back > LATE_MAX_RETURN_MIN && isLodging(ctx.endAnchor)) return null;
         }
 
         // ---- 식사 규칙 ----

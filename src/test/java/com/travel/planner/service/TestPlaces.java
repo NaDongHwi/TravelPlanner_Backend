@@ -189,6 +189,8 @@ final class TestPlaces {
         Place smile = add(out, c, "Higashishizuoka Smile Park", 34.9880, 138.4157, "관광지", "액티비티,힐링", null, H_24, 90);
         smile.setUserRatingCount(400);
         add(out, c, "도로 공원", 34.9560, 138.4088, "관광지", "자연,문화", null, H_24, null);
+        // 밤 9시까지 개방하지만 해가 지면 볼 것이 없는 해안 공원 (planId 54 에서 19:10 에 잡혔던 곳)
+        add(out, c, "히로노 해안공원", 34.9240, 138.3761, "관광지", "자연,사진", null, week("오전 6:00 ~ 오후 9:00"), 60);
         add(out, c, "스시로 히가시 시즈오카점", 34.9913, 138.4195, "식음", "맛집", "실내", week("오전 10:30 ~ 오후 11:00"), null);
         add(out, c, "Valor Fujimidai Shop", 34.9620, 138.4156, "식음", null, null, week("오전 9:30 ~ 오후 9:00"), null);
 

@@ -116,6 +116,17 @@ class SupportLogicTest {
         assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(place("스마트 키친", "식음")));
         assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(place("Ramen Shop Ichiban", "식음")));
         assertTrue(ThemeVocabulary.inferredThemes(place("Valor Fujimidai Shop", "식음")).contains("쇼핑"));
+
+        // 쇼핑몰·가전매장 안에 있어 '쇼핑'으로 분류됐지만 테마가 맛집뿐인 곳은 식당으로 다룬다
+        Place unagi = place("하마나코 우나기마루하마 빅카메라점", "쇼핑");
+        unagi.setTheme("맛집");
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(unagi));
+        Place market = place("누마즈 미나토 신선관", "쇼핑");
+        market.setTheme("쇼핑,맛집,서브컬쳐");
+        assertEquals(PlaceKind.SHOPPING, PlaceKind.of(market));
+        assertEquals("스시", PlaceKind.cuisineOf("스에히로즈시"));
+        assertEquals("스시", PlaceKind.cuisineOf("스시로 히가시 시즈오카점"));
+        assertNull(PlaceKind.cuisineOf("나스비 총본점"));
     }
 
     @Test

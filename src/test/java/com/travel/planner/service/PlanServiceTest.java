@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -507,6 +508,91 @@ class PlanServiceTest {
         p.setRating(4.2);
         p.setUserRatingCount(1500);
         return p;
+    }
+
+    // ------------------------------------------------------------------ 다중 도시: 다른 도시로 밥 먹으러 가지 않는다
+
+    /** planId 55 의 모양: 숙소가 도시를 따라 옮겨 가고, 둘째 도시에는 갈 곳이 몇 군데뿐이며, 식사 5회·야경 테마 */
+    static TripInput sparseSecondCityTrip() {
+        TripInput in = osakaTrip(4, "13:20", "15:40", "맛집", "서브컬쳐", "야경");
+        in.request.setCities(new ArrayList<>(List.of("오사카", "교토")));
+        in.request.setMealCount(5);
+        in.request.setPreferredStartTime(LocalTime.of(9, 0));
+        in.request.setPreferredEndTime(LocalTime.of(22, 30));
+        List<Place> kyoto = new ArrayList<>(TestPlaces.kyoto());
+        kyoto.removeIf(p -> !List.of("교토 국립 박물관", "기요미즈데라", "교토역 오코노미야키", "기온 우동", "기온 하나미코지").contains(p.getName()));
+        in.candidates.addAll(kyoto);
+        Place kyotoHotel = TestPlaces.place("HOTEL_KYOTO", "교토 테스트 호텔", "교토", 34.9858, 135.7588, "숙소", null, null);
+        in.lodgingByNight.put(2, kyotoHotel);
+        in.lodgingByNight.put(3, kyotoHotel);
+        in.dayCities = new ArrayList<>(List.of("오사카", "교토", "교토", "오사카"));
+        return in;
+    }
+
+    @Test
+    void doesNotLeaveTheDayCityForAMealOrNightView() {
+        TripInput in = sparseSecondCityTrip();
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+
+        // 3일차: 교토 숙소에서 출발해 교토 숙소로 돌아오는 날. 교토에 갈 곳이 떨어져도 오사카(75분)로 넘어가지 않는다.
+        DayPlan kyotoDay = plan.getDays().get(2);
+        for (SimulatedItinerary v : visits(kyotoDay)) {
+            assertEquals("교토", v.getPlace().getCity(), "교토 일정 중 다른 도시 방문: " + v.getDisplayName() + "\n" + describe(plan));
+            assertTrue(v.getTravelMinutes() <= PlanService.MAX_HOP_MIN, v.getDisplayName() + " 까지 " + v.getTravelMinutes() + "분 이동");
+        }
+        SimulatedItinerary end = kyotoDay.getItems().get(kyotoDay.getItems().size() - 1);
+        assertTrue(end.getStartMin() <= 22 * 60 + 30, "숙소 도착 " + end.getTime() + "\n" + describe(plan));
+
+        // 식당까지의 이동은 (도시를 옮기는 이동을 빼면) 40분 이내
+        for (DayPlan day : plan.getDays()) {
+            List<SimulatedItinerary> v = visits(day);
+            for (int i = 1; i < v.size(); i++) {
+                boolean restaurant = com.travel.planner.util.PlaceKind.of(v.get(i).getPlace()) == com.travel.planner.util.PlaceKind.RESTAURANT;
+                boolean sameCity = v.get(i).getPlace().getCity().equals(v.get(i - 1).getPlace().getCity());
+                if (restaurant && sameCity) {
+                    assertTrue(v.get(i).getTravelMinutes() <= PlanService.MEAL_MAX_TRAVEL_MIN,
+                            "Day " + day.getDayNumber() + " " + v.get(i).getDisplayName() + " 까지 " + v.get(i).getTravelMinutes() + "분");
+                }
+            }
+        }
+    }
+
+    @Test
+    void cityWithFewSightsGetsFewerDays() {
+        // 교토에 볼거리가 3곳(하루 치 미만)뿐이면 4일 중 교토는 하루만. 균등 배분이면 2일이 된다.
+        TripInput in = sparseSecondCityTrip();
+        in.lodgingByNight.clear();
+        Map<String, double[]> centers = planService.cityCenters(in.candidates, in.request.getCities());
+        Map<String, Integer> sights = planService.sightMinutesByCity(in.request, in.candidates);
+        assertTrue(sights.get("교토") < PlanService.SIGHT_MINUTES_PER_DAY * 3 / 2, sights.toString());
+
+        List<String> even = planService.assignDayCities(in.request, 4, centers, in.arrivalAirport, in.departureAirport, new java.util.HashMap<>());
+        List<String> weighted = planService.assignDayCities(in.request, 4, centers, in.arrivalAirport, in.departureAirport,
+                new java.util.HashMap<>(), sights);
+        assertEquals(2, java.util.Collections.frequency(even, "교토"), even.toString());
+        assertEquals(1, java.util.Collections.frequency(weighted, "교토"), weighted.toString());
+        assertEquals(3, java.util.Collections.frequency(weighted, "오사카"), weighted.toString());
+    }
+
+    @Test
+    void sameCuisineIsNotRepeatedInOneDayWhenAlternativesExist() {
+        TripInput in = osakaTrip(3, "오전", "오후", "맛집", "사진");
+        in.request.setMealCount(5);
+        // 어느 시간대에나 고를 수 있는 식당이 여럿 있도록 식당을 전부 종일 영업으로 둔다
+        // (감점 규칙이라, 그 시간에 여는 곳이 같은 종류뿐이면 반복될 수 있다)
+        for (Place p : in.candidates) {
+            if ("식음".equals(p.getCategory()) && "맛집".equals(p.getTheme())) p.setOpeningHours(TestPlaces.week("오전 11:00 ~ 오후 10:00"));
+        }
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        for (DayPlan day : plan.getDays()) {
+            Set<String> cuisines = new HashSet<>();
+            for (SimulatedItinerary v : visits(day)) {
+                String cuisine = com.travel.planner.util.PlaceKind.cuisineOf(v.getPlace().getName());
+                if (cuisine != null) assertTrue(cuisines.add(cuisine), "Day " + day.getDayNumber() + " 에 " + cuisine + " 가 두 번\n" + describe(plan));
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 불변식

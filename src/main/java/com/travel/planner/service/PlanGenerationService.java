@@ -90,7 +90,9 @@ public class PlanGenerationService {
             resolveUserAccommodations(request, totalDays, centers, mainCity, lodgingByNight, accommodationEntities, warnings);
             dayCities = planService.assignDayCities(request, totalDays, centers, arrivalAirport, departureAirport, lodgingByNight);
         } else {
-            dayCities = planService.assignDayCities(request, totalDays, centers, arrivalAirport, departureAirport, lodgingByNight);
+            // 숙소가 정해져 있지 않으면 도시별 볼거리 분량을 보고 일수를 나눈다 (볼거리가 적은 도시에 이틀을 주지 않는다)
+            dayCities = planService.assignDayCities(request, totalDays, centers, arrivalAirport, departureAirport, lodgingByNight,
+                    planService.sightMinutesByCity(request, allPlaces));
             if (request.isSuggestHotel() && totalDays > 1) {
                 suggestHotels(request, totalDays, dayCities, centers, mainCity, lodgingByNight, accommodationEntities, warnings);
             }

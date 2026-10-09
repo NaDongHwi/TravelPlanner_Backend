@@ -41,7 +41,11 @@ public enum PlaceKind {
             if (theme.contains("카페") && !theme.contains("맛집")) return CAFE;
             return RESTAURANT;
         }
-        if ("쇼핑".equals(category)) return SHOPPING;
+        if ("쇼핑".equals(category)) {
+            // 쇼핑몰·가전매장 안에 있어 '쇼핑'으로 분류됐지만 테마는 맛집뿐인 곳(예: "우나기 ○○ 빅카메라점")은 식당이다
+            if (theme.contains("맛집") && !theme.contains("쇼핑")) return RESTAURANT;
+            return SHOPPING;
+        }
         return ATTRACTION;
     }
 
@@ -65,6 +69,25 @@ public enum PlaceKind {
         if (name == null) return false;
         String n = name.trim().toLowerCase();
         return PARK_NAME.matcher(n).find() || OPEN_AIR_NAME.matcher(n).find();
+    }
+
+    private static final String[][] CUISINES = {
+            {"스시", "초밥", "寿司", "鮨", "sushi", "즈시"}, {"라멘", "ラーメン", "ramen"}, {"소바", "そば", "蕎麦", "soba"},
+            {"우동", "うどん", "udon"}, {"교자", "餃子", "gyoza"}, {"야키니쿠", "焼肉", "yakiniku"}, {"돈카츠", "とんかつ", "tonkatsu"},
+            {"우나기", "うなぎ", "鰻", "장어", "unagi"}, {"카레", "カレー", "curry"}, {"햄버그", "ハンバーグ", "hamburg", "사와야카"},
+            {"오뎅", "おでん", "oden"}, {"텐동", "덴푸라", "天ぷら", "tempura"}, {"오코노미야키", "お好み焼", "okonomiyaki"},
+            {"타코야키", "たこ焼"}, {"피자", "pizza"}, {"파스타", "pasta"}, {"야키토리", "焼鳥", "焼き鳥", "yakitori"}};
+
+    /** 이름으로 본 음식 종류(스시·라멘 등). 알 수 없으면 null. 하루에 같은 종류를 두 번 넣지 않는 데 쓴다. */
+    public static String cuisineOf(String name) {
+        if (name == null) return null;
+        String n = name.toLowerCase();
+        for (String[] group : CUISINES) {
+            for (String keyword : group) {
+                if (n.contains(keyword)) return group[0];
+            }
+        }
+        return null;
     }
 
     public boolean isFood() {

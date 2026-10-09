@@ -148,6 +148,57 @@ class SupportLogicTest {
         assertFalse(WeatherService.isWetDay(om.readTree("{}")));
     }
 
+    @Test
+    void oneCallDailyRecordsAreMappedToLocalDates() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        // 문서의 응답 모양: dt 는 현지 정오(일본이면 03:00 UTC), timezone_offset 은 초 단위
+        StringBuilder data = new StringBuilder();
+        LocalDate first = LocalDate.of(2026, 10, 9);          // 요청 범위보다 하루 앞선 기록이 섞여 와도 된다
+        for (int i = 0; i < 7; i++) {
+            long dt = first.plusDays(i).atTime(3, 0).toEpochSecond(java.time.ZoneOffset.UTC);
+            String main = i == 2 ? "Rain" : "Clear";            // 10/11 만 비
+            if (i > 0) data.append(',');
+            data.append("{\"dt\":").append(dt).append(",\"weather\":[{\"main\":\"").append(main).append("\"}],\"pop\":").append(i == 2 ? 0.9 : 0.1).append('}');
+        }
+        com.fasterxml.jackson.databind.JsonNode root = om.readTree("{\"timezone\":\"Asia/Tokyo\",\"timezone_offset\":32400,\"data\":[" + data + "]}");
+
+        java.util.Map<LocalDate, Boolean> result = new java.util.HashMap<>();
+        LocalDate[] seen = WeatherService.collectDaily(root, LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 15), result);
+        assertEquals(LocalDate.of(2026, 10, 9), seen[0]);
+        assertEquals(LocalDate.of(2026, 10, 15), seen[1]);
+        assertEquals(6, result.size(), result.toString());
+        assertTrue(result.get(LocalDate.of(2026, 10, 11)));
+        assertFalse(result.get(LocalDate.of(2026, 10, 10)));
+        assertFalse(result.containsKey(LocalDate.of(2026, 10, 9)));
+
+        // dt 가 밀리초나 날짜 문자열로 와도 같은 날짜로 읽는다
+        long noon = LocalDate.of(2026, 10, 10).atTime(3, 0).toEpochSecond(java.time.ZoneOffset.UTC);
+        assertEquals(LocalDate.of(2026, 10, 10), WeatherService.dayOf(om.readTree(String.valueOf(noon)), 32400));
+        assertEquals(LocalDate.of(2026, 10, 10), WeatherService.dayOf(om.readTree(String.valueOf(noon * 1000)), 32400));
+        assertEquals(LocalDate.of(2026, 10, 10), WeatherService.dayOf(om.readTree("\"2026-10-10T12:00:00+09:00\""), 32400));
+        assertNull(WeatherService.dayOf(om.readTree("\"??\""), 32400));
+    }
+
+    @Test
+    void onsenStayDependsOnWhetherOnsenThemeWasChosen() {
+        PlanService planService = new PlanService();
+        Place spa = place("유노키노 사토", "관광지");
+        spa.setTheme("온천,힐링");
+        spa.setRecommendedDuration(180);
+
+        PlanRequest lover = new PlanRequest();
+        lover.setThemes(List.of("힐링", "온천", "자연"));
+        assertEquals(180, planService.calculateDwellTime(spa, lover), "온천 테마를 골랐으면 최대 3시간 (이전 220분)");
+
+        PlanRequest other = new PlanRequest();
+        other.setThemes(List.of("힐링", "문화"));
+        assertEquals(90, planService.calculateDwellTime(spa, other), "온천 테마를 고르지 않았으면 최대 1시간 30분");
+
+        Place small = place("동네 족욕탕 온천", "관광지");
+        small.setRecommendedDuration(40);
+        assertEquals(40, planService.calculateDwellTime(small, new PlanRequest()), "짧은 곳은 그대로");
+    }
+
     // ---------------------------------------------------------------- 고정 일정 저장/복원
 
     @Test

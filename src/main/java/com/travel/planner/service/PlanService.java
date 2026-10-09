@@ -78,6 +78,9 @@ public class PlanService {
     /** 리뷰 수가 이보다 적은 공원·정원은 "작은 공원"으로 보고 체류 시간을 제한한다 */
     static final int LARGE_PARK_REVIEW_COUNT = 2000;
     static final int SMALL_PARK_DWELL_MAX_MIN = 60;
+    /** 온천 체류 상한: 온천 테마를 골랐을 때 / 고르지 않았을 때 */
+    static final int ONSEN_DWELL_MAX_WITH_THEME_MIN = 180;
+    static final int ONSEN_DWELL_MAX_MIN = 90;
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
@@ -452,6 +455,10 @@ public class PlanService {
         List<String> themes = ThemeVocabulary.normalizeAll(request.getThemes());
         if (kind != PlaceKind.THEME_PARK && (isFamily(request) || themes.contains("힐링"))) {
             time = (int) (time * 1.2);
+        }
+        // 온천: 온천 테마를 고른 사람은 길게(최대 3시간), 고르지 않았는데 일정에 들어간 경우는 짧게(최대 1시간 30분)
+        if (kind == PlaceKind.ATTRACTION && themesOf(p).contains("온천")) {
+            time = Math.min(time, themes.contains("온천") ? ONSEN_DWELL_MAX_WITH_THEME_MIN : ONSEN_DWELL_MAX_MIN);
         }
         return TimeUtil.roundUpTo5(time);
     }

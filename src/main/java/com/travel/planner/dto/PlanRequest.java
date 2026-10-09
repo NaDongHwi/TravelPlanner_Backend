@@ -88,6 +88,16 @@ public class PlanRequest {
     @Schema(description = "근교 추천 제외 여부 (true: 선택한 도시 내부만 탐색, false: 일정 여유 시 근교 자동 확장)", example = "false")
     private boolean excludeSuburbs;
 
+    // 하루에 추천받을 식사(식당) 횟수. 맛집 테마를 골랐으면 1~5, 아니면 1~3. 보내지 않으면 2(점심·저녁).
+    @com.fasterxml.jackson.annotation.JsonAlias({"mealsPerDay", "mealCountPerDay", "foodCount", "restaurantCount"})
+    @Schema(description = "하루 식사 추천 횟수 (맛집 테마 1~5, 그 외 1~3, 기본 2). 1: 저녁 / 2: 점심·저녁 / 3: +아침 / 4: +오후 간식 / 5: +야식", example = "2")
+    private Integer mealCount;
+
+    // 카페 테마를 고르지 않았을 때 "카페 추천 받지 않기" 체크박스. 카페 테마를 골랐으면 이 값은 무시된다.
+    @com.fasterxml.jackson.annotation.JsonAlias({"noCafe", "skipCafe", "excludeCafes", "cafeExcluded"})
+    @Schema(description = "카페 추천 받지 않기 (카페 테마를 선택하지 않았을 때만 적용)", example = "false")
+    private Boolean excludeCafe;
+
     @Getter
     @Setter
     public static class AccommodationInput {

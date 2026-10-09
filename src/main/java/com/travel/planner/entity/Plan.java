@@ -74,6 +74,12 @@ public class Plan {
     @Column(length = 10)
     private String language;
 
+    @Column
+    private Integer mealCount;          // 하루 식사 추천 횟수 (null = 기본 2)
+
+    @Column
+    private Boolean excludeCafe;        // 카페 추천 받지 않기
+
     @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("dayNumber ASC, sequence ASC")
     private List<Itinerary> itineraries = new ArrayList<>();

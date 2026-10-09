@@ -156,6 +156,14 @@ public class PlanGenerationService {
         if (cities.isEmpty()) throw new IllegalArgumentException("여행 도시를 1개 이상 선택해주세요.");
         request.setCities(cities);
 
+        if (request.getMealCount() != null) {
+            int max = PlanService.maxMealCount(request);
+            if (request.getMealCount() < 1 || request.getMealCount() > max) {
+                throw new IllegalArgumentException("하루 식사 횟수는 1~" + max + "회 사이로 선택해주세요."
+                        + (max < PlanService.MAX_MEALS_FOOD_THEME ? " (4회 이상은 맛집 테마를 선택했을 때만 가능합니다.)" : ""));
+            }
+        }
+
         if (request.getPreferredStartTime() != null && request.getPreferredStartTime().equals(request.getPreferredEndTime())) {
             throw new IllegalArgumentException("하루 일정 시작 시간과 종료 시간이 같습니다.");
         }

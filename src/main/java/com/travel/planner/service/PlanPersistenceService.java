@@ -69,6 +69,8 @@ public class PlanPersistenceService {
         if (request.getExcludedThemes() != null) plan.setExcludedThemes(String.join(", ", request.getExcludedThemes()));
         plan.setFixedSchedulesJson(FixedScheduleCodec.toJson(request.getFixedSchedules()));
         plan.setLanguage(request.getLanguage());
+        plan.setMealCount(request.getMealCount());
+        plan.setExcludeCafe(request.getExcludeCafe());
 
         for (Accommodation accommodation : accommodations) {
             plan.addAccommodation(accommodation);
@@ -191,6 +193,8 @@ public class PlanPersistenceService {
         req.setPreferredEndTime(plan.getPreferredEndTime());
         req.setFixedSchedules(FixedScheduleCodec.fromJson(plan.getFixedSchedulesJson()));
         req.setLanguage(plan.getLanguage());
+        req.setMealCount(plan.getMealCount());
+        req.setExcludeCafe(plan.getExcludeCafe());
         return req;
     }
 

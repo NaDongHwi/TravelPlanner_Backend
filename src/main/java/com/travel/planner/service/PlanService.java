@@ -16,6 +16,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -77,22 +78,59 @@ public class PlanService {
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
-        LUNCH("점심", 11 * 60, 11 * 60 + 30, 13 * 60 + 30, 14 * 60 + 30),
-        DINNER("저녁", 17 * 60, 18 * 60, 19 * 60 + 30, 20 * 60 + 30);
+        // 시간 순서대로 둔다 (엔진이 이 순서로 "다음 식사"를 찾는다)
+        BREAKFAST("아침", 7 * 60, 8 * 60, 9 * 60 + 30, 10 * 60, false),
+        LUNCH("점심", 11 * 60, 11 * 60 + 30, 13 * 60 + 30, 14 * 60 + 30, false),
+        SNACK("간식", 14 * 60 + 30, 15 * 60, 16 * 60, 16 * 60 + 30, true),
+        DINNER("저녁", 17 * 60, 18 * 60, 19 * 60 + 30, 20 * 60 + 30, false),
+        LATE("야식", 20 * 60 + 30, 20 * 60 + 30, 21 * 60, 21 * 60 + 30, true);
 
         final String label;
         final int earliest;
         final int mustFrom;
         final int latestStart;
         final int giveUp;
+        /** true 면 갈 식당이 없을 때 "자유 식사"를 넣지 않고 그냥 건너뛴다 (간식·야식) */
+        final boolean optional;
 
-        Meal(String label, int earliest, int mustFrom, int latestStart, int giveUp) {
+        Meal(String label, int earliest, int mustFrom, int latestStart, int giveUp, boolean optional) {
             this.label = label;
             this.earliest = earliest;
             this.mustFrom = mustFrom;
             this.latestStart = latestStart;
             this.giveUp = giveUp;
+            this.optional = optional;
         }
+    }
+
+    public static final int DEFAULT_MEAL_COUNT = 2;
+    public static final int MAX_MEALS_FOOD_THEME = 5;
+    public static final int MAX_MEALS_DEFAULT = 3;
+    /** 앞 식사가 끝난 뒤 다음 식사까지 최소 간격(분) */
+    static final int MIN_MEAL_GAP_MIN = 90;
+    /** 간식·야식은 가볍게 먹는다고 보고 체류 시간을 줄인다 */
+    static final int SNACK_DWELL_MAX_MIN = 45;
+    static final int LATE_DWELL_MAX_MIN = 60;
+
+    /** 하루 식사 횟수 상한: 맛집 테마를 골랐으면 5, 아니면 3 */
+    public static int maxMealCount(PlanRequest request) {
+        return ThemeVocabulary.normalizeAll(request.getThemes()).contains("맛집") ? MAX_MEALS_FOOD_THEME : MAX_MEALS_DEFAULT;
+    }
+
+    /** 요청한 하루 식사 횟수(없으면 2, 범위를 벗어나면 허용 범위로 맞춤) */
+    static int mealCount(PlanRequest request) {
+        Integer requested = request.getMealCount();
+        if (requested == null) return DEFAULT_MEAL_COUNT;
+        return Math.max(1, Math.min(maxMealCount(request), requested));
+    }
+
+    /** 횟수별 식사 구성. 1회는 {점심, 저녁} 중 그날 가능한 한 끼(저녁 우선)로 initMeals 에서 줄인다. */
+    static EnumSet<Meal> mealsFor(int count) {
+        EnumSet<Meal> meals = EnumSet.of(Meal.LUNCH, Meal.DINNER);
+        if (count >= 3) meals.add(Meal.BREAKFAST);
+        if (count >= 4) meals.add(Meal.SNACK);
+        if (count >= 5) meals.add(Meal.LATE);
+        return meals;
     }
 
     // =====================================================================================
@@ -463,6 +501,13 @@ public class PlanService {
         boolean cafeLover;
         boolean shoppingLover;
         boolean nightViewLover;
+        /** 카페 추천 받지 않기 (카페 테마를 고르지 않았을 때만) */
+        boolean noCafe;
+        /** 하루 식사 구성 */
+        int mealCount = DEFAULT_MEAL_COUNT;
+        EnumSet<Meal> meals = EnumSet.of(Meal.LUNCH, Meal.DINNER);
+        final Map<Meal, Integer> mealActiveDays = new EnumMap<>(Meal.class);
+        final List<Integer> optionalMealSkippedDays = new ArrayList<>();
         /** 외딴 장소 한 곳을 중심으로 삼은 날 수 (요청 테마를 시내에서 채울 수 없을 때만, 여행당 제한) */
         int remoteDaysUsed;
         int maxRemoteDays;
@@ -508,6 +553,21 @@ public class PlanService {
         return explicit.isEmpty() ? ThemeVocabulary.inferredThemes(p) : explicit;
     }
 
+    /** 요청한 식사 횟수를 다 채우지 못한 이유를 알린다. */
+    private void addMealWarnings(TripState st, List<String> warnings) {
+        for (Meal m : st.meals) {
+            boolean extra = m == Meal.BREAKFAST || m == Meal.SNACK || m == Meal.LATE;
+            if (extra && st.mealActiveDays.getOrDefault(m, 0) == 0) {
+                warnings.add(String.format("'%s'(%s~%s)은 하루 일정 시간 안에 들어가지 않아 넣지 못했습니다. 일정 시작·종료 시간을 조정하면 포함됩니다.",
+                        m.label, TimeUtil.format(m.mustFrom), TimeUtil.format(m.mustFrom + MEAL_PLACEHOLDER_MIN)));
+            }
+        }
+        if (!st.optionalMealSkippedDays.isEmpty()) {
+            String days = st.optionalMealSkippedDays.stream().map(d -> "Day " + d).collect(Collectors.joining(", "));
+            warnings.add("간식·야식 시간대에 갈 수 있는 식당이 없어 " + days + " 은(는) 요청한 식사 횟수보다 적게 넣었습니다.");
+        }
+    }
+
     private TripState buildState(TripInput in) {
         PlanRequest req = in.request;
         TripState st = new TripState();
@@ -519,6 +579,9 @@ public class PlanService {
         st.cafeLover = st.themes.contains("카페");
         st.shoppingLover = st.themes.contains("쇼핑");
         st.nightViewLover = st.themes.contains("야경");
+        st.noCafe = Boolean.TRUE.equals(req.getExcludeCafe()) && !st.cafeLover;
+        st.mealCount = mealCount(req);
+        st.meals = mealsFor(st.mealCount);
         for (String t : st.themes) st.themeCounts.put(t, 0);
 
         st.centers = cityCenters(in.candidates, req.getCities());
@@ -552,6 +615,7 @@ public class PlanService {
                     && p.getCategory() != null && p.getCategory().contains(ex));
             if (isExcluded) continue;
             if (st.family && c.kind == PlaceKind.BAR) continue;
+            if (st.noCafe && c.kind == PlaceKind.CAFE) continue;
 
             double[] center = st.centers.get(p.getCity());
             double distFromCenter = center == null ? 0.0 : DistanceUtil.calculateDistance(center[0], center[1], c.lat, c.lng);
@@ -739,6 +803,7 @@ public class PlanService {
         }
 
         plan.themeCounts.putAll(st.themeCounts);
+        addMealWarnings(st, plan.warnings);
         for (String theme : st.themes) {
             if (st.themeCounts.getOrDefault(theme, 0) > 0) continue;
             boolean anyCandidate = st.pool.stream().anyMatch(c -> c.matched.contains(theme));
@@ -765,6 +830,7 @@ public class PlanService {
         int visitCount;
         int cafes;
         int lastCafeEnd = -1000;
+        int lastMealEnd = -1000;
         int bars;
         int shopping;
         boolean themeParkDone;
@@ -802,7 +868,7 @@ public class PlanService {
         ds.cur = ctx.startMin;
         ds.startDeparture = ctx.startMin;
         int visitLimit = visitLimit(ctx);
-        initMeals(ctx, ds, visitLimit);
+        initMeals(ctx, ds, st, visitLimit);
         ds.seed = visitLimit - ctx.startMin >= 60 ? chooseSeed(ctx, st) : null;
         boolean remoteSeed = ds.seed != null && !seedEligible(ds.seed, st);
         if (remoteSeed) st.remoteDaysUsed++;
@@ -816,7 +882,7 @@ public class PlanService {
             if (enterFixedBlockIfDue(ctx, ds, warnings)) continue;
 
             Meal pending = pendingMeal(ds);
-            boolean mustEat = pending != null && ds.cur >= pending.mustFrom;
+            boolean mustEat = pending != null && ds.cur >= mustFrom(ds, pending);
 
             // (b) 지금 바로 갈 수 있는 최선의 후보
             Eval best = pickBest(ctx, ds, st, false);
@@ -829,6 +895,12 @@ public class PlanService {
 
             // (c) 식사 시간인데 갈 수 있는 식당이 없으면 자유 식사 60분
             if (mustEat) {
+                if (pending.optional) {
+                    // 간식·야식: 그 시간에 갈 식당이 없으면 자리만 차지하는 "자유 식사"를 넣지 않고 건너뛴다
+                    ds.mealsDone.add(pending);
+                    if (!st.optionalMealSkippedDays.contains(ctx.dayNumber)) st.optionalMealSkippedDays.add(ctx.dayNumber);
+                    continue;
+                }
                 if (pending == Meal.DINNER && nextBlock == null && isLodging(ctx.endAnchor) && !hasRestaurantNearby(ds, st)) {
                     dinnerNearLodging(ctx, ds);
                     continue;
@@ -857,7 +929,7 @@ public class PlanService {
 
             // (e) 더 넣을 곳이 없으면 다음 예정(고정 일정 또는 식사 시간)까지 시간을 흘려보낸다
             Integer blockDepart = nextBlock == null ? null : nextBlock.start - travelToBlock(ctx, ds, nextBlock);
-            Integer mealAt = (pending != null && ds.cur < pending.mustFrom) ? pending.mustFrom : null;
+            Integer mealAt = (pending != null && ds.cur < mustFrom(ds, pending)) ? mustFrom(ds, pending) : null;
             if (nextBlock != null && (mealAt == null || blockDepart <= mealAt)) {
                 jumpToBlock(ctx, ds, nextBlock);
                 continue;
@@ -893,12 +965,27 @@ public class PlanService {
         return Math.min(ctx.endMin, ctx.hardDeadlineMin - back);
     }
 
-    private void initMeals(DayContext ctx, DayState ds, int visitLimit) {
+    private void initMeals(DayContext ctx, DayState ds, TripState st, int visitLimit) {
         for (Meal m : Meal.values()) {
             boolean activeBefore = ctx.startMin < m.giveUp - 30;
             boolean activeAfter = visitLimit >= m.mustFrom + MEAL_PLACEHOLDER_MIN;
-            if (!activeBefore || !activeAfter) ds.mealsDone.add(m);
+            if (!st.meals.contains(m) || !activeBefore || !activeAfter) ds.mealsDone.add(m);
         }
+        // 하루 1회: 저녁을 우선하고, 저녁을 먹을 수 없는 날(출국일 등)에만 점심으로 대신한다
+        if (st.mealCount == 1 && !ds.mealsDone.contains(Meal.DINNER)) ds.mealsDone.add(Meal.LUNCH);
+        for (Meal m : Meal.values()) {
+            if (!ds.mealsDone.contains(m)) st.mealActiveDays.merge(m, 1, Integer::sum);
+        }
+    }
+
+    /** 앞 식사와의 간격을 반영한 "이때부터는 식사가 우선" 시각 */
+    private static int mustFrom(DayState ds, Meal m) {
+        return Math.min(m.latestStart, Math.max(m.mustFrom, ds.lastMealEnd + MIN_MEAL_GAP_MIN));
+    }
+
+    /** 앞 식사와의 간격을 반영한 "이때부터 식당에 갈 수 있음" 시각 */
+    private static int earliest(DayState ds, Meal m) {
+        return Math.min(m.latestStart, Math.max(m.earliest, ds.lastMealEnd + MIN_MEAL_GAP_MIN));
     }
 
     private void dropImpossibleBlocks(DayContext ctx, List<String> warnings) {
@@ -976,7 +1063,10 @@ public class PlanService {
         for (Meal m : Meal.values()) {
             boolean coversWindow = b.start <= m.mustFrom + 30 && b.end >= m.giveUp - 30;
             boolean overlaps = b.start < m.giveUp && b.end > m.earliest;
-            if (coversWindow || (overlaps && looksLikeMeal(b.name))) ds.mealsDone.add(m);
+            if (coversWindow || (overlaps && looksLikeMeal(b.name))) {
+                if (!ds.mealsDone.contains(m)) ds.lastMealEnd = Math.max(ds.lastMealEnd, b.end);
+                ds.mealsDone.add(m);
+            }
         }
         return true;
     }
@@ -1020,6 +1110,7 @@ public class PlanService {
         ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.MEAL, null, meal.label + " 식사 (주변 자유 식사)",
                 start, end, 0, ds.locLat, ds.locLng));
         ds.mealsDone.add(meal);
+        ds.lastMealEnd = end;
         ds.cur = end;
         ds.bufferPending = 0;
         ds.lastKind = PlaceKind.RESTAURANT;
@@ -1049,6 +1140,7 @@ public class PlanService {
         ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.MEAL, null, "저녁 식사 (숙소 근처)",
                 start, end, back, lodging.getLatitude(), lodging.getLongitude()));
         ds.mealsDone.add(Meal.DINNER);
+        ds.lastMealEnd = end;
         ds.cur = end;
         ds.bufferPending = 0;
         ds.lastKind = PlaceKind.RESTAURANT;
@@ -1189,6 +1281,12 @@ public class PlanService {
 
         // ---- 영업시간 ----
         int dwell = c.dwell;
+        if (c.kind == PlaceKind.RESTAURANT || c.kind == PlaceKind.BAR) {
+            Meal next = pendingMeal(ds);
+            if (next != null && next.optional && arrive >= earliest(ds, next) - 15) {
+                dwell = Math.min(dwell, next == Meal.SNACK ? SNACK_DWELL_MAX_MIN : LATE_DWELL_MAX_MIN);
+            }
+        }
         int start = -1;
         for (int[] iv : intervals(c, ctx.date, st)) {
             int s = Math.max(arrive, iv[0]);
@@ -1246,29 +1344,35 @@ public class PlanService {
         Meal fills = null;
         boolean longStay = dwell >= 240;   // 테마파크 등: 안에서 식사한다고 본다
         boolean mealPlace = c.kind == PlaceKind.RESTAURANT || c.kind == PlaceKind.BAR;
-        if (mealPlace) {
+        // 아침은 일찍 여는 카페·베이커리(모닝 세트)로도 해결한다
+        boolean breakfastCafe = c.kind == PlaceKind.CAFE && !ds.mealsDone.contains(Meal.BREAKFAST)
+                && start >= earliest(ds, Meal.BREAKFAST) && start < Meal.BREAKFAST.giveUp;
+        if (mealPlace || breakfastCafe) {
             if (c.kind == PlaceKind.BAR && start < 17 * 60 + 30) return null;
+            if (breakfastCafe) fills = Meal.BREAKFAST;
             for (Meal m : Meal.values()) {
-                boolean inWindow = start >= m.earliest && start < m.giveUp;
-                // 이자카야는 저녁 식사로만 센다
-                if (!ds.mealsDone.contains(m) && inWindow && (c.kind != PlaceKind.BAR || m == Meal.DINNER)) fills = m;
+                if (breakfastCafe) break;
+                boolean inWindow = start >= earliest(ds, m) && start < m.giveUp;
+                // 이자카야는 저녁·야식으로만 센다
+                if (!ds.mealsDone.contains(m) && inWindow && (c.kind != PlaceKind.BAR || m == Meal.DINNER || m == Meal.LATE)) fills = m;
             }
             if (fills == null) {
                 // 식사 시간대가 아니면 식당은 넣지 않는다. 예외: 맛집 테마일 때 저녁 뒤 이자카야 한 곳(2차)
-                boolean secondRound = c.kind == PlaceKind.BAR && st.foodLover && ds.bars == 0
+                // (야식을 따로 요청했으면 야식이 그 역할을 하므로 2차는 넣지 않는다)
+                boolean secondRound = c.kind == PlaceKind.BAR && st.foodLover && ds.bars == 0 && !st.meals.contains(Meal.LATE)
                         && ds.mealsDone.contains(Meal.DINNER) && start >= 20 * 60;
                 if (!secondRound) return null;
-            } else if (pending != null && ds.cur >= pending.mustFrom
-                    && travel > (ds.items.isEmpty() ? 90 : MUST_EAT_MAX_TRAVEL_MIN)) {
+            } else if (pending != null && ds.cur >= mustFrom(ds, pending)
+                    && travel > (ds.items.isEmpty() && pending != Meal.BREAKFAST ? 90 : MUST_EAT_MAX_TRAVEL_MIN)) {
                 // 식사 시간에 30분 넘게 이동해야 하는 식당은 제외 (공항·숙소에서 막 출발하는 경우는 예외)
                 return null;
-            } else if (!deferred && ds.cur < fills.mustFrom && wait > 15) {
+            } else if (!deferred && ds.cur < mustFrom(ds, fills) && wait > 15) {
                 // 아직 식사 시간 전인데 식당 문 열기를 기다리느니 그 사이에 다른 곳을 본다
                 return null;
             }
-        } else if (pending != null && !longStay) {
-            if (ds.cur >= pending.mustFrom) return null;          // 식사가 먼저
-            if (finish > pending.latestStart) return null;        // 이 방문 때문에 식사 시간을 놓치면 안 됨
+        } else if (pending != null) {
+            if (ds.cur >= mustFrom(ds, pending)) return null;                   // 식사가 먼저 (테마파크도 식사 뒤에 간다)
+            if (!longStay && finish > pending.latestStart) return null;         // 이 방문 때문에 식사 시간을 놓치면 안 됨
         }
 
         // ---- 효용 ----
@@ -1350,7 +1454,10 @@ public class PlanService {
             case THEME_PARK: ds.themeParkDone = true; break;
             default: break;
         }
-        if (e.fills != null) ds.mealsDone.add(e.fills);
+        if (e.fills != null) {
+            ds.mealsDone.add(e.fills);
+            ds.lastMealEnd = e.end;
+        }
         if (e.dwell >= 240) {
             for (Meal m : Meal.values()) {
                 if (e.start <= m.mustFrom + 30 && e.end >= m.latestStart) ds.mealsDone.add(m);

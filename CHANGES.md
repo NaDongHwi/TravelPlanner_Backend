@@ -22,7 +22,7 @@
 | 테이블 | 추가 컬럼 |
 |---|---|
 | place | opening_periods, address, phone, rating, user_rating_count |
-| plan | cities, companion, transportation, preferred_start_time, preferred_end_time, excluded_themes, fixed_schedules_json, language |
+| plan | cities, companion, transportation, preferred_start_time, preferred_end_time, excluded_themes, fixed_schedules_json, language, meal_count, exclude_cafe |
 | itinerary | end_time, custom_title |
 | accommodation | place_id |
 
@@ -144,13 +144,41 @@
 | 이동이 긴 날인데 `warnings` 가 비어 있음 | 하루 이동이 240분 이상이면 `warnings` 에 표시 |
 | 날씨 API | One Call API 4.0 일별 예보(`/data/4.0/onecall/timeline/1day`)를 먼저 쓰고, 실패하면 기존 5일 예보로 대체. 서버 로그에 `[날씨]` 로 어느 쪽을 썼는지 남김 |
 
+### 4-7. 하루 식사 횟수 · 카페 추천 제외 (프론트 입력 추가분)
+
+요청(`PlanRequest`)에 두 필드를 추가했습니다. 둘 다 보내지 않으면 이전과 똑같이 동작합니다.
+
+| 필드 | 타입 | 의미 |
+|---|---|---|
+| `mealCount` | 숫자 | 하루 식사 추천 횟수. 맛집 테마가 있으면 1~5, 없으면 1~3. 범위를 벗어나면 400. 기본 2 |
+| `excludeCafe` | true/false | 카페 추천 받지 않기. 카페 테마를 골랐으면 무시하고 카페를 넣음 |
+
+프론트가 다른 이름으로 보내고 있어도 다음 이름은 그대로 받습니다: `mealsPerDay`, `mealCountPerDay`, `foodCount`, `restaurantCount` / `noCafe`, `skipCafe`, `excludeCafes`, `cafeExcluded`.
+그 밖의 이름이면 `PlanRequest` 의 `@JsonAlias` 에 추가하세요.
+
+횟수별 구성:
+
+| 횟수 | 구성 |
+|---|---|
+| 1 | 저녁 (저녁을 먹을 수 없는 날만 점심) |
+| 2 | 점심 · 저녁 |
+| 3 | 아침 · 점심 · 저녁 |
+| 4 | 아침 · 점심 · 오후 간식 · 저녁 |
+| 5 | 아침 · 점심 · 오후 간식 · 저녁 · 야식 |
+
+- 아침(08:00~10:00)은 일찍 여는 식당이나 카페로 채우고, 없으면 "아침 식사 (주변 자유 식사)" 60분.
+- 간식(14:30~16:30, 45분)과 야식(20:30~21:30, 60분)은 그 시간에 갈 식당이 없으면 건너뛰고 `warnings` 로 알립니다.
+- 야식은 하루 종료 시간이 21:30 이후일 때만 들어갑니다. 안 들어가면 `warnings` 에 이유가 나옵니다.
+- 식사 사이는 최소 90분(`MIN_MEAL_GAP_MIN`).
+- 두 값은 `plan` 테이블에 저장되어 재탐색 때 그대로 복원됩니다 (컬럼 `meal_count`, `exclude_cafe` 는 `ddl-auto=update` 로 자동 추가).
+
 ## 5. 엔진 규칙 요약 (`PlanService`)
 
 조정하고 싶은 값은 클래스 맨 위 상수에 모여 있습니다.
 
 - 1일차: 착륙 + 90분부터 이동 가능. 마지막 날: 출국 120분 전까지 공항 도착.
-- 식사: 점심 11:00~14:30, 저녁 17:00~20:30 사이에 식당 1곳씩. 식사 시간에 갈 식당이 없으면 "자유 식사" 60분.
-- 하루 한도: 카페 1곳(카페 테마 2곳), 쇼핑 1곳(쇼핑 테마 3곳), 테마파크 1곳. 같은 체인은 여행 중 한 번.
+- 식사: 기본은 점심 11:00~14:30, 저녁 17:00~20:30 사이에 식당 1곳씩(`mealCount` 로 1~5회 조절, 4-7 참고). 식사 시간에 갈 식당이 없으면 "자유 식사" 60분.
+- 하루 한도: 카페 1곳(카페 테마 2곳, `excludeCafe` 면 0곳), 쇼핑 1곳(쇼핑 테마 3곳), 테마파크 1곳. 같은 체인은 여행 중 한 번.
 - 야경 테마를 고르면 야경 명소는 해 진 뒤(월별 17:00~18:30)에만 배치.
 - 여러 도시: 도시별 일수를 균등 배분하고, 입·출국일은 공항에서 가까운 도시에 배정.
 - 영업시간 정보가 없으면 유형별 기본값(식당 11~22시, 실내 관광지 9~18시 등)을 씁니다.
@@ -163,7 +191,7 @@
 
 - 실제 컴파일: 이 PC 의 Gradle 캐시에 있는 라이브러리(Spring Boot 4.1.0, Spring 7.0.8, Security 7.1.0, Hibernate 7.4.1, Lombok 1.18.46 등)로
   `src/main/java` 76개 파일 전체가 오류 없이 컴파일됩니다. (JDK 21 로 컴파일했습니다. 프로젝트 설정은 25 입니다.)
-- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 42개 통과 (영업시간 해석 9, 엔진 시나리오 20, 보조 로직 13)
+- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 48개 통과 (영업시간 해석 9, 엔진 시나리오 26, 보조 로직 13)
 - 실제 jjwt 로 토큰 발급·관리자 권한 판정 동작 확인
 - 인메모리 저장소와 가짜 외부 API 로 생성 → 저장 → 재탐색 → 삭제 흐름 실행
 - 실제로 문제가 됐던 시즈오카 조건을 테스트 데이터로 옮겨 회귀 테스트 추가 (호텔·역·슈퍼 제외, 50km 제한, 일몰, 숙소 근처 저녁)

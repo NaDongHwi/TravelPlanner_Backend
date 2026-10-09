@@ -278,6 +278,115 @@ class PlanServiceTest {
 
     // ------------------------------------------------------------------ 공통 불변식
 
+    // ------------------------------------------------------------------ 하루 식사 횟수 · 카페 제외
+
+    /** 그날 식사로 잡힌 항목 수: 식당·이자카야 방문 + "자유 식사" 자리 */
+    private static int mealsOn(DayPlan day) {
+        int n = 0;
+        for (SimulatedItinerary i : day.getItems()) {
+            if (i.getType() == Type.MEAL) n++;
+            if (i.getType() == Type.VISIT) {
+                com.travel.planner.util.PlaceKind kind = com.travel.planner.util.PlaceKind.of(i.getPlace());
+                if (kind == com.travel.planner.util.PlaceKind.RESTAURANT || kind == com.travel.planner.util.PlaceKind.BAR) n++;
+            }
+        }
+        return n;
+    }
+
+    private static int cafesOn(DayPlan day) {
+        return (int) visits(day).stream()
+                .filter(v -> com.travel.planner.util.PlaceKind.of(v.getPlace()) == com.travel.planner.util.PlaceKind.CAFE).count();
+    }
+
+    @Test
+    void mealCountOneGivesASingleDinner() {
+        TripInput in = osakaTrip(3, "오전", "오후", "문화", "자연");
+        in.request.setMealCount(1);
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        for (DayPlan day : plan.getDays()) assertTrue(mealsOn(day) <= 1, "Day " + day.getDayNumber() + " 식사 " + mealsOn(day) + "회\n" + describe(plan));
+        // 종일 일정인 2일차는 저녁 한 끼
+        DayPlan full = plan.getDays().get(1);
+        assertEquals(1, mealsOn(full), describe(plan));
+        SimulatedItinerary dinner = full.getItems().stream().filter(i -> i.getType() == Type.MEAL || (i.getType() == Type.VISIT
+                && com.travel.planner.util.PlaceKind.of(i.getPlace()) == com.travel.planner.util.PlaceKind.RESTAURANT)).findFirst().orElseThrow();
+        assertTrue(dinner.getStartMin() >= 17 * 60, "저녁 시간대가 아님: " + dinner.getTime());
+    }
+
+    @Test
+    void defaultMealCountIsLunchAndDinner() {
+        TripInput base = osakaTrip(3, "오전", "오후", "문화", "자연");
+        TripInput two = osakaTrip(3, "오전", "오후", "문화", "자연");
+        two.request.setMealCount(2);
+        assertEquals(describe(planService.planTrip(base)), describe(planService.planTrip(two)), "횟수를 보내지 않으면 2회와 같아야 한다");
+        assertEquals(2, mealsOn(planService.planTrip(base).getDays().get(1)));
+    }
+
+    @Test
+    void mealCountThreeAddsBreakfast() {
+        TripInput in = osakaTrip(3, "오전", "오후", "문화", "자연");
+        in.request.setMealCount(3);
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        DayPlan full = plan.getDays().get(1);
+        // 아침은 일찍 여는 카페나 식당, 없으면 "아침 식사" 자리로 들어간다 (09:00 출발 → 10:00 전에 시작)
+        SimulatedItinerary first = full.getItems().get(1);
+        boolean breakfast = first.getStartMin() < 10 * 60 && (first.getType() == Type.MEAL
+                || com.travel.planner.util.PlaceKind.of(first.getPlace()).isFood());
+        assertTrue(breakfast, "2일차 첫 일정이 아침 식사가 아님\n" + describe(plan));
+        assertTrue(mealsOn(full) + cafesOn(full) >= 3, describe(plan));
+    }
+
+    @Test
+    void mealCountFiveForFoodLovers() {
+        TripInput in = osakaTrip(3, "오전", "오후", "맛집", "사진");
+        in.request.setMealCount(5);
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        DayPlan full = plan.getDays().get(1);
+        assertTrue(mealsOn(full) >= 4, "2일차 식사 " + mealsOn(full) + "회 (아침은 카페일 수 있음)\n" + describe(plan));
+
+        // 식사끼리는 최소 90분 간격
+        for (DayPlan day : plan.getDays()) {
+            int lastEnd = -1000;
+            for (SimulatedItinerary i : day.getItems()) {
+                boolean meal = i.getType() == Type.MEAL || (i.getType() == Type.VISIT && (
+                        com.travel.planner.util.PlaceKind.of(i.getPlace()) == com.travel.planner.util.PlaceKind.RESTAURANT
+                                || com.travel.planner.util.PlaceKind.of(i.getPlace()) == com.travel.planner.util.PlaceKind.BAR));
+                if (!meal) continue;
+                assertTrue(i.getStartMin() - lastEnd >= PlanService.MIN_MEAL_GAP_MIN, "Day " + day.getDayNumber() + " " + i.getDisplayName() + " " + i.getTime() + " 앞 식사와 너무 붙음");
+                lastEnd = i.getEndMin();
+            }
+        }
+    }
+
+    @Test
+    void mealCountAboveLimitIsClampedWithoutFoodTheme() {
+        TripInput in = osakaTrip(3, "오전", "오후", "문화", "자연");
+        in.request.setMealCount(5);   // 맛집 테마가 없으면 3회까지만
+        assertEquals(3, PlanService.maxMealCount(in.request));
+        assertEquals(3, PlanService.mealCount(in.request));
+        in.request.setThemes(new ArrayList<>(List.of("맛집")));
+        assertEquals(5, PlanService.maxMealCount(in.request));
+    }
+
+    @Test
+    void excludeCafeRemovesCafesUnlessCafeThemeIsChosen() {
+        TripInput in = osakaTrip(3, "오전", "오후", "문화", "자연");
+        in.request.setExcludeCafe(true);
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+        for (DayPlan day : plan.getDays()) assertEquals(0, cafesOn(day), "Day " + day.getDayNumber() + " 에 카페가 들어감");
+
+        // 카페 테마를 골랐으면 체크박스 값과 상관없이 카페가 들어간다 (종일 일정인 날마다 1곳 이상)
+        TripInput cafe = osakaTrip(3, "오전", "오후", "카페", "자연");
+        cafe.request.setExcludeCafe(true);
+        TripPlan cafePlan = planService.planTrip(cafe);
+        checkInvariants(cafePlan, cafe);
+        assertTrue(cafesOn(cafePlan.getDays().get(1)) >= 1, describe(cafePlan));
+        assertTrue(cafePlan.getThemeCounts().get("카페") >= 2, cafePlan.getThemeCounts().toString());
+    }
+
     // ------------------------------------------------------------------ 실제 보고된 시즈오카 일정의 문제들
 
     @Test

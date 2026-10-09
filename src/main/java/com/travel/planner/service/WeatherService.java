@@ -40,17 +40,86 @@ public class WeatherService {
         }
     }
 
+    /** One Call 4.0 일별 예보를 일정 점수에 반영하는 최대 범위(오늘부터). 그보다 먼 날짜는 통계 기반이라 쓰지 않는다. */
+    private static final int ONE_CALL_HORIZON_DAYS = 16;
+    private static final int ONE_CALL_MAX_RECORDS = 10;      // 4.0 타임라인은 한 번에 최대 10건
+    private static final double WET_POP_THRESHOLD = 0.5;
+
     /**
-     * 여행 날짜별 악천후 여부 (true = 낮 시간대에 비/눈 예보가 많음).
+     * 여행 날짜별 악천후 여부 (true = 그날 비/눈 예보).
      *
      * 일정 점수에는 "요청한 순간의 오늘 날씨"가 아니라 "방문하는 날의 예보"를 써야 한다.
-     * OpenWeather 무료 예보는 5일치(3시간 간격)라서 그 범위 밖의 날짜는 결과에 넣지 않고,
-     * 엔진은 예보가 없는 날을 날씨 가감 없이 계획한다.
+     * 1순위: One Call API 4.0 일별 타임라인(오늘부터 16일까지 사용).
+     * 2순위: 4.0 호출이 실패하면 기존 5일/3시간 예보(2.5)로 대신한다.
+     * 예보가 없는 날짜는 결과에 넣지 않고, 엔진은 그런 날을 날씨 가감 없이 계획한다.
      */
     public Map<LocalDate, Boolean> getBadWeatherByDate(double lat, double lon, LocalDate startDate, LocalDate endDate) {
+        LocalDate today = LocalDate.now(JST);
+        if (startDate == null || endDate == null || endDate.isBefore(today)) return new HashMap<>();
+
+        try {
+            Map<LocalDate, Boolean> daily = fetchOneCallDaily(lat, lon, startDate, endDate, today);
+            System.out.println("[날씨] One Call 4.0 일별 예보 " + daily.size() + "일치 반영");
+            return daily;
+        } catch (Exception e) {
+            System.err.println("[날씨] One Call 4.0 호출 실패 → 5일 예보(2.5)로 대체: " + e.getMessage());
+        }
+        return fetchFiveDayForecast(lat, lon, startDate, endDate, today);
+    }
+
+    private static final java.time.ZoneId JST = java.time.ZoneId.of("Asia/Tokyo");
+
+    /** One Call 4.0: /onecall/timeline/1day — 하루 1건, 한 번에 최대 10건이라 필요한 만큼 나눠 부른다. */
+    private Map<LocalDate, Boolean> fetchOneCallDaily(double lat, double lon, LocalDate startDate, LocalDate endDate,
+                                                      LocalDate today) throws Exception {
         Map<LocalDate, Boolean> result = new HashMap<>();
-        LocalDate today = LocalDate.now();
-        if (startDate.isAfter(today.plusDays(5)) || endDate.isBefore(today)) return result;
+        LocalDate from = startDate.isBefore(today) ? today : startDate;
+        LocalDate horizon = today.plusDays(ONE_CALL_HORIZON_DAYS);
+        LocalDate to = endDate.isAfter(horizon) ? horizon : endDate;
+        if (from.isAfter(to)) return result;
+
+        String url = "https://api.openweathermap.org/data/4.0/onecall/timeline/1day"
+                + "?lat={lat}&lon={lon}&start={start}&cnt={cnt}&units=metric&appid={key}";
+
+        LocalDate cursor = from;
+        for (int call = 0; call < 3 && !cursor.isAfter(to); call++) {
+            int cnt = (int) Math.min(ONE_CALL_MAX_RECORDS, java.time.temporal.ChronoUnit.DAYS.between(cursor, to) + 1);
+            long start = cursor.atStartOfDay(JST).toEpochSecond();
+            String response = restTemplate.getForObject(url, String.class, lat, lon, start, cnt, weatherApiKey);
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode data = root.path("data");
+            if (!data.isArray()) throw new IllegalStateException("응답에 data 배열이 없습니다");
+            long offset = root.path("timezone_offset").asLong(9 * 3600L);
+
+            LocalDate last = null;
+            for (JsonNode day : data) {
+                if (!day.hasNonNull("dt")) continue;
+                LocalDate date = java.time.LocalDateTime
+                        .ofEpochSecond(day.path("dt").asLong() + offset, 0, java.time.ZoneOffset.UTC).toLocalDate();
+                if (last == null || date.isAfter(last)) last = date;
+                if (date.isBefore(from) || date.isAfter(to)) continue;
+                result.put(date, isWetDay(day));
+            }
+            if (last == null || last.isBefore(cursor)) break;      // 더 받을 것이 없다
+            cursor = last.plusDays(1);
+        }
+        return result;
+    }
+
+    /** 일별 요약이 비/눈/뇌우이고 강수확률이 절반 이상(강수확률이 없으면 요약만으로 판단). */
+    static boolean isWetDay(JsonNode day) {
+        String main = day.path("weather").path(0).path("main").asText("");
+        boolean wetMain = main.equals("Rain") || main.equals("Snow") || main.equals("Thunderstorm") || main.equals("Drizzle");
+        if (!wetMain) return false;
+        JsonNode pop = day.path("pop");
+        return !pop.isNumber() || pop.asDouble() >= WET_POP_THRESHOLD;
+    }
+
+    /** 기존 방식: 5일/3시간 예보에서 일본 시각 낮(09~21시) 슬롯의 절반 이상이 비/눈이면 악천후. */
+    private Map<LocalDate, Boolean> fetchFiveDayForecast(double lat, double lon, LocalDate startDate, LocalDate endDate,
+                                                         LocalDate today) {
+        Map<LocalDate, Boolean> result = new HashMap<>();
+        if (startDate.isAfter(today.plusDays(5))) return result;
 
         try {
             String url = "https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={key}&lang=kr&units=metric";
@@ -61,7 +130,6 @@ public class WeatherService {
             for (JsonNode node : list) {
                 String dtTxt = node.path("dt_txt").asText();          // "2026-07-02 12:00:00" (UTC)
                 if (dtTxt.length() < 13) continue;
-                // 일본 시각(UTC+9)으로 옮겨 낮(09~21시) 슬롯만 센다
                 java.time.LocalDateTime utc = java.time.LocalDateTime.parse(dtTxt.replace(' ', 'T'));
                 java.time.LocalDateTime jst = utc.plusHours(9);
                 if (jst.getHour() < 9 || jst.getHour() > 21) continue;
@@ -79,7 +147,7 @@ public class WeatherService {
                 if (c[0] >= 2) result.put(e.getKey(), c[1] * 2 >= c[0]);   // 낮 슬롯의 절반 이상이 비/눈
             }
         } catch (Exception e) {
-            System.err.println("오픈웨더 예보 호출 실패(날씨 가감 없이 진행): " + e.getMessage());
+            System.err.println("[날씨] 5일 예보 호출 실패(날씨 가감 없이 진행): " + e.getMessage());
         }
         return result;
     }

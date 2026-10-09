@@ -123,7 +123,8 @@ public final class ThemeVocabulary {
         if (("관광지".equals(category) || category.isEmpty()) && name.matches(".*[가-힣]성($|\\s.*|\\(.*)")) out.add("문화");
 
         if ("식음".equals(category)) {
-            out.add(PlaceKind.of(p) == PlaceKind.CAFE ? "카페" : "맛집");
+            PlaceKind kind = PlaceKind.of(p);
+            out.add(kind == PlaceKind.CAFE ? "카페" : kind == PlaceKind.SHOPPING ? "쇼핑" : "맛집");
         } else if ("쇼핑".equals(category)) {
             out.add("쇼핑");
         } else if ("테마파크".equals(category)) {

@@ -68,6 +68,12 @@ public class PlanService {
     static final double SEED_DISTANCE_WEIGHT = 6.0;
     static final double CITY_MISMATCH_PENALTY = 80.0;
     static final double MIN_NET_UTILITY = -60.0;
+    /** 도시 중심에서 이 거리를 넘는 장소는 후보에서 제외 */
+    static final double MAX_DISTANCE_FROM_CENTER_KM = 50.0;
+    /** 이 거리 안의 장소는 조건 없이 그날의 중심이 될 수 있다. 더 먼 곳은 주변에 갈 곳이 충분할 때만 */
+    static final double NEAR_SEED_KM = 25.0;
+    /** 하루 이동 시간이 이 값을 넘으면 warnings 로 알린다 */
+    static final int LONG_TRAVEL_DAY_MIN = 240;
 
     /** 식사 시간대. earliest~giveUp 사이에 식당 방문을 시작할 수 있고, mustFrom 이후엔 식사가 최우선이다. */
     enum Meal {
@@ -361,9 +367,9 @@ public class PlanService {
         List<String> themes = ThemeVocabulary.normalizeAll(request.getThemes());
         boolean isTight = themes.contains("액티비티") || themes.contains("쇼핑");
         boolean isRelaxed = themes.contains("힐링");
-        if (isRelaxed || isFamily(request)) return 30;
+        if (isRelaxed || isFamily(request)) return 20;
         if (isTight) return 10;
-        return 20;
+        return 15;
     }
 
     private static boolean isFamily(PlanRequest request) {
@@ -396,7 +402,7 @@ public class PlanService {
                 time = clamp(hasRecommended ? recommended : 90, 30, 180);
                 break;
             default:
-                time = clamp(hasRecommended ? recommended : 90, 20, 300);
+                time = clamp(hasRecommended ? recommended : defaultAttractionDwell(p), 20, 300);
         }
 
         List<String> themes = ThemeVocabulary.normalizeAll(request.getThemes());
@@ -404,6 +410,18 @@ public class PlanService {
             time = (int) (time * 1.2);
         }
         return TimeUtil.roundUpTo5(time);
+    }
+
+    /** 체류 시간 정보가 없는 관광지의 기본값. 동네 공원·광장에 90분씩 잡히지 않도록 이름으로 나눈다. */
+    private static int defaultAttractionDwell(Place p) {
+        String name = p.getName() == null ? "" : p.getName().toLowerCase();
+        for (String k : new String[]{"공원", "park", "정원", "garden", "광장", "거리", "신사", "shrine", "전망대"}) {
+            if (name.contains(k)) return 50;
+        }
+        for (String k : new String[]{"온천", "温泉", "스파", "박물관", "미술관", "museum", "수족관", "동물원"}) {
+            if (name.contains(k)) return 90;
+        }
+        return 70;
     }
 
     private static int clamp(int v, int min, int max) {
@@ -423,6 +441,9 @@ public class PlanService {
         boolean explicitThemes;
         List<String> matched = new ArrayList<>();
         double baseScore;
+        double distFromCenter;
+        /** 도심에서 멀고(25km 초과) 주변 5km 안에 함께 볼 곳이 3곳 미만인 외딴 장소 */
+        boolean remoteLone;
         String brandKey;
         int dwell;
         final Map<LocalDate, List<int[]>> intervalCache = new HashMap<>();
@@ -442,6 +463,9 @@ public class PlanService {
         boolean cafeLover;
         boolean shoppingLover;
         boolean nightViewLover;
+        /** 외딴 장소 한 곳을 중심으로 삼은 날 수 (요청 테마를 시내에서 채울 수 없을 때만, 여행당 제한) */
+        int remoteDaysUsed;
+        int maxRemoteDays;
     }
 
     /** 도시별 중심 좌표(그 도시 장소들의 위·경도 중앙값). 이전에는 places.get(0) 을 기준점으로 써서 엉뚱했다. */
@@ -472,7 +496,10 @@ public class PlanService {
         if ("숙소".equals(category) || "교통".equals(category) || isPseudoCategory(category)) return false;
         if (p.getPlaceId().startsWith("DUMMY_") || p.getPlaceId().startsWith(AirportDirectory.PLACE_ID_PREFIX)) return false;
         String name = p.getName();
-        return !name.contains("공항") && !name.toLowerCase().contains("airport");
+        if (name.contains("공항") || name.toLowerCase().contains("airport")) return false;
+        // 분류가 비어 있거나 관광지로 잘못 들어간 호텔·역이 "방문지"로 뽑히지 않게 이름으로 한 번 더 거른다.
+        boolean uncertainCategory = category == null || category.isBlank() || "관광지".equals(category);
+        return !(uncertainCategory && (PlaceKind.looksLikeLodging(name) || PlaceKind.looksLikeStation(name)));
     }
 
     /** 장소가 요청 테마에 해당하는가. DB 테마가 비어 있으면 카테고리·이름으로 추정한 값을 쓴다. */
@@ -529,6 +556,9 @@ public class PlanService {
             double[] center = st.centers.get(p.getCity());
             double distFromCenter = center == null ? 0.0 : DistanceUtil.calculateDistance(center[0], center[1], c.lat, c.lng);
             if (req.isExcludeSuburbs() && distFromCenter > 20.0) continue;
+            // "근교"라도 도심에서 직선 50km 를 넘는 곳은 당일로 다녀오기 어렵다 (다른 현의 온천 등이 섞여 들어오는 것 방지)
+            if (distFromCenter > MAX_DISTANCE_FROM_CENTER_KM) continue;
+            c.distFromCenter = distFromCenter;
 
             for (String t : st.themes) {
                 if (c.themes.contains(t)) c.matched.add(t);
@@ -540,6 +570,9 @@ public class PlanService {
         }
         // HashMap 순회 순서에 따라 결과가 달라지지 않도록 고정
         st.pool.sort(Comparator.comparing(c -> c.place.getPlaceId()));
+        for (Cand c : st.pool) c.remoteLone = !seedEligible(c, st);
+        int days = totalDays(req);
+        st.maxRemoteDays = days < 3 ? 0 : (days < 7 ? 1 : 2);
         return st;
     }
 
@@ -739,6 +772,8 @@ public class PlanService {
         Cand seed;
         /** 고정 일정 등으로 그날의 중심 권역을 벗어나면 true: 이후에는 현재 위치 기준으로만 고른다 */
         boolean leftSeedArea;
+        /** 직전 항목이 방문이면 그 뒤에 더해 둔 여유 시간(분). 숙소로 돌아갈 때는 이 여유를 붙이지 않는다. */
+        int bufferPending;
         /** 출발 앵커를 떠나는 시각 (첫 방문지가 늦게 열면 숙소에서 늦게 나온다) */
         int startDeparture;
     }
@@ -769,6 +804,8 @@ public class PlanService {
         int visitLimit = visitLimit(ctx);
         initMeals(ctx, ds, visitLimit);
         ds.seed = visitLimit - ctx.startMin >= 60 ? chooseSeed(ctx, st) : null;
+        boolean remoteSeed = ds.seed != null && !seedEligible(ds.seed, st);
+        if (remoteSeed) st.remoteDaysUsed++;
 
         for (int guard = 0; guard < 80; guard++) {
             for (Meal m : Meal.values()) {
@@ -792,6 +829,10 @@ public class PlanService {
 
             // (c) 식사 시간인데 갈 수 있는 식당이 없으면 자유 식사 60분
             if (mustEat) {
+                if (pending == Meal.DINNER && nextBlock == null && isLodging(ctx.endAnchor) && !hasRestaurantNearby(ds, st)) {
+                    dinnerNearLodging(ctx, ds);
+                    continue;
+                }
                 if (addMealPlaceholder(ctx, ds, pending, nextBlock)) continue;
                 if (nextBlock != null) {
                     jumpToBlock(ctx, ds, nextBlock);
@@ -805,6 +846,12 @@ public class PlanService {
             Eval deferred = pickBest(ctx, ds, st, true);
             if (deferred != null) {
                 commitVisit(ctx, ds, st, deferred);
+                continue;
+            }
+
+            // 그날의 중심 권역에서 더 갈 곳이 없으면 권역 제한을 풀고 다시 고른다 (오후가 통째로 비는 것 방지)
+            if (ds.seed != null && !ds.leftSeedArea && st.visited.contains(ds.seed.place.getPlaceId())) {
+                ds.leftSeedArea = true;
                 continue;
             }
 
@@ -827,6 +874,12 @@ public class PlanService {
             break;
         }
 
+        if (remoteSeed && st.visited.contains(ds.seed.place.getPlaceId())) {
+            String theme = ds.seed.matched.stream()
+                    .min(Comparator.comparingInt(t -> st.themeCounts.getOrDefault(t, 0))).orElse("요청");
+            warnings.add(String.format("Day %d: 시내에 '%s' 테마 장소가 부족해 도심에서 약 %dkm 떨어진 '%s'을(를) 넣었습니다. 이동 시간이 깁니다.",
+                    ctx.dayNumber, theme, Math.round(ds.seed.distFromCenter), ds.seed.place.getName()));
+        }
         finishDay(ctx, ds, dayPlan, warnings);
         return dayPlan;
     }
@@ -910,6 +963,7 @@ public class PlanService {
                 b.hasLocation() ? b.lat : ds.locLat, b.hasLocation() ? b.lng : ds.locLng));
         b.done = true;
         ds.cur = Math.max(ds.cur, b.end);
+        ds.bufferPending = 0;
         ds.lastKind = null;
         if (b.hasLocation()) {
             ds.locLat = b.lat;
@@ -950,6 +1004,7 @@ public class PlanService {
         if (to - from < 30) return;
         ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.FREE, null, "자유 시간 (주변 산책·휴식)",
                 from, to, 0, ds.locLat, ds.locLng));
+        ds.bufferPending = 0;
         ds.lastKind = null;
     }
 
@@ -966,8 +1021,40 @@ public class PlanService {
                 start, end, 0, ds.locLat, ds.locLng));
         ds.mealsDone.add(meal);
         ds.cur = end;
+        ds.bufferPending = 0;
         ds.lastKind = PlaceKind.RESTAURANT;
         return true;
+    }
+
+    /** 현재 위치에서 걸어갈 만한 거리(약 1.2km)에 식당이 하나라도 있는가 */
+    private boolean hasRestaurantNearby(DayState ds, TripState st) {
+        if (ds.locLat == null || ds.locLng == null) return true;
+        for (Cand c : st.pool) {
+            if (c.kind != PlaceKind.RESTAURANT && c.kind != PlaceKind.BAR) continue;
+            if (Math.abs(c.lat - ds.locLat) > 0.02 || Math.abs(c.lng - ds.locLng) > 0.02) continue;
+            if (DistanceUtil.calculateDistance(ds.locLat, ds.locLng, c.lat, c.lng) <= 1.2) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 저녁 시간인데 주변에 식당이 없는 외진 곳이면, 그 자리에 "자유 식사"를 넣지 않고
+     * 숙소로 돌아가 숙소 근처에서 저녁을 먹는다. 그 뒤로는 숙소 주변만 본다.
+     */
+    private void dinnerNearLodging(DayContext ctx, DayState ds) {
+        Place lodging = ctx.endAnchor;
+        int back = travelFromCurrent(ctx, ds, lodging.getLatitude(), lodging.getLongitude());
+        int start = ds.cur - ds.bufferPending + back;
+        int end = start + MEAL_PLACEHOLDER_MIN;
+        ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.MEAL, null, "저녁 식사 (숙소 근처)",
+                start, end, back, lodging.getLatitude(), lodging.getLongitude()));
+        ds.mealsDone.add(Meal.DINNER);
+        ds.cur = end;
+        ds.bufferPending = 0;
+        ds.lastKind = PlaceKind.RESTAURANT;
+        ds.locLat = lodging.getLatitude();
+        ds.locLng = lodging.getLongitude();
+        ds.leftSeedArea = true;      // 그날의 중심에서 벗어났으므로 이후 후보는 숙소 기준으로만 평가한다
     }
 
     private Eval pickBest(DayContext ctx, DayState ds, TripState st, boolean deferred) {
@@ -1005,6 +1092,18 @@ public class PlanService {
             List<int[]> iv = OpeningHours.intervalsOn(c.place, d);
             if (iv == null) iv = defaultIntervals(c, d);
 
+            // 야외 자연 명소는 "24시간 영업"이라도 해가 있을 때만 의미가 있다 (저녁 6시에 차밭·호수 전망대 방지)
+            if (isDaylightOnly(c)) {
+                int sunset = nightViewFrom(d);
+                List<int[]> daylight = new ArrayList<>();
+                for (int[] range : iv) {
+                    boolean openAllDay = range[1] - range[0] >= 20 * 60;
+                    int end = openAllDay ? Math.min(range[1], sunset) : range[1];
+                    if (end > range[0]) daylight.add(new int[]{range[0], end});
+                }
+                iv = daylight;
+            }
+
             if (st.nightViewLover && c.kind == PlaceKind.ATTRACTION && c.themes.contains("야경")) {
                 int from = nightViewFrom(d);
                 List<int[]> night = new ArrayList<>();
@@ -1015,6 +1114,11 @@ public class PlanService {
             }
             return iv;
         });
+    }
+
+    private static boolean isDaylightOnly(Cand c) {
+        return c.kind == PlaceKind.ATTRACTION && !"실내".equals(c.place.getPlaceType())
+                && c.themes.contains("자연") && !c.themes.contains("야경") && !c.themes.contains("온천");
     }
 
     private static List<int[]> defaultIntervals(Cand c, LocalDate date) {
@@ -1030,7 +1134,7 @@ public class PlanService {
                 if ("실내".equals(c.place.getPlaceType())) {
                     iv.add(new int[]{9 * 60, 18 * 60});
                 } else if (c.themes.contains("자연") && !c.themes.contains("야경")) {
-                    iv.add(new int[]{7 * 60, nightViewFrom(date) + 30});   // 공원·산책로는 해 지기 전까지만
+                    iv.add(new int[]{7 * 60, nightViewFrom(date)});   // 공원·산책로는 해 지기 전까지만
                 } else {
                     iv.add(new int[]{7 * 60, 22 * 60});
                 }
@@ -1071,6 +1175,11 @@ public class PlanService {
                 break;
             default:
                 break;
+        }
+        // 외딴 장소는 그날의 중심이 바로 그곳(또는 그 5km 안)일 때만 간다
+        if (c.remoteLone && ds.seed != c) {
+            if (ds.seed == null || ds.leftSeedArea
+                    || DistanceUtil.calculateDistance(c.lat, c.lng, ds.seed.lat, ds.seed.lng) > 5.0) return null;
         }
         // 같은 체인의 다른 지점은 여행 중 한 번만 (돈키호테 4개 지점 같은 일정 방지)
         if (c.brandKey != null && st.visitedBrands.contains(c.brandKey)) return null;
@@ -1228,6 +1337,7 @@ public class PlanService {
 
         ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.VISIT, c.place, null, e.start, e.end, e.travel, c.lat, c.lng));
         ds.cur = e.end + st.buffer;
+        ds.bufferPending = st.buffer;
         ds.locLat = c.lat;
         ds.locLng = c.lng;
         ds.lastKind = c.kind;
@@ -1291,22 +1401,29 @@ public class PlanService {
 
         Cand fallback = null;
         double fallbackScore = Double.NEGATIVE_INFINITY;
+        boolean remoteAllowed = st.remoteDaysUsed < st.maxRemoteDays && ctx.hardDeadlineMin == null
+                && isLodging(ctx.startAnchor) && isLodging(ctx.endAnchor);
         for (String theme : order) {
-            List<Cand> options = st.pool.stream()
-                    .filter(c -> !st.visited.contains(c.place.getPlaceId()))
-                    .filter(c -> theme == null ? !c.kind.isFood() : c.matched.contains(theme))
-                    .filter(c -> roughlyFeasible(c, ctx, st))
-                    .sorted(Comparator.comparingDouble((Cand c) -> -c.baseScore))
-                    .limit(40)
-                    .collect(Collectors.toList());
-
             Cand best = null;
             double bestScore = Double.NEGATIVE_INFINITY;
-            for (Cand c : options) {
-                double s = seedScore(c, ctx, st);
-                if (s > bestScore) {
-                    bestScore = s;
-                    best = c;
+            // 1차: 도심·근교의 자격 있는 곳. 2차: 그 테마를 시내에서 더 채울 수 없을 때만 외딴 곳 하나를 허용.
+            for (int pass = 0; pass < 2 && best == null; pass++) {
+                if (pass == 1 && (theme == null || !remoteAllowed)) break;
+                final boolean remotePass = pass == 1;
+                List<Cand> options = st.pool.stream()
+                        .filter(c -> !st.visited.contains(c.place.getPlaceId()))
+                        .filter(c -> theme == null ? !c.kind.isFood() : c.matched.contains(theme))
+                        .filter(c -> remotePass ? !seedEligible(c, st) : seedEligible(c, st))
+                        .filter(c -> roughlyFeasible(c, ctx, st))
+                        .sorted(Comparator.comparingDouble((Cand c) -> -c.baseScore))
+                        .limit(40)
+                        .collect(Collectors.toList());
+                for (Cand c : options) {
+                    double sc = remotePass ? c.baseScore - 2.0 * c.distFromCenter : seedScore(c, ctx, st);
+                    if (sc > bestScore) {
+                        bestScore = sc;
+                        best = c;
+                    }
                 }
             }
             if (best == null) continue;
@@ -1318,6 +1435,22 @@ public class PlanService {
             }
         }
         return fallback;
+    }
+
+    /**
+     * 그날의 중심이 될 자격.
+     * 도심에서 가까운 곳은 그대로 허용하고, 먼 곳은 주변 5km 안에 함께 볼 곳이 3곳 이상 있을 때만 허용한다.
+     * (덜 채워진 테마를 찾아 점점 멀리 나가다가, 온천 한 곳 때문에 하루를 통째로 쓰는 일을 막는다)
+     */
+    private boolean seedEligible(Cand c, TripState st) {
+        if (c.distFromCenter <= NEAR_SEED_KM) return true;
+        int companions = 0;
+        for (Cand o : st.pool) {
+            if (o == c || o.kind.isFood() || st.visited.contains(o.place.getPlaceId())) continue;
+            if (Math.abs(o.lat - c.lat) > 0.06 || Math.abs(o.lng - c.lng) > 0.07) continue;
+            if (DistanceUtil.calculateDistance(c.lat, c.lng, o.lat, o.lng) <= 5.0 && ++companions >= 3) return true;
+        }
+        return false;
     }
 
     private double seedScore(Cand c, DayContext ctx, TripState st) {
@@ -1396,7 +1529,13 @@ public class PlanService {
                 && start.getPlaceId() != null && start.getPlaceId().equals(end.getPlaceId());
         if (end != null && !sameAnchorNoActivity) {
             int back = travelFromCurrent(ctx, ds, end.getLatitude(), end.getLongitude());
-            int arrival = ds.cur + back;
+            // 공항으로 갈 때는 여유 시간을 그대로 두고, 숙소로 돌아갈 때는 붙이지 않는다.
+            int arrival = ds.cur + back - (isLodging(end) ? ds.bufferPending : 0);
+            int totalTravel = back;
+            for (SimulatedItinerary item : ds.items) totalTravel += item.getTravelMinutes();
+            if (totalTravel >= LONG_TRAVEL_DAY_MIN) {
+                warnings.add(String.format("Day %d: 이동에만 약 %d분이 듭니다. 숙소와 방문지, 또는 방문지 사이가 멉니다.", ctx.dayNumber, totalTravel));
+            }
             if (ctx.hardDeadlineMin != null && arrival > ctx.hardDeadlineMin && !(ds.items.isEmpty() && ctx.arrivalFixed)) {
                 warnings.add(String.format("Day %d: 공항 도착 예상 %s 이 출국 수속 마감 %s 보다 늦습니다. 고정 일정이나 출국 시간을 확인해 주세요.",
                         ctx.dayNumber, TimeUtil.format(arrival), TimeUtil.format(ctx.hardDeadlineMin)));

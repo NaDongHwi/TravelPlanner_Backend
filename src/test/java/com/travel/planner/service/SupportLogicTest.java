@@ -105,6 +105,49 @@ class SupportLogicTest {
         assertEquals(480, new PlanService().calculateDwellTime(usj, new PlanRequest()));
     }
 
+    @Test
+    void groceriesAndTeaShopsAreNotRestaurants() {
+        assertEquals(PlaceKind.SHOPPING, PlaceKind.of(place("Valor Fujimidai Shop", "식음")));
+        assertEquals(PlaceKind.SHOPPING, PlaceKind.of(place("이온 시즈오카점", "식음")));
+        assertEquals(PlaceKind.CAFE, PlaceKind.of(place("GOOD TIMING TEA", "식음")));
+        assertEquals(PlaceKind.CAFE, PlaceKind.of(place("Blue Coffee Shop", "식음")));
+        // 이름 일부가 겹칠 뿐인 식당·주점은 그대로
+        assertEquals(PlaceKind.BAR, PlaceKind.of(place("긴자 라이온 비어홀", "식음")));
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(place("스마트 키친", "식음")));
+        assertEquals(PlaceKind.RESTAURANT, PlaceKind.of(place("Ramen Shop Ichiban", "식음")));
+        assertTrue(ThemeVocabulary.inferredThemes(place("Valor Fujimidai Shop", "식음")).contains("쇼핑"));
+    }
+
+    @Test
+    void uncategorizedLodgingAndStationsAreNotVisitCandidates() {
+        PlanService planService = new PlanService();
+        for (String name : new String[]{"Hotel Ole Inn", "누마즈 리버 사이드 호텔", "누마즈역", "Shizuoka Station", "도요코인 시즈오카"}) {
+            assertFalse(planService.isVisitCandidate(located(place(name, null))), name);
+            assertFalse(planService.isVisitCandidate(located(place(name, "관광지"))), name + " (관광지로 잘못 분류)");
+        }
+        // 이름에 '역'이 들어가도 역이 아닌 곳, 분류가 확실한 곳은 그대로 후보
+        assertTrue(planService.isVisitCandidate(located(place("난바 역사 박물관", "관광지"))));
+        assertTrue(planService.isVisitCandidate(located(place("기온 전통 보존 지역", "관광지"))));
+        assertTrue(planService.isVisitCandidate(located(place("호텔 뉴오타니 레스토랑", "식음"))));
+    }
+
+    private static Place located(Place p) {
+        p.setPlaceId("T_" + p.getName());
+        p.setLatitude(34.97);
+        p.setLongitude(138.38);
+        return p;
+    }
+
+    @Test
+    void oneCallDailySummaryDecidesWetDays() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        assertTrue(WeatherService.isWetDay(om.readTree("{\"weather\":[{\"main\":\"Rain\"}],\"pop\":0.8}")));
+        assertFalse(WeatherService.isWetDay(om.readTree("{\"weather\":[{\"main\":\"Rain\"}],\"pop\":0.2}")), "강수확률이 낮으면 맑은 날로 본다");
+        assertTrue(WeatherService.isWetDay(om.readTree("{\"weather\":[{\"main\":\"Snow\"}]}")), "강수확률이 없으면 요약만으로 판단");
+        assertFalse(WeatherService.isWetDay(om.readTree("{\"weather\":[{\"main\":\"Clouds\"}],\"pop\":0.9}")));
+        assertFalse(WeatherService.isWetDay(om.readTree("{}")));
+    }
+
     // ---------------------------------------------------------------- 고정 일정 저장/복원
 
     @Test

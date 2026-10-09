@@ -123,6 +123,10 @@ public class AdminController {
     /** 기존 장소에 비어 있는 필드만 새 응답 값으로 채운다. 바뀐 것이 있으면 true. */
     private boolean backfill(Place existing, Place fetched) {
         boolean changed = false;
+        if ((existing.getCategory() == null || existing.getCategory().isBlank()) && fetched.getCategory() != null) {
+            existing.setCategory(fetched.getCategory());   // 분류가 비어 있던 기존 장소는 구글 유형으로 채운다
+            changed = true;
+        }
         if (existing.getOpeningPeriods() == null && fetched.getOpeningPeriods() != null) {
             existing.setOpeningPeriods(fetched.getOpeningPeriods());
             if (fetched.getOpeningHours() != null) existing.setOpeningHours(fetched.getOpeningHours());

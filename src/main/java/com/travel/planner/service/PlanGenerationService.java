@@ -314,7 +314,7 @@ public class PlanGenerationService {
         place.setCity(fallbackCity);
         place.setLatitude(airport.latitude);
         place.setLongitude(airport.longitude);
-        return planPersistenceService.upsertPlace(place);
+        return saveAnchor(place, "교통");
     }
 
     // =====================================================================
@@ -341,9 +341,8 @@ public class PlanGenerationService {
                 warnings.add("숙소 '" + acc.getName() + "'의 위치를 찾지 못했습니다. 해당 기간은 숙소 출발/복귀 없이 계획했습니다.");
                 continue;
             }
-            found.setCategory("숙소");
             found.setCity(nearestCity(found, centers, mainCity));
-            Place lodging = planPersistenceService.upsertPlace(found);
+            Place lodging = saveAnchor(found, "숙소");
             entity.setPlaceId(lodging.getPlaceId());
             if (entity.getAddress() == null) entity.setAddress(lodging.getAddress());
 
@@ -376,9 +375,8 @@ public class PlanGenerationService {
             Place best = center == null ? hotels.get(0) : hotels.stream()
                     .min(Comparator.comparingDouble(h -> DistanceUtil.calculateDistance(center[0], center[1], h.getLatitude(), h.getLongitude())))
                     .orElse(hotels.get(0));
-            best.setCategory("숙소");
             best.setCity(city);
-            hotelByCity.put(city, planPersistenceService.upsertPlace(best));
+            hotelByCity.put(city, saveAnchor(best, "숙소"));
         }
 
         // 같은 호텔에 연속으로 묵는 구간을 하나의 숙박 기록으로 묶는다.
@@ -404,6 +402,21 @@ public class PlanGenerationService {
             }
             entity.setCheckOut(date.plusDays(1));
         }
+    }
+
+    /**
+     * 숙소·공항을 저장하고 분류를 확정한다.
+     * 같은 장소가 예전에 분류 없이(또는 다른 분류로) 저장돼 있으면 그 행의 분류를 바로잡는다.
+     * 분류가 비어 있으면 숙소가 방문지로 뽑히거나, 재탐색에서 출발·도착 지점으로 인식되지 않는다.
+     */
+    private Place saveAnchor(Place fetched, String category) {
+        fetched.setCategory(category);
+        Place saved = planPersistenceService.upsertPlace(fetched);
+        if (!category.equals(saved.getCategory())) {
+            saved.setCategory(category);
+            saved = placeRepository.save(saved);
+        }
+        return saved;
     }
 
     private String nearestCity(Place place, Map<String, double[]> centers, String fallback) {

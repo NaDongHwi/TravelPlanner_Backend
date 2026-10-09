@@ -9,7 +9,13 @@ public enum PlaceKind {
     ATTRACTION, RESTAURANT, CAFE, BAR, SHOPPING, THEME_PARK;
 
     private static final Pattern CAFE_NAME = Pattern.compile(
-            "카페|cafe|café|coffee|커피|珈琲|喫茶|스타벅스|starbucks|베이커리|bakery|디저트|파티스리|티룸|찻집|블루보틀|도토루|코메다");
+            "카페|cafe|café|coffee|커피|珈琲|喫茶|스타벅스|starbucks|베이커리|bakery|디저트|파티스리|티룸|찻집|\\btea\\b|블루보틀|도토루|코메다");
+    // 분류가 '식음'으로 들어가 있지만 실제로는 식당이 아닌 곳 (슈퍼마켓·편의점 등)
+    private static final Pattern GROCERY_NAME = Pattern.compile(
+            "슈퍼|(?<!스)마트(\\s|$)|supermarket|편의점|\\bvalor\\b|\\baeon\\b|(^|\\s)이온(\\s|몰|$)|세이유|\\bseiyu\\b|로손|\\blawson\\b|세븐일레븐|7-eleven|패밀리마트|familymart|돈키호테|업무슈퍼");
+    private static final Pattern LODGING_NAME = Pattern.compile(
+            "호텔|hotel|ホテル|료칸|旅館|\\binn\\b|게스트하우스|guest ?house|호스텔|hostel|민박|펜션|도요코인|toyoko|apa ");
+    private static final Pattern STATION_NAME = Pattern.compile("(?<![구지유])역$|駅$|\\bstation$");
     private static final Pattern BAR_NAME = Pattern.compile(
             "이자카야|居酒屋|술집|\\b(bar|pub|beer)\\b|펍|비어|야타이|스탠딩바|하이볼");
     private static final Pattern THEME_PARK_NAME = Pattern.compile(
@@ -26,12 +32,23 @@ public enum PlaceKind {
         if (attractionLike && THEME_PARK_NAME.matcher(name).find()) return THEME_PARK;
         if ("식음".equals(category)) {
             if (CAFE_NAME.matcher(name).find()) return CAFE;
+            if (GROCERY_NAME.matcher(name).find()) return SHOPPING;
             if (BAR_NAME.matcher(name).find()) return BAR;
             if (theme.contains("카페") && !theme.contains("맛집")) return CAFE;
             return RESTAURANT;
         }
         if ("쇼핑".equals(category)) return SHOPPING;
         return ATTRACTION;
+    }
+
+    /** 이름으로 본 숙박 시설 여부. DB 에 분류가 비어 있는 호텔이 방문지로 들어가는 것을 막는 데 쓴다. */
+    public static boolean looksLikeLodging(String name) {
+        return name != null && LODGING_NAME.matcher(name.toLowerCase()).find();
+    }
+
+    /** 이름으로 본 역 여부 ("누마즈역", "Shizuoka Station"). "역사박물관"처럼 '역'으로 끝나지 않는 이름은 해당하지 않는다. */
+    public static boolean looksLikeStation(String name) {
+        return name != null && STATION_NAME.matcher(name.trim().toLowerCase()).find();
     }
 
     public boolean isFood() {

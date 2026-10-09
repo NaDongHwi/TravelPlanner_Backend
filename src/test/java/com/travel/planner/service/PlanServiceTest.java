@@ -278,6 +278,85 @@ class PlanServiceTest {
 
     // ------------------------------------------------------------------ 공통 불변식
 
+    // ------------------------------------------------------------------ 실제 보고된 시즈오카 일정의 문제들
+
+    @Test
+    void shizuoka_hotelsStationsAndFarPlacesAreNotVisited() {
+        TripInput in = shizuokaTrip();
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+
+        double[] center = planService.cityCenters(in.candidates, in.request.getCities()).get("시즈오카");
+        int remoteVisits = 0;
+        for (DayPlan day : plan.getDays()) {
+            for (SimulatedItinerary v : visits(day)) {
+                String name = v.getPlace().getName();
+                assertFalse(name.contains("호텔") || name.contains("Hotel") || name.endsWith("역"), "숙소·역이 방문지로 들어감: " + name);
+                assertFalse("Valor Fujimidai Shop".equals(name), "슈퍼마켓이 일정에 들어감");
+                double km = com.travel.planner.util.DistanceUtil.calculateDistance(center[0], center[1], v.getLatitude(), v.getLongitude());
+                assertTrue(km <= PlanService.MAX_DISTANCE_FROM_CENTER_KM, name + " 은 도심에서 " + Math.round(km) + "km");
+                if (km > PlanService.NEAR_SEED_KM) remoteVisits++;
+            }
+        }
+        // 외딴 온천은 "시내에서 온천 테마를 더 채울 수 없을 때" 여행 전체에서 한 번만, 그리고 경고와 함께
+        assertTrue(remoteVisits <= 1, "외딴 장소 방문 " + remoteVisits + "회");
+        if (remoteVisits == 1) {
+            assertTrue(plan.getWarnings().stream().anyMatch(w -> w.contains("떨어진")), "외딴 장소를 넣었으면 알려야 한다: " + plan.getWarnings());
+        }
+        assertTrue(plan.getThemeCounts().get("온천") >= 1 && plan.getThemeCounts().get("자연") >= 3, plan.getThemeCounts().toString());
+    }
+
+    @Test
+    void shizuoka_outdoorNatureSpotsAreVisitedInDaylight() {
+        TripInput in = shizuokaTrip();
+        TripPlan plan = planService.planTrip(in);
+        int sunset = 17 * 60 + 30;   // 10월
+        int checked = 0;
+        for (DayPlan day : plan.getDays()) {
+            for (SimulatedItinerary v : visits(day)) {
+                Place p = v.getPlace();
+                boolean outdoorNature = "관광지".equals(p.getCategory()) && p.getTheme() != null && p.getTheme().contains("자연");
+                if (!outdoorNature) continue;
+                checked++;
+                assertTrue(v.getEndMin() <= sunset, "Day " + day.getDayNumber() + " " + p.getName() + " " + v.getTime() + "~" + v.getEndTime() + " (해 진 뒤)");
+            }
+        }
+        assertTrue(checked >= 4, "자연 명소 방문 수 " + checked);
+    }
+
+    @Test
+    void shizuoka_smallParksDoNotTakeTwoHours() {
+        TripInput in = shizuokaTrip();
+        Place park = TestPlaces.find(in.candidates, "도키와 공원");
+        Place onsen = TestPlaces.find(in.candidates, "아오이 온천 쿠사나기노유");
+        assertTrue(planService.calculateDwellTime(park, in.request) <= 60, "공원 체류 " + planService.calculateDwellTime(park, in.request));
+        assertTrue(planService.calculateDwellTime(onsen, in.request) >= 90);
+    }
+
+    @Test
+    void dinnerIsNotLeftInTheMiddleOfNowhere() {
+        // 식당 데이터가 전혀 없는 근교(숙소에서 7~12km)만 도는 날: 저녁은 그 자리가 아니라 숙소 근처에서 먹는다.
+        TripInput in = shizuokaTrip();
+        in.candidates.removeIf(p -> !List.of("니혼다이라 유메테라스", "구노잔 도쇼구", "미호노 마쓰바라", "니혼다이라 동물원").contains(p.getName()));
+        TripPlan plan = planService.planTrip(in);
+        checkInvariants(plan, in);
+
+        Place hotel = in.lodgingByNight.get(1);
+        int dinners = 0;
+        for (DayPlan day : plan.getDays()) {
+            for (SimulatedItinerary item : day.getItems()) {
+                if (item.getType() != Type.MEAL || !item.getDisplayName().startsWith("저녁")) continue;
+                dinners++;
+                assertTrue(hotel.getLatitude().equals(item.getLatitude()) && hotel.getLongitude().equals(item.getLongitude()),
+                        "Day " + day.getDayNumber() + " " + item.getDisplayName() + " 위치가 숙소가 아님");
+                assertTrue(item.getDisplayName().contains("숙소 근처"));
+            }
+        }
+        assertTrue(dinners >= 1, describe(plan));
+    }
+
+    // ------------------------------------------------------------------ 불변식
+
     void checkInvariants(TripPlan plan, TripInput in) {
         PlanRequest req = in.request;
         int totalDays = planService.totalDays(req);
@@ -364,6 +443,35 @@ class PlanServiceTest {
     }
 
     // ------------------------------------------------------------------ 입력 생성
+
+    /** 실제로 문제가 보고된 조건: 시즈오카 6일, 혼자, 힐링·온천·자연, 10월, 09:00~21:00 */
+    static TripInput shizuokaTrip() {
+        PlanRequest req = new PlanRequest();
+        req.setStartDate(LocalDate.of(2026, 10, 10));
+        req.setEndDate(LocalDate.of(2026, 10, 15));
+        req.setCities(new ArrayList<>(List.of("시즈오카")));
+        req.setThemes(new ArrayList<>(List.of("힐링", "온천", "자연")));
+        req.setExcludedThemes(new ArrayList<>(List.of("쇼핑", "서브컬쳐")));
+        req.setCompanion("혼자");
+        req.setTransportation("도보 및 대중교통");
+        req.setPreferredStartTime(java.time.LocalTime.of(9, 0));
+        req.setPreferredEndTime(java.time.LocalTime.of(21, 0));
+        req.setInCity("시즈오카");
+        req.setOutCity("시즈오카");
+        req.setInTime("오전");
+        req.setOutTime("저녁");
+
+        TripInput in = new TripInput();
+        in.request = req;
+        in.candidates = new ArrayList<>(TestPlaces.shizuoka());
+
+        Place airport = TestPlaces.place("AIRPORT_FSZ", "시즈오카 공항", "시즈오카", 34.7961, 138.1894, "교통", null, null);
+        in.arrivalAirport = airport;
+        in.departureAirport = airport;
+        Place hotel = TestPlaces.place("HOTEL_ASSOCIA", "Hotel Associa Shizuoka", "시즈오카", 34.9730, 138.3899, "숙소", null, null);
+        for (int night = 1; night < 6; night++) in.lodgingByNight.put(night, hotel);
+        return in;
+    }
 
     static TripInput osakaTrip(int days, String inTime, String outTime, String... themes) {
         PlanRequest req = new PlanRequest();

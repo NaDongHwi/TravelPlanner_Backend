@@ -49,10 +49,12 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         // 기존 시스템의 JWT 토큰 발급
         String token = jwtUtil.generateToken(email);
 
-        // 토큰을 쿼리스트링(?token=)이 아니라 URL 프래그먼트(#token=)로 넘긴다.
-        // 프래그먼트는 서버로 전송되지 않아 서버 접근 로그·Referer 헤더에 토큰이 남지 않는다.
-        // 프론트에서는 location.hash 에서 token 을 읽은 뒤 주소창에서 지우면 된다.
-        String targetUrl = redirectUri + "#token=" + token;
+        // 토큰을 쿼리스트링(?token=)과 URL 프래그먼트(#token=) 양쪽에 모두 실어 보낸다.
+        // - ?token= : 기존 프론트(앱의 웹뷰에서 콜백 주소를 가로채 queryParameters 로 읽는 방식)가 그대로 동작한다.
+        // - #token= : 웹 프론트라면 location.hash 에서 읽고 주소창에서 지울 수 있다.
+        // (프래그먼트만 보내도록 바꿨더니 쿼리에서 읽던 앱의 소셜 로그인이 끊겼다)
+        String separator = redirectUri.contains("?") ? "&" : "?";
+        String targetUrl = redirectUri + separator + "token=" + token + "#token=" + token;
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
 }

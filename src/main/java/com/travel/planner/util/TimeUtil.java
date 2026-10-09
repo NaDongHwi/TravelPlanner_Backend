@@ -25,6 +25,17 @@ public final class TimeUtil {
         return String.format("%02d:%02d", m / 60, m % 60);
     }
 
+    /** "HH:mm" → 분. 형식이 맞지 않으면 0. (저장된 일정 시각을 다시 읽을 때 쓴다) */
+    public static int parseClock(String hhmm) {
+        if (hhmm == null) return 0;
+        String[] parts = hhmm.trim().split(":");
+        try {
+            return Integer.parseInt(parts[0].trim()) * 60 + (parts.length > 1 ? Integer.parseInt(parts[1].trim()) : 0);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     public static int roundUpTo5(double minutes) {
         return (int) (Math.ceil(minutes / 5.0) * 5);
     }

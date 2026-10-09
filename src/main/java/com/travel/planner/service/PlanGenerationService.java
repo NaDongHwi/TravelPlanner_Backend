@@ -45,6 +45,7 @@ public class PlanGenerationService {
     private final UserRepository userRepository;
     private final GoogleMapsService googleMapsService;
     private final WeatherService weatherService;
+    private final PlaceDescriptionService placeDescriptionService;
 
     public AiRouteResponse createPlan(String email, PlanRequest request) {
         // ------------------------------------------------------------------
@@ -127,6 +128,11 @@ public class PlanGenerationService {
         // ------------------------------------------------------------------
         // Step 7. 응답 조립 + DB 저장
         // ------------------------------------------------------------------
+        // 일정에 들어간 장소 중 AI 소개가 아직 없는 곳만 지금 채운다 (DB 에 남으므로 같은 장소는 다시 묻지 않는다)
+        placeDescriptionService.fillMissing(tripPlan.getDays().stream().flatMap(d -> d.getItems().stream())
+                .filter(i -> i.getType() == PlanService.SimulatedItinerary.Type.VISIT && i.getPlace() != null)
+                .map(PlanService.SimulatedItinerary::getPlace).collect(Collectors.toList()));
+
         AiRouteResponse response = new AiRouteResponse();
         // 어떤 여행인지: 전체 요약(reason)·제목·일자별 개요. 일정 결과에서 바로 만들므로 AI 호출이 없다.
         response.setTitle(PlanSummarizer.tripTitle(request, tripPlan.getDays()));

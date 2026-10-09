@@ -68,6 +68,10 @@ public class Plan {
     @Column(length = 500)
     private String excludedThemes;
 
+    // 사용자가 "다른 곳으로 바꿔 달라"고 했던 장소들의 placeId (쉼표 구분). 같은 계획에서 다시 추천하지 않는다.
+    @Column(columnDefinition = "TEXT")
+    private String rejectedPlaceIds;
+
     @Column(columnDefinition = "TEXT")
     private String fixedSchedulesJson;  // 고정 일정 목록(JSON)
 

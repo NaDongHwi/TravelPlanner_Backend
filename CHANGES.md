@@ -22,7 +22,7 @@
 | 테이블 | 추가 컬럼 |
 |---|---|
 | place | opening_periods, address, phone, rating, user_rating_count, sub_type, summary |
-| plan | cities, companion, transportation, preferred_start_time, preferred_end_time, excluded_themes, fixed_schedules_json, language, meal_count, exclude_cafe |
+| plan | cities, companion, transportation, preferred_start_time, preferred_end_time, excluded_themes, fixed_schedules_json, language, meal_count, exclude_cafe, rejected_place_ids |
 | itinerary | end_time, custom_title |
 | accommodation | place_id |
 
@@ -37,7 +37,8 @@
    끝난 뒤 `SELECT COUNT(*) FROM place WHERE theme IS NOT NULL` 로 확인하세요.
 4. (권장) 도시별로 `POST /api/v1/admin/collect-places?city=...` 를 다시 돌립니다.
    새 장소 수집과 함께, 기존 장소의 구조화 영업시간·주소·평점이 추가 호출 없이 채워집니다.
-5. `POST /api/v1/admin/enrich-summaries` 를 실행해 장소마다 세부 유형·한 줄 소개를 채웁니다 (4-9 참고).
+5. (선택) `POST /api/v1/admin/enrich-summaries` 를 실행해 장소마다 세부 유형·한 줄 소개를 미리 채웁니다 (4-9 참고).
+   돌리지 않아도 일정에 들어간 장소는 일정 생성 때 자동으로 채워집니다(4-11). 미리 채워 두면 일정 생성이 그만큼 빨라집니다.
    테마 인리치먼트가 끝난 뒤에 돌려야 테마 정보가 소개에 반영됩니다. 30건씩 처리합니다. OpenAI 가 주 모델이면 배치 사이 대기가 2초라 2,500곳 기준 15~25분 정도로 예상합니다(AI 응답 속도에 따라 다름).
 6. 프론트엔드를 아래 3번에 맞춰 고칩니다.
 
@@ -63,6 +64,7 @@
 | `fixedSchedules[]` | name, startTime, endTime | + `date` 또는 `dayNumber`, 선택 `latitude`/`longitude` |
 | reroute | 결과만 반환 | **DB 에 저장**. `insertSequence` 는 그 날 화면 순번(1부터). 성공 시 `updatedDaySummary`(바뀐 날의 개요) 포함 |
 | 푸시 토큰 | 저장 API 없음 | `PUT /api/v1/users/me/fcm-token` `{"fcmToken":"..."}` |
+| 일정 일부 바꾸기 | 없음 | `POST /api/v1/plans/{planId}/replace` — 고른 줄만 다른 장소로 (4-11 참고) |
 
 `warnings` 에는 "도쿄는 나리타로 가정", "○○ 테마 후보 없음", "Day 3 후보 부족으로 자유 시간" 같은 안내가 담깁니다.
 화면에 보여 주면 사용자가 조건을 고칠 수 있습니다.
@@ -276,6 +278,88 @@ Gemini 무료 티어는 분당 호출 한도(429)에 자주 걸려 인리치먼�
 | 비 예보가 있는 날 공원 두 곳이 들어갔는데 개요에는 "실내 장소를 우선했습니다"만 표시 | 야외 방문지가 남아 있으면 이름을 적고 우산을 챙기라고 안내 |
 | "후지산 전망 로비"의 세부 유형이 `야경 명소`로 표시 | 이름에 `전망`이 있으면 `전망대` |
 
+### 4-11. 장소별 AI 설명 자동 채우기 · 고른 일정만 바꾸기
+
+**장소별 AI 설명** (planId 59: 설명이 전부 "산책하며 쉬어 가기 좋은 공원" 같은 기본 문구로 나옴)
+
+기본 문구는 AI 소개가 DB 에 없을 때 나가는 값입니다. 관리자 배치를 돌려야만 채워지던 것을, 일정 생성 때 자동으로 채우도록 했습니다.
+
+| 항목 | 동작 |
+|---|---|
+| 언제 | 일정이 만들어진 직후, 그 일정에 들어간 방문지 중 `summary` 가 비어 있는 곳만 |
+| 어떻게 | 20곳씩 묶어 AI 에 동시에 요청 (`PlaceDescriptionService`). 주 모델 OpenAI, 실패 시 Gemini |
+| 저장 | `place.sub_type`, `place.summary` 에 남김 → 같은 장소는 다시 묻지 않음. 일정을 만들수록 빨라짐 |
+| 느릴 때 | 25초 안에 답이 안 오면 기다리지 않고 기본 문구로 응답. 늦게 온 답은 DB 에만 저장해 다음 일정부터 사용 |
+| 설정 | `app.plan.describe-on-create=false` 로 끄기, `app.plan.describe-timeout-seconds` 로 대기 시간 조정 |
+| 로그 | `[장소 소개] 소개가 없던 N곳 중 M곳을 AI 로 채웠습니다. (…ms)` |
+
+처음 만드는 도시의 일정은 AI 응답 시간만큼(대략 수 초~십수 초) 더 걸립니다. 실제 OpenAI 응답 시간은 여기서 재 보지 못했습니다.
+
+**고른 일정만 바꾸기** — `POST /api/v1/plans/{planId}/replace`
+
+마음에 들지 않는 줄만 골라 다른 장소로 바꿉니다. **나머지 줄은 장소도 시각도 그대로**입니다.
+고른 줄의 "앞 일정이 끝나는 시각 ~ 뒤 일정이 시작하는 시각" 사이에 이동 시간까지 포함해 들어가는 곳만 넣기 때문에, 뒤 일정이 밀리거나 빠지는 일이 없습니다(그래서 경고 창이 필요 없습니다).
+
+요청:
+
+```json
+{
+  "placeIds": ["ChIJ4wvOvdZJGmAREhwIQF9MpAo"],
+  "targets": [ { "dayNumber": 4, "sequence": 3 } ],
+  "theme": "문화",
+  "preview": false
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `placeIds` | 바꿀 장소의 placeId 목록 (타임라인 항목의 `placeId`) |
+| `targets` | 일차 + 그 날 화면 순번(1부터, 숙소 출발이 1번). 자유 식사·자유 시간처럼 placeId 가 없는 줄은 이것으로 고름. `placeIds` 와 함께 써도 됨 |
+| `theme` | (선택) 원하는 테마 1개. 주면 그 테마의 장소로만 바꿈. `카페`·`맛집`이면 카페·식당 |
+| `preview` | (선택) true 면 저장하지 않고 결과만 반환. 같은 요청을 false 로 다시 보내면 같은 결과가 저장됨 |
+
+응답:
+
+```json
+{
+  "success": true,
+  "saved": true,
+  "message": "1곳을 바꿨습니다. 다른 일정의 장소와 시간은 그대로입니다.",
+  "changes": [
+    { "dayNumber": 2, "sequence": 5, "changed": true,
+      "oldPlaceId": "ChIJ…", "oldPlaceName": "Mochimune Port Spa",
+      "newPlaceId": "ChIJ…", "newPlaceName": "…", "message": "바꿨습니다." }
+  ],
+  "updatedTimeline": [ "…바뀐 날의 타임라인 전체 (POST /plans 의 timeline 항목과 같은 형식)…" ],
+  "updatedDaySummaries": [ "…바뀐 날의 개요 (days 항목과 같은 형식)…" ]
+}
+```
+
+규칙:
+
+| 상황 | 동작 |
+|---|---|
+| 식당·자유 식사를 고름 | 식당으로만 바꿈 (끼니가 사라지지 않게. `theme` 을 줘도 식당) |
+| 카페를 고름 | 카페로 바꿈. `theme` 을 주면 그 테마의 장소로 |
+| 관광지·쇼핑·자유 시간을 고름 | 관광지·쇼핑으로 바꿈. `theme` 을 주면 그 테마만 |
+| 숙소·공항·고정 일정을 고름 | 바꾸지 않음 (`changed=false`, 이유는 `message`) |
+| 맞는 곳이 없음 | 그 줄은 원래대로 두고 `message` 에 이유. 다른 줄은 정상 처리 |
+| 이웃한 줄을 여러 개 고름 | 앞에서부터 하나씩 채움. 한 줄이 실패해도 원래 장소가 그대로 다닐 수 있게 유지 |
+| 새 장소가 원래보다 짧게 머무는 곳 | 45분 이상 비면 그 사이에 "자유 시간" 줄이 생김 |
+| 마지막 방문지를 바꿈 | 숙소·공항 도착 시각만 다시 계산 (출국 수속 마감은 반드시 지킴) |
+| 다시 바꿔 달라고 함 | 이전에 바꿔 달라고 했던 장소는 `plan.rejected_place_ids` 에 기록해 다시 추천하지 않음 |
+
+새 장소는 엔진의 기존 규칙을 그대로 따릅니다: 영업시간, 여행 중 중복·같은 체인 금지, 온천 하루 1곳·카페·쇼핑 한도, 제외 테마, 밤 8시 이후 숙소 30분 이내, 일몰 규칙, 같은 음식 종류 반복 감점.
+이동 시간 한도는 평소 규칙(식사 40분, 그 외 60분)을 쓰되 원래 일정이 그보다 멀리 다녔다면 그만큼은 허용합니다.
+
+기존 `POST /api/v1/plans/{planId}/reroute`(직접 고른 장소 끼워 넣기)는 그대로 있습니다. 차이는 아래와 같습니다.
+
+| | reroute | replace |
+|---|---|---|
+| 용도 | 사용자가 지도에서 고른 장소를 **추가** | 마음에 안 드는 줄을 **다른 추천으로 교체** |
+| 다른 일정 | 시각이 다시 계산되고, 안 들어가면 확인 후 뺌 | 장소·시각 그대로 |
+| 새 장소 | 사용자가 지정 | 엔진이 고름 (테마 지정 가능) |
+
 ## 5. 엔진 규칙 요약 (`PlanService`)
 
 조정하고 싶은 값은 클래스 맨 위 상수에 모여 있습니다.
@@ -296,14 +380,15 @@ Gemini 무료 티어는 분당 호출 한도(429)에 자주 걸려 인리치먼�
 **확인한 것**
 
 - 실제 컴파일: 이 PC 의 Gradle 캐시에 있는 라이브러리(Spring Boot 4.1.0, Spring 7.0.8, Security 7.1.0, Hibernate 7.4.1, Lombok 1.18.46 등)로
-  `src/main/java` 78개 파일 전체가 오류 없이 컴파일됩니다. (JDK 21 로 컴파일했습니다. 프로젝트 설정은 25 입니다.)
-- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 74개 통과 (영업시간 해석 9, 엔진 시나리오 32, 보조 로직 15, 장소 소개·요약 12, AI 호출 순서 6)
+  `src/main/java` 82개 파일 전체가 오류 없이 컴파일됩니다. (JDK 21 로 컴파일했습니다. 프로젝트 설정은 25 입니다.)
+- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 84개 통과 (영업시간 해석 9, 엔진 시나리오 32, 보조 로직 15, 장소 소개·요약 12, AI 호출 순서 6, 일정 일부 바꾸기 7, 소개 자동 채우기 3)
 - 실제 jjwt 로 토큰 발급·관리자 권한 판정 동작 확인
 - 인메모리 저장소와 가짜 외부 API 로 생성 → 저장 → 재탐색 → 삭제 흐름 실행
 - 실제로 문제가 됐던 시즈오카 조건을 테스트 데이터로 옮겨 회귀 테스트 추가 (호텔·역·슈퍼 제외, 50km 제한, 일몰, 숙소 근처 저녁)
 - 무작위 조건 8,000건에서 "출국 마감·영업시간·시간 순서·중복 방문" 위반 0건
   (고정 일정이 물리적으로 불가능한 입력은 경고와 함께 출력)
 - 같은 8,000건에서 일자별 개요·여행 요약이 예외 없이 일수만큼 만들어지고 빈 문장이 없는 것 확인
+- 같은 8,000건에서 무작위로 고른 줄을 바꿔 봄(약 5,900줄 교체): 고르지 않은 줄의 장소·시각 변화 0건, 이동 시간·영업시간·출국 마감 위반 0건
 
 **확인하지 못한 것** — 서버를 띄워 봐야 알 수 있는 부분입니다.
 
@@ -319,6 +404,8 @@ Gemini 무료 티어는 분당 호출 한도(429)에 자주 걸려 인리치먼�
 6. 장소 소개 채우기(`enrich-summaries`)와 OpenAI 우선 호출: 호출 순서와 응답 해석은 가짜 응답으로 테스트했지만 실제 OpenAI·Gemini 서버로는 돌려 보지 못했습니다.
    먼저 `GET /api/test/ai` 에서 openai 줄이 "응답 성공"인지 확인하세요. 실패하면 그 줄에 원인(키·모델명·한도)이 나옵니다.
    로그의 `[소개 인리치먼트] 30건 중 N건 저장` 에서 N 이 0 이 아닌지, `SELECT name, sub_type, summary FROM place WHERE summary IS NOT NULL LIMIT 30` 으로 문장이 맞는지 몇 건 확인해 주세요.
+
+7. 일정 일부 바꾸기(`replace`): 가짜 저장소로 저장·재조회 흐름까지 돌려 봤지만 실제 DB 로는 돌려 보지 못했습니다. 한 번 바꾼 뒤 일정을 다시 열어 그 날 순서가 맞는지 확인해 주세요.
 
 새 테스트만 돌리려면 (기존 `PlannerApplicationTests` 는 DB 연결이 필요합니다):
 
@@ -341,3 +428,5 @@ gradlew test --tests "com.travel.planner.service.*" --tests "com.travel.planner.
   `enrich-summaries` 를 돌리기 전에는 "공원", "라멘 전문점" 같은 유형 수준의 문구만 나옵니다.
 - 세부 유형·소개·일자별 개요·여행 요약은 한국어로만 만듭니다. `language` 를 다른 언어로 보내도 이 부분은 한국어입니다.
 - 일자별 개요의 끼니 이름(아침·점심·간식·저녁·야식)은 식사 시작 시각으로 붙입니다.
+- 일정 일부 바꾸기는 고른 줄의 시간 칸에 맞는 곳만 넣습니다. 칸이 좁거나(예: 30분) 근처에 남은 후보가 없으면 "그대로 두었습니다"가 나옵니다. 그 도시의 장소 데이터가 많을수록 잘 바뀝니다.
+- 일정 일부 바꾸기 뒤에는 여행 전체 요약(`reason`)을 다시 만들지 않습니다. 바뀐 날의 개요만 응답에 담깁니다.

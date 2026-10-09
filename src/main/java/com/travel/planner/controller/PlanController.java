@@ -24,6 +24,7 @@ public class PlanController {
     private final PlanGenerationService planGenerationService;
     private final PlanValidationService planValidationService;
     private final PlanModifierService planModifierService;
+    private final com.travel.planner.service.PlanReplaceService planReplaceService;
 
     @GetMapping("/validate")
     @Operation(summary = "다중 도시 일정 검증 (Soft Warning)", description = "입/출국 도시와 선택한 도시들, 숙박 일수를 바탕으로 피로도 점수를 계산하여 무리한 일정인지 경고 메시지를 반환합니다.")
@@ -52,5 +53,19 @@ public class PlanController {
             @RequestBody RerouteRequest request
     ) {
         return planModifierService.modifyPlanRoute(authentication.getName(), planId, request);
+    }
+
+    @PostMapping("/{planId}/replace")
+    @Operation(summary = "일정 일부 바꾸기 (고른 일정만 다른 장소로)",
+            description = "마음에 들지 않는 줄만 골라 다른 장소로 바꿉니다. 나머지 일정의 장소와 시각은 그대로 두고, 고른 줄의 앞뒤 일정 사이 시간에 맞는 곳만 넣기 때문에 "
+                    + "뒤 일정이 밀리거나 빠지지 않습니다. targets(일차+순번) 또는 placeIds 로 고르고, theme 을 주면 그 테마의 장소로만 바꿉니다. "
+                    + "식사 자리는 식당으로, 카페는 카페로 바꿉니다. 맞는 곳이 없으면 그 줄은 그대로 두고 changes[].message 에 이유를 담습니다. "
+                    + "preview=true 면 저장하지 않고 결과만 돌려줍니다. 바꾼 장소는 기억해 두어 다시 바꿔도 같은 곳이 나오지 않습니다.")
+    public com.travel.planner.dto.ReplaceResponse replacePlanItems(
+            Authentication authentication,
+            @PathVariable Long planId,
+            @RequestBody com.travel.planner.dto.ReplaceRequest request
+    ) {
+        return planReplaceService.replace(authentication.getName(), planId, request);
     }
 }

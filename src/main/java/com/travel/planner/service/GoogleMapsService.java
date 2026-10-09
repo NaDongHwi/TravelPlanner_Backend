@@ -82,7 +82,6 @@ public class GoogleMapsService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            // 가져올 필드를 명시 (좌표, 영업시간, 평점, 리뷰 수)
             headers.set("X-Goog-FieldMask", "places.id,places.location,places.regularOpeningHours.weekdayDescriptions,places.rating,places.userRatingCount");
 
             Map<String, Object> body = new HashMap<>();
@@ -110,7 +109,6 @@ public class GoogleMapsService {
                 resultPlace.setLongitude(firstResult.path("location").path("longitude").asDouble());
                 resultPlace.setPlaceId(firstResult.path("id").asText());
 
-                // 영업시간 조립
                 JsonNode weekdayText = firstResult.path("regularOpeningHours").path("weekdayDescriptions");
                 if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
                     List<String> hoursList = new ArrayList<>();
@@ -135,13 +133,11 @@ public class GoogleMapsService {
         resultPlace.setOpeningHours("영업시간 정보 없음"); // 기본값
 
         String targetLang = (lang != null && !lang.trim().isEmpty()) ? lang : "ko";
-        // Text Search가 아닌 신버전 Place Details 엔드포인트 (GET 방식)
         String url = "https://places.googleapis.com/v1/places/" + placeId + "?languageCode=" + targetLang;
 
         try {
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            // 딱 필요한 정보만 핀포인트로 요청
             headers.set("X-Goog-FieldMask", "id,location,regularOpeningHours.weekdayDescriptions,rating,userRatingCount,displayName");
 
             org.springframework.http.HttpEntity<Void> request = new org.springframework.http.HttpEntity<>(headers);
@@ -150,12 +146,9 @@ public class GoogleMapsService {
             com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(response.getBody());
 
             if (node != null && !node.isMissingNode()) {
-                // 이미 DB에 있는 인증된 장소이므로 평점/리뷰 수 검증(수질 검증) 로직을 생략합니다.
-                // (국립공원, 거리 등은 원래 평점이 누락되기도 함)
                 resultPlace.setLatitude(node.path("location").path("latitude").asDouble(0.0));
                 resultPlace.setLongitude(node.path("location").path("longitude").asDouble(0.0));
 
-                // 영업시간 조립
                 com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
                 if (!weekdayText.isMissingNode() && weekdayText.isArray()) {
                     List<String> hoursList = new ArrayList<>();
@@ -176,8 +169,8 @@ public class GoogleMapsService {
     public String getPlaceReviews(String city, String placeName) {
         String url = "https://places.googleapis.com/v1/places:searchText";
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
             headers.set("X-Goog-FieldMask", "places.reviews"); // 리뷰만 타겟팅
 
@@ -186,17 +179,17 @@ public class GoogleMapsService {
             body.put("languageCode", "ko");
             body.put("regionCode", "JP");
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(body, headers);
             String response = restTemplate.postForObject(url, request, String.class);
-            JsonNode rootNode = objectMapper.readTree(response);
-            JsonNode places = rootNode.path("places");
+            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response);
+            com.fasterxml.jackson.databind.JsonNode places = rootNode.path("places");
 
             if (!places.isMissingNode() && places.isArray() && places.size() > 0) {
-                JsonNode reviews = places.get(0).path("reviews");
+                com.fasterxml.jackson.databind.JsonNode reviews = places.get(0).path("reviews");
                 StringBuilder reviewText = new StringBuilder();
 
                 if (!reviews.isMissingNode() && reviews.isArray()) {
-                    for (JsonNode review : reviews) {
+                    for (com.fasterxml.jackson.databind.JsonNode review : reviews) {
                         reviewText.append(review.path("text").path("text").asText()).append("\n");
                     }
                     return reviewText.toString();
@@ -221,7 +214,6 @@ public class GoogleMapsService {
             if ("OK".equals(root.path("status").asText())) {
                 JsonNode geometry = root.path("results").get(0).path("geometry");
 
-                // 1. 도시 정중앙 좌표
                 double centerLat = geometry.path("location").path("lat").asDouble();
                 double centerLng = geometry.path("location").path("lng").asDouble();
 
@@ -232,17 +224,14 @@ public class GoogleMapsService {
                     double swLat = viewport.path("southwest").path("lat").asDouble();
                     double swLng = viewport.path("southwest").path("lng").asDouble();
 
-                    // 2. 도시 실제 크기(면적) 계산
                     double latDiff = neLat - swLat;
                     double lngDiff = neLng - swLng;
                     double maxDiff = Math.max(latDiff, lngDiff);
 
-                    // 3. 그물망 하나의 반경(Radius) 동적 계산 (도쿄는 크게, 유후인은 작게)
                     double radius = (maxDiff * 111000) / 3.0;
-                    if (radius > 50000) radius = 50000; // 구글 최대 허용치 50km
-                    if (radius < 2000) radius = 2000;   // 최소 2km 보장
+                    if (radius > 50000) radius = 50000;
+                    if (radius < 2000) radius = 2000;
 
-                    // 4. 중앙, 북, 남, 동, 서 5곳에 그물망 좌표 투척
                     gridPoints.add(new double[]{centerLat, centerLng, radius});
                     double latOffset = (neLat - centerLat) / 1.5;
                     double lngOffset = (neLng - centerLng) / 1.5;
@@ -252,58 +241,13 @@ public class GoogleMapsService {
                     gridPoints.add(new double[]{centerLat, centerLng + lngOffset, radius});
                     gridPoints.add(new double[]{centerLat, centerLng - lngOffset, radius});
                 } else {
-                    gridPoints.add(new double[]{centerLat, centerLng, 10000}); // 뷰포트 실패 시 기본 10km
+                    gridPoints.add(new double[]{centerLat, centerLng, 10000});
                 }
             }
         } catch (Exception e) {
             System.out.println("그리드 추출 실패: " + e.getMessage());
         }
         return gridPoints;
-    }
-
-    // 도시 이름을 기반으로 주요 역/거점 상위 5개를 동적으로 가져옵니다.
-    public List<String> getDynamicSubRegions(String city) {
-        List<String> subRegions = new ArrayList<>();
-        subRegions.add(city); // 도시 이름 자체로도 1회 검색하도록 추가
-
-        String url = "https://places.googleapis.com/v1/places:searchText";
-        try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            // 검증을 위해 주소(formattedAddress)도 함께 달라고 요청합니다.
-            headers.set("X-Goog-FieldMask", "places.displayName.text,places.formattedAddress");
-
-            Map<String, Object> body = new HashMap<>();
-            body.put("textQuery", city + " 주요 전철역(駅)");
-            body.put("languageCode", "ko");
-            body.put("regionCode", "JP");
-
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-            String response = restTemplate.postForObject(url, request, String.class);
-            JsonNode root = objectMapper.readTree(response);
-            JsonNode places = root.path("places");
-
-            if (!places.isMissingNode() && places.isArray()) {
-                int count = 0;
-                for (JsonNode node : places) {
-                    String stationName = node.path("displayName").path("text").asText();
-                    String address = node.path("formattedAddress").asText("");
-
-                    // 반환된 주소에 '일본'이나 'Japan'이 없으면 컷
-                    if (!address.contains("일본") && !address.contains("Japan")) {
-                        continue;
-                    }
-
-                    subRegions.add(city + " " + stationName);
-                    count++;
-                    if (count >= 5) break; // 최대 5개 거점만 추출 (과금 방어)
-                }
-            }
-        } catch (Exception e) {
-            System.out.println("[" + city + "] 동적 하위 지역 추출 실패, 기본 지명만 사용: " + e.getMessage());
-        }
-        return subRegions;
     }
 
     // 4. 대량 자동 수집
@@ -328,15 +272,15 @@ public class GoogleMapsService {
             circle.put("center", center);
             circle.put("radius", radius);
 
-            // 원형(circle) 탐색을 지원하는 locationBias(우선 탐색) 옵션으로 변경
             Map<String, Object> locationBias = new HashMap<>();
             locationBias.put("circle", circle);
             body.put("locationBias", locationBias);
 
+            // TYPE 검색 시 영어 단어 강제 삽입 방지!
             if (searchItem != null && searchItem.startsWith("[TYPE]")) {
                 String type = searchItem.replace("[TYPE]", "");
                 body.put("includedType", type);
-                body.put("textQuery", formalizedCity + " " + type.replace("_", " "));
+                body.put("textQuery", formalizedCity);
             } else {
                 String text = (searchItem != null) ? searchItem.replace("[TEXT]", "") : "";
                 body.put("textQuery", formalizedCity + " " + text);
@@ -376,10 +320,10 @@ public class GoogleMapsService {
         JsonNode results = root.path("places");
         if (results.isMissingNode() || !results.isArray()) return;
 
-        // "일본 오이타현 유후시"에서 끝단 행정구역인 "유후시" 추출
         String cleanFormalCity = formalizedCity.replace("일본", "").trim();
         String[] formalParts = cleanFormalCity.split(" ");
-        String strictCityName = formalParts[formalParts.length - 1]; // "도쿄도", "유후시", "하코네마치" 등
+        // 줄바꿈 버그 해결
+        String strictCityName = formalParts[formalParts.length - 1];
 
         for (JsonNode node : results) {
             double rating = node.path("rating").asDouble(0.0);
@@ -389,11 +333,10 @@ public class GoogleMapsService {
 
             if (address.isEmpty() || address.contains("대한민국") || address.contains("한국")) continue;
 
+            // 영문 주소 컷오프 문제 방어 (일본 텍스트 제거 후 한글 검사)
             String addressWithoutJapan = address.replace("일본", "").trim();
             boolean hasKorean = addressWithoutJapan.matches(".*[가-힣]+.*");
 
-            // 진짜 한글 지명(예: 오이타현 벳푸시)이 있는데 검색한 도시명(유후인/유후시)이 없으면 타지역이므로 컷오프
-            // 하지만 한글이 없는 영문 주소(예: Tokyo, Minato City)라면 그리드(Grid)의 정확도를 믿고 통과
             if (hasKorean && !address.contains(city) && !address.contains(strictCityName)) {
                 continue;
             }
@@ -416,14 +359,13 @@ public class GoogleMapsService {
         }
     }
 
-    // 6. Geocoding API 기반 자체 지명 정제 엔진 (에러 상세 출력 로직 추가됨)
+    // 6. Geocoding API 기반 자체 지명 정제 엔진
     public String getFormalizedJapanCity(String cityInput) {
         try {
             String url = "https://maps.googleapis.com/maps/api/geocode/json?address={address}&components=country:JP&key={key}&language=ko";
             String response = restTemplate.getForObject(url, String.class, cityInput, googleMapsApiKey);
             JsonNode root = objectMapper.readTree(response);
 
-            // 구글이 반환한 실제 상태 코드 확인
             String status = root.path("status").asText();
 
             if ("OK".equals(status)) {
@@ -432,7 +374,6 @@ public class GoogleMapsService {
                 System.out.println("[지명 검증 완료] 정식 주소: " + formattedAddress + " -> 판정 권역: " + recognizedRegion.name());
                 return formattedAddress;
             } else {
-                // 구글이 뱉어낸 진짜 이유를 콘솔에 빨간 글씨로 출력
                 String errorMessage = root.path("error_message").asText("이유 없음");
                 System.err.println("[구글 Geocoding API 에러] 상태: " + status + " / 사유: " + errorMessage);
                 throw new RuntimeException("구글 API 거부: " + status);
@@ -465,7 +406,8 @@ public class GoogleMapsService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Goog-Api-Key", googleMapsApiKey);
-            headers.set("X-Goog-FieldMask", "places.displayName.text,places.location,places.rating,places.userRatingCount");
+            // DB 저장 시 무조건 필요한 places.id(고유 ID)를 가져오도록 추가
+            headers.set("X-Goog-FieldMask", "places.id,places.displayName.text,places.location,places.rating,places.userRatingCount");
 
             Map<String, Object> body = new HashMap<>();
             body.put("textQuery", city + " 유명 호텔");
@@ -484,6 +426,8 @@ public class GoogleMapsService {
 
                     if (rating >= 3.5 && reviewCount >= 50) {
                         Place hotel = new Place();
+                        // place_id가 텅 비어서 터지는 1048 에러 방지
+                        hotel.setPlaceId(node.path("id").asText());
                         hotel.setName(node.path("displayName").path("text").asText());
                         hotel.setCity(city);
                         hotel.setLatitude(node.path("location").path("latitude").asDouble());
@@ -527,15 +471,13 @@ public class GoogleMapsService {
                 com.fasterxml.jackson.databind.JsonNode weekdayText = node.path("regularOpeningHours").path("weekdayDescriptions");
                 if (!weekdayText.isMissingNode() && weekdayText.isArray() && weekdayText.size() > 0) {
 
-                    // 방문할 날짜의 요일을 한국어로 구합니다.
                     String[] koreanDays = {"월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"};
-                    int dayOfWeekValue = targetDate.getDayOfWeek().getValue(); // 1(월) ~ 7(일)
+                    int dayOfWeekValue = targetDate.getDayOfWeek().getValue();
                     String targetDayName = koreanDays[dayOfWeekValue - 1];
 
                     boolean isFound = false;
                     for (com.fasterxml.jackson.databind.JsonNode descNode : weekdayText) {
                         String desc = descNode.asText();
-                        // 구글이 준 배열 중 "토요일: 오전 9:00~오후 10:00" 처럼 해당 요일이 포함된 문장만 추출
                         if (desc.contains(targetDayName)) {
                             details[2] = desc;
                             isFound = true;
@@ -543,7 +485,6 @@ public class GoogleMapsService {
                         }
                     }
 
-                    // 만약 구글 응답에 예외가 생겨 요일을 못 찾으면 일단 7일 전체를 던져줌
                     if (!isFound) {
                         details[2] = weekdayText.get(0).asText();
                     }

@@ -184,6 +184,9 @@ public class PlanService {
             if (p.getName().contains("공항")) continue;
             if ("식음".equals(p.getCategory()) && foodCount >= maxFoodLimit) continue;
 
+            // AI가 긁어온 수많은 호텔과 기차역들이 일반 관광지인 척하고 후보에 끼어드는 것을 원천 차단합니다.
+            if ("숙소".equals(p.getCategory()) || "교통".equals(p.getCategory())) continue;
+
             int estimatedDwellTime = calculateDwellTime(p, request);
             int bufferTime = calculateBufferTime(request);
             int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);

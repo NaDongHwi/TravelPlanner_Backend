@@ -44,11 +44,28 @@ public class AdminAsyncService {
         Set<Long> failedPlaceIdsThisSession = new HashSet<>();
 
         while (isEnriching) {
-            // DB에게 문제가 있는 데이터 30개만 줘라고 요청합니다.
-            org.springframework.data.domain.Pageable limit30 = org.springframework.data.domain.PageRequest.of(0, 30);
-            List<Place> targetPlaces = placeRepository.findPlacesNeedingEnrichment(limit30).stream()
-                    .filter(p -> !failedPlaceIdsThisSession.contains(p.getId()))
-                    .collect(Collectors.toList());
+            List<Place> targetPlaces = new ArrayList<>();
+            int pageNum = 0;
+
+            // 맨 앞줄이 블랙리스트로 꽉 차서 0건이 되는 현상(병목)을 방지합니다.
+            // 유효한 장소가 나올 때까지 DB의 다음 페이지(100건 단위)를 계속 넘겨가며 탐색합니다.
+            while (targetPlaces.isEmpty()) {
+                org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(pageNum, 100);
+                List<Place> rawPlaces = placeRepository.findPlacesNeedingEnrichment(pageable);
+
+                if (rawPlaces.isEmpty()) {
+                    break; // DB 끝까지 다 뒤졌는데 진짜로 남은 빈칸 데이터가 없는 경우 탈출
+                }
+
+                targetPlaces = rawPlaces.stream()
+                        .filter(p -> !failedPlaceIdsThisSession.contains(p.getId()))
+                        .limit(30)
+                        .collect(Collectors.toList());
+
+                if (targetPlaces.isEmpty()) {
+                    pageNum++; // 가져온 100건이 모조리 블랙리스트라면, 다음 100건을 가져오도록 페이지 증가
+                }
+            }
 
             if (targetPlaces.isEmpty()) {
                 System.out.println("[인리치먼트 완료] 남은 데이터가 없거나 모두 처리에 실패한 데이터입니다.");

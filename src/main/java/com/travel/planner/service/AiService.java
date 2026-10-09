@@ -226,10 +226,13 @@ public class AiService {
 
     // 모든 API에서 공통으로 사용할 수 있는 범용 GPT 백업 호출 메서드
     private <T> T callFallbackOpenAi(String prompt, Object typeOrClass) {
-        if (openAiApiKey == null || openAiApiKey.isEmpty()) return null;
+        if (openAiApiKey == null || openAiApiKey.isEmpty()) {
+            System.err.println("[오류] OpenAI API 키가 yml 파일에 설정되지 않았습니다!");
+            return null;
+        }
 
         try {
-            String gptUrl = "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)";
+            String gptUrl = "https://api.openai.com/v1/chat/completions";
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", openAiModel);
 
@@ -242,12 +245,12 @@ public class AiService {
             responseFormat.put("type", "json_object");
             requestBody.put("response_format", responseFormat);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             headers.setBearerAuth(openAiApiKey);
 
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-            ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
+            org.springframework.http.HttpEntity<Map<String, Object>> request = new org.springframework.http.HttpEntity<>(requestBody, headers);
+            org.springframework.http.ResponseEntity<String> response = restTemplate.postForEntity(gptUrl, request, String.class);
 
             JsonNode rootNode = objectMapper.readTree(response.getBody());
             String gptText = rootNode.path("choices").get(0).path("message").path("content").asText().trim();
@@ -257,6 +260,11 @@ public class AiService {
             } else if (typeOrClass instanceof TypeReference) {
                 return (T) objectMapper.readValue(gptText, (TypeReference<?>) typeOrClass);
             }
+        }
+        // RestTemplate이 숨겨버린 진짜 OpenAI 에러 바디(JSON)를 강제로 뜯어냅니다
+        catch (org.springframework.web.client.HttpStatusCodeException e) {
+            String realErrorBody = e.getResponseBodyAsString();
+            saveErrorLog("AI_FATAL_GPT_FAIL", "HTTP " + e.getStatusCode() + " | 상세: " + realErrorBody);
         } catch (Exception e) {
             saveErrorLog("AI_FATAL_GPT_FAIL", e.getMessage());
         }
@@ -292,9 +300,17 @@ public class AiService {
 
     private void saveErrorLog(String errorType, String message) {
         try {
+            String actualMessage = message != null ? message : "Unknown Error";
+
+            // 인텔리제이 콘솔창에 빨간 글씨로 출력합니다.
+            System.err.println("\n[AI 통신 장애 리포트]");
+            System.err.println("▶ 발생 위치 (타입): " + errorType);
+            System.err.println("▶ 구글/오픈AI 진짜 응답: " + actualMessage);
+            System.err.println("=========================================\n");
+
             Log errorLog = new Log();
             errorLog.setErrorType(errorType);
-            errorLog.setErrorMessage(message != null ? message : "Unknown Error");
+            errorLog.setErrorMessage(actualMessage);
             logRepository.save(errorLog);
         } catch (Exception ignore) {}
     }

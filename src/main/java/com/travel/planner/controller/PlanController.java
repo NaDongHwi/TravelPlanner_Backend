@@ -180,17 +180,31 @@ public class PlanController {
             if (!searchResult.isEmpty()) {
                 baseCamp = searchResult.get(0);
                 baseCamp.setCategory("숙소");
-            }
-        } else if (request.isSuggestHotel()) {
-            // 2. AI 숙소 추천을 켠 경우
-            List<Place> hotels = googleMapsService.searchRecommendedHotels(mainCity);
-            if (!hotels.isEmpty()) {
-                baseCamp = hotels.get(0);
-                baseCamp.setCategory("숙소");
+                // 사용자 지정 숙소 DB 저장 및 후보 풀(allCityPlaces) 추가
                 if (!placeRepository.existsByPlaceId(baseCamp.getPlaceId())) {
                     baseCamp = placeRepository.save(baseCamp);
                 } else {
                     baseCamp = placeRepository.findByPlaceId(baseCamp.getPlaceId()).get();
+                }
+                Place finalBaseCamp1 = baseCamp;
+                if (allCityPlaces.stream().noneMatch(p -> p.getPlaceId().equals(finalBaseCamp1.getPlaceId()))) {
+                    allCityPlaces.add(baseCamp);
+                }
+            }
+        } else if (request.isSuggestHotel()) {
+            List<Place> hotels = googleMapsService.searchRecommendedHotels(mainCity);
+            if (!hotels.isEmpty()) {
+                baseCamp = hotels.get(0);
+                baseCamp.setCategory("숙소");
+                // AI 추천 숙소를 후보 풀(allCityPlaces)에 명시적 추가
+                if (!placeRepository.existsByPlaceId(baseCamp.getPlaceId())) {
+                    baseCamp = placeRepository.save(baseCamp);
+                } else {
+                    baseCamp = placeRepository.findByPlaceId(baseCamp.getPlaceId()).get();
+                }
+                Place finalBaseCamp2 = baseCamp;
+                if (allCityPlaces.stream().noneMatch(p -> p.getPlaceId().equals(finalBaseCamp2.getPlaceId()))) {
+                    allCityPlaces.add(baseCamp);
                 }
             }
         }
@@ -311,11 +325,11 @@ public class PlanController {
                 itinerary.setTime(item.getTime());
                 itinerary.setAiComment(item.getDescription());
 
-                if ("[자유 시간 및 로컬 탐방]".equals(item.getPlaceName())) {
+                if ("자유시간".equals(item.getCategory())) {
                     Place dummyPlace = placeRepository.findByPlaceId("DUMMY_FREE_TIME").orElseGet(() -> {
                         Place newDummy = new Place();
                         newDummy.setPlaceId("DUMMY_FREE_TIME");
-                        newDummy.setName("[자유 시간 및 로컬 탐방]");
+                        newDummy.setName(item.getPlaceName());
                         newDummy.setCategory("자유시간");
                         newDummy.setTheme("힐링,산책");
                         newDummy.setCity(mainCity);

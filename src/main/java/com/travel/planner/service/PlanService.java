@@ -84,6 +84,7 @@ public class PlanService {
         }).collect(Collectors.toList());
     }
 
+    // applyWeightedScoring: 반쪽짜리 필터링 고치고 자연/온천 거리 페널티 완화
     public List<Place> applyWeightedScoring(List<Place> places, String weather, PlanRequest request) {
         boolean isBadWeather = weather != null && (weather.contains("비") || weather.contains("눈"));
         List<String> themes = request.getThemes() != null ? request.getThemes() : new ArrayList<>();
@@ -109,9 +110,12 @@ public class PlanService {
 
         for (Place p : places) {
             boolean isExcluded = false;
-            if (p.getTheme() != null && !excludedThemes.isEmpty()) {
+            // '테마'뿐만 아니라 '카테고리'에 블랙리스트 키워드가 있어도 완벽하게 차단합니다.
+            if (!excludedThemes.isEmpty()) {
                 for (String ex : excludedThemes) {
-                    if (p.getTheme().contains(ex)) {
+                    boolean themeMatch = p.getTheme() != null && p.getTheme().contains(ex);
+                    boolean categoryMatch = p.getCategory() != null && p.getCategory().contains(ex);
+                    if (themeMatch || categoryMatch) {
                         isExcluded = true;
                         break;
                     }
@@ -147,10 +151,13 @@ public class PlanService {
                 if (p.getTheme() != null && p.getTheme().contains("액티비티")) score -= 50;
             }
 
+            // '자연', '온천' 테마는 외곽에 있는 것이 당연하므로 거리 페널티를 대폭 완화.
             if (baseLat != 0 && baseLng != 0 && !p.getName().contains("공항")) {
                 double distKm = DistanceUtil.calculateDistance(baseLat, baseLng, p.getLatitude(), p.getLongitude());
-                if (distKm > 10.0) {
-                    score -= (int)((distKm - 10) * 5);
+                double allowedDist = (p.getTheme() != null && (p.getTheme().contains("자연") || p.getTheme().contains("온천"))) ? 25.0 : 10.0;
+
+                if (distKm > allowedDist) {
+                    score -= (int)((distKm - allowedDist) * 4);
                 }
             }
 
@@ -287,7 +294,7 @@ public class PlanService {
     }
 
     // ============================================================================
-    // 앵커(숙소/공항) 기반 시뮬레이터
+    // 앵커(숙소/공항) 기반 시뮬레이터 (동적 스케줄링 적용)
     // ============================================================================
     public SimulationResult runScheduleSimulation(List<Place> draftRoute, PlanRequest request, int dayNumber, int totalDays, boolean insertDummyNode) {
         SimulationResult result = new SimulationResult();
@@ -308,7 +315,12 @@ public class PlanService {
             dayEndTime = outTime.isBefore(dayEndTime) ? outTime : dayEndTime;
         }
 
-        Place prevPlace = null;
+        if (draftRoute.isEmpty()) {
+            result.setSuccess(true);
+            result.setValidRoute(validRoute);
+            return result;
+        }
+
         int currentBudgetUsed = 0;
         int maxBudget = Integer.MAX_VALUE;
         int dailyFoodCount = 0;
@@ -320,99 +332,159 @@ public class PlanService {
         boolean isFoodLover = request.getThemes() != null && (request.getThemes().contains("맛집") || request.getThemes().contains("카페"));
         int maxFoodLimit = isFoodLover ? 4 : 3;
 
-        for (Place p : draftRoute) {
-            // 숙소와 공항은 앵커(Anchor)로서 시간 제약을 무시하고 보호받습니다.
-            boolean isAnchor = "숙소".equals(p.getCategory()) || p.getName().contains("공항");
+        // 1. 출발지(Anchor) 무조건 확정
+        Place startAnchor = draftRoute.get(0);
+        validRoute.add(new SimulatedItinerary(startAnchor, currentTime.toString()));
+        Place prevPlace = startAnchor;
 
+        // 2. 중간 관광지 동적 스케줄링 (Dynamic Reordering)
+        List<Place> remainingPlaces = new ArrayList<>();
+        Place endAnchor = null;
+
+        if (draftRoute.size() > 1) {
+            endAnchor = draftRoute.get(draftRoute.size() - 1);
+            if (draftRoute.size() > 2) {
+                // 출발/도착(숙소/공항)을 제외한 순수 방문 목적지만 리스트에 담음
+                remainingPlaces.addAll(draftRoute.subList(1, draftRoute.size() - 1));
+            }
+        }
+
+        // 남은 장소들을 하나씩 꺼내보며 "지금 당장 갈 수 있는" 최적의 장소를 낚아챕니다.
+        while (!remainingPlaces.isEmpty()) {
+            boolean placeFound = false;
+
+            for (int i = 0; i < remainingPlaces.size(); i++) {
+                Place p = remainingPlaces.get(i);
+
+                int transitMinutes = 0;
+                if (prevPlace != null) {
+                    double distKm = DistanceUtil.calculateDistance(
+                            prevPlace.getLatitude(), prevPlace.getLongitude(),
+                            p.getLatitude(), p.getLongitude()
+                    );
+                    transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
+                    transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2);
+                }
+                LocalTime arrivalTime = currentTime.plusMinutes(transitMinutes);
+
+                if (arrivalTime.isAfter(dayEndTime)) continue;
+
+                if (request.getFixedSchedules() != null) {
+                    boolean hasConflict = false;
+                    for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
+                        if (arrivalTime.isAfter(fixed.getStartTime().minusMinutes(30)) && arrivalTime.isBefore(fixed.getEndTime())) {
+                            hasConflict = true;
+                            break;
+                        }
+                    }
+                    if (hasConflict) continue;
+                }
+
+                if ("식음".equals(p.getCategory())) {
+                    if (dailyFoodCount >= maxFoodLimit) continue;
+                    if (prevPlace != null && "식음".equals(prevPlace.getCategory())) {
+                        boolean isCurrentCafe = (p.getTheme() != null && p.getTheme().contains("카페")) || p.getName().toLowerCase().contains("cafe") || p.getName().contains("커피");
+                        boolean isPrevCafe = (prevPlace.getTheme() != null && prevPlace.getTheme().contains("카페")) || prevPlace.getName().toLowerCase().contains("cafe") || prevPlace.getName().contains("커피");
+                        if (isCurrentCafe == isPrevCafe) continue;
+                    }
+                }
+
+                if ("쇼핑".equals(p.getCategory())) {
+                    if (dailyShoppingCount >= maxShoppingLimit) continue;
+                }
+
+                boolean isNightSpot = p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경"));
+
+                // 야간 명소인데 지금 너무 낮(17시 이전)이면 억지로 17시로 워프하지 않고, 그냥 패스한 뒤 다음 장소부터 탐색합니다!
+                if (isNightSpot && arrivalTime.isBefore(LocalTime.of(17, 0))) {
+                    continue;
+                }
+
+                LocalTime openTime = parseOpenTime(p.getOpeningHours(), request, dayNumber);
+                LocalTime closeTime = parseCloseTime(p.getOpeningHours(), request, dayNumber);
+
+                LocalTime actualStartTime = arrivalTime;
+                if (arrivalTime.isBefore(openTime)) {
+                    long waitMinutes = Duration.between(arrivalTime, openTime).toMinutes();
+                    // 30분 이상 기다려야 하면 억지로 대기하지 않고, 지금 문 열려있는 다른 장소를 찾으러 갑니다!
+                    if (waitMinutes > 30) {
+                        continue;
+                    }
+                    actualStartTime = openTime;
+                }
+
+                int dwellTime = calculateDwellTime(p, request);
+                int bufferTime = calculateBufferTime(request);
+                int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
+                LocalTime finishTime = actualStartTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
+
+                if (finishTime.isAfter(closeTime) || finishTime.isAfter(dayEndTime)) continue;
+                if (currentBudgetUsed + estimatedCost > maxBudget) continue;
+
+                // 통과! 지금 방문하기에 시간이 딱 맞는 완벽한 장소입니다.
+                if ("식음".equals(p.getCategory())) dailyFoodCount++;
+                if ("쇼핑".equals(p.getCategory())) dailyShoppingCount++;
+
+                validRoute.add(new SimulatedItinerary(p, actualStartTime.toString()));
+                currentTime = finishTime;
+                prevPlace = p;
+
+                // 방문한 장소는 남은 목록에서 지우고, 갱신된 현재 시간을 바탕으로 남은 장소들을 처음부터 다시 탐색합니다.
+                remainingPlaces.remove(i);
+                placeFound = true;
+                break;
+            }
+
+            // 리스트를 싹 다 뒤졌는데도 갈 수 있는 곳이 단 하나도 없을 경우
+            if (!placeFound) {
+                // 남은 장소가 전부 '오뎅거리' 같은 야간 명소들뿐인지 확인합니다.
+                boolean hasNightSpots = remainingPlaces.stream().anyMatch(p -> p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경")));
+
+                // 남은 게 전부 야간 명소인데 현재 시각이 오후 3시라면?
+                // 이때만 남은 2시간을 '로컬 탐방/카페 휴식'으로 한 번만 채워주고 17시로 넘깁니다. (유일한 더미 발생 구간)
+                if (hasNightSpots && currentTime.isBefore(LocalTime.of(17, 0))) {
+                    Place freeTime = new Place();
+                    freeTime.setName("[오후 휴식 및 카페/로컬 탐방]");
+                    freeTime.setCategory("자유시간");
+                    freeTime.setTheme("힐링,휴식");
+                    freeTime.setLatitude(prevPlace != null && prevPlace.getLatitude() != null ? prevPlace.getLatitude() : 0.0);
+                    freeTime.setLongitude(prevPlace != null && prevPlace.getLongitude() != null ? prevPlace.getLongitude() : 0.0);
+
+                    validRoute.add(new SimulatedItinerary(freeTime, currentTime.toString()));
+                    currentTime = LocalTime.of(17, 0);
+                    continue; // 시계가 17시로 바뀌었으니, 다음 루프에서는 밀려있던 야간 명소들이 정상적으로 스케줄에 들어옵니다.
+                } else {
+                    // 남은 장소들이 물리적으로 도저히 방문 불가능한 곳들이라면 억지로 끼워넣지 않고 남은 일정을 드랍시킵니다.
+                    break;
+                }
+            }
+        }
+
+        // 3. 일정이 너무 일찍 끝났다면(오후 3시 이전) 자유시간 부여
+        if (validRoute.size() <= 1 || (insertDummyNode && currentTime.isBefore(LocalTime.of(15, 0)))) {
+            Place dummyNode = new Place();
+            dummyNode.setName("[자유 시간 및 로컬 탐방]");
+            dummyNode.setCategory("자유시간");
+            dummyNode.setTheme("힐링,산책");
+            dummyNode.setLatitude(prevPlace != null && prevPlace.getLatitude() != null ? prevPlace.getLatitude() : 0.0);
+            dummyNode.setLongitude(prevPlace != null && prevPlace.getLongitude() != null ? prevPlace.getLongitude() : 0.0);
+
+            validRoute.add(new SimulatedItinerary(dummyNode, currentTime.toString()));
+        }
+
+        // 4. 도착지(숙소/공항 Anchor) 확정
+        if (endAnchor != null) {
             int transitMinutes = 0;
             if (prevPlace != null) {
                 double distKm = DistanceUtil.calculateDistance(
                         prevPlace.getLatitude(), prevPlace.getLongitude(),
-                        p.getLatitude(), p.getLongitude()
+                        endAnchor.getLatitude(), endAnchor.getLongitude()
                 );
                 transitMinutes = (int) Math.round((distKm / 20.0) * 60.0);
                 transitMinutes = (int) (Math.max(transitMinutes, 10) * 1.2);
             }
             LocalTime arrivalTime = currentTime.plusMinutes(transitMinutes);
-
-            // 해당 날짜의 첫 번째 장소(출발지)라면 출발 시간을 현재 시간으로 픽스
-            if (validRoute.isEmpty()) {
-                arrivalTime = currentTime;
-            }
-
-            // 일반 관광지라면 일과 시간 범위를 벗어날 경우 패스
-            if (!isAnchor) {
-                if (arrivalTime.isBefore(currentTime) || arrivalTime.isAfter(dayEndTime)) {
-                    continue;
-                }
-            }
-            currentTime = arrivalTime;
-
-            if (request.getFixedSchedules() != null && !isAnchor) {
-                boolean hasConflict = false;
-                for (PlanRequest.FixedScheduleInput fixed : request.getFixedSchedules()) {
-                    if (currentTime.isAfter(fixed.getStartTime().minusMinutes(30)) && currentTime.isBefore(fixed.getEndTime())) {
-                        hasConflict = true;
-                        break;
-                    }
-                }
-                if (hasConflict) continue;
-            }
-
-            if ("식음".equals(p.getCategory())) {
-                if (dailyFoodCount >= maxFoodLimit) continue;
-                if (prevPlace != null && "식음".equals(prevPlace.getCategory())) {
-                    boolean isCurrentCafe = (p.getTheme() != null && p.getTheme().contains("카페")) || p.getName().toLowerCase().contains("cafe") || p.getName().contains("커피");
-                    boolean isPrevCafe = (prevPlace.getTheme() != null && prevPlace.getTheme().contains("카페")) || prevPlace.getName().toLowerCase().contains("cafe") || prevPlace.getName().contains("커피");
-                    if (isCurrentCafe == isPrevCafe) continue;
-                }
-            }
-
-            if ("쇼핑".equals(p.getCategory())) {
-                if (dailyShoppingCount >= maxShoppingLimit) continue;
-            }
-
-            boolean isNightSpot = p.getName().contains("오뎅") || p.getName().contains("이자카야") || p.getName().contains("술") || (p.getTheme() != null && p.getTheme().contains("야경"));
-            if (isNightSpot && currentTime.isBefore(LocalTime.of(17, 0))) {
-                currentTime = LocalTime.of(17, 30);
-            }
-
-            LocalTime openTime = parseOpenTime(p.getOpeningHours(), request, dayNumber);
-            LocalTime closeTime = parseCloseTime(p.getOpeningHours(), request, dayNumber);
-
-            // 앵커(숙소, 공항)는 내부 체류 시간을 0으로 계산하여 붕괴 방지
-            int dwellTime = isAnchor ? 0 : calculateDwellTime(p, request);
-            int bufferTime = isAnchor ? 0 : calculateBufferTime(request);
-            int estimatedCost = "테마파크".equals(p.getCategory()) ? 8000 : ("식음".equals(p.getCategory()) ? 3000 : 0);
-            LocalTime finishTime = currentTime.plusMinutes(dwellTime).plusMinutes(bufferTime);
-
-            if (!isAnchor) {
-                // 오픈시간 전이거나 영업 종료 이후면 스킵
-                if (currentTime.isBefore(openTime) || finishTime.isAfter(closeTime) || finishTime.isBefore(currentTime) || finishTime.isAfter(dayEndTime)) {
-                    continue;
-                }
-                currentBudgetUsed += estimatedCost;
-                if (currentBudgetUsed > maxBudget) continue;
-            }
-
-            if ("식음".equals(p.getCategory())) dailyFoodCount++;
-            if ("쇼핑".equals(p.getCategory())) dailyShoppingCount++;
-
-            validRoute.add(new SimulatedItinerary(p, currentTime.toString()));
-            currentTime = finishTime;
-            prevPlace = p;
-        }
-
-        // 일정이 지나치게 일찍 끝나버렸고, 유저가 자유시간을 허용했다면 더미 노드 1개만 안전하게 추가
-        if (validRoute.isEmpty() || (insertDummyNode && currentTime.isBefore(LocalTime.of(15, 0)))) {
-            Place dummyNode = new Place();
-            dummyNode.setName("[자유 시간 및 로컬 탐방]");
-            dummyNode.setCategory("자유시간");
-            dummyNode.setTheme("힐링,산책");
-            dummyNode.setLatitude(prevPlace != null && prevPlace.getLatitude() != null && prevPlace.getLatitude() != 0.0 ? prevPlace.getLatitude() : 0.0);
-            dummyNode.setLongitude(prevPlace != null && prevPlace.getLongitude() != null && prevPlace.getLongitude() != 0.0 ? prevPlace.getLongitude() : 0.0);
-
-            validRoute.add(new SimulatedItinerary(dummyNode, currentTime.toString()));
+            validRoute.add(new SimulatedItinerary(endAnchor, arrivalTime.toString()));
         }
 
         result.setSuccess(true);

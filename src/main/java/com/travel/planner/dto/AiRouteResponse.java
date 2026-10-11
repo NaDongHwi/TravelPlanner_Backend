@@ -28,6 +28,12 @@ public class AiRouteResponse {
     // 교통비가 어떤 기준의 값인지 (추정 기준·노선 미확인 구간 수 등)
     private String transitNote;
 
+    // 추천 교통 패스 (이득이 큰 순). 여행 전체의 요금 합계와 패스 가격을 견준 결과이며, 이득이 나는 패스가 없으면 빈 목록
+    private List<PassSuggestionDto> passes;
+
+    // 추천 패스를 모두 샀을 때의 교통비 합계 (성인 1인, 엔). 추천 패스가 없으면 null
+    private Integer transitFareWithPassesYen;
+
     private RouteInfoDto transportOptimization;
 
     // 저장된 여행 계획 ID (reroute / PDF 다운로드에 필요)

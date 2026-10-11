@@ -1,0 +1,929 @@
+{
+  "version": "2026-10-11",
+  "passes": [
+    {
+      "key": "tokyo-subway-ticket-24h",
+      "name": "Tokyo Subway Ticket 24시간권",
+      "city": "도쿄",
+      "priceYen": 1000,
+      "childPriceYen": 500,
+      "hours": 24,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "東京都"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptLines": [
+            "日暮里・舎人ライナー"
+          ]
+        }
+      ],
+      "coverageDescription": "도쿄메트로 전 노선 + 도에이 지하철 전 노선",
+      "url": "https://www.tokyometro.jp/ticket/value/travel/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "도쿄도와 인근 7현(가나가와·사이타마·지바·이바라키·도치기·군마·야마나시) 밖에 사는 사람과 방일 외국인(여권 제시)만 살 수 있습니다."
+    },
+    {
+      "key": "tokyo-subway-ticket-48h",
+      "name": "Tokyo Subway Ticket 48시간권",
+      "city": "도쿄",
+      "priceYen": 1500,
+      "childPriceYen": 750,
+      "hours": 48,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "東京都"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptLines": [
+            "日暮里・舎人ライナー"
+          ]
+        }
+      ],
+      "coverageDescription": "도쿄메트로 전 노선 + 도에이 지하철 전 노선",
+      "url": "https://www.tokyometro.jp/ticket/value/travel/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "도쿄도와 인근 7현(가나가와·사이타마·지바·이바라키·도치기·군마·야마나시) 밖에 사는 사람과 방일 외국인(여권 제시)만 살 수 있습니다."
+    },
+    {
+      "key": "tokyo-subway-ticket-72h",
+      "name": "Tokyo Subway Ticket 72시간권",
+      "city": "도쿄",
+      "priceYen": 2000,
+      "childPriceYen": 1000,
+      "hours": 72,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "東京都"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptLines": [
+            "日暮里・舎人ライナー"
+          ]
+        }
+      ],
+      "coverageDescription": "도쿄메트로 전 노선 + 도에이 지하철 전 노선",
+      "url": "https://www.tokyometro.jp/ticket/value/travel/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "도쿄도와 인근 7현(가나가와·사이타마·지바·이바라키·도치기·군마·야마나시) 밖에 사는 사람과 방일 외국인(여권 제시)만 살 수 있습니다."
+    },
+    {
+      "key": "tokyo-metro-24h",
+      "name": "도쿄메트로 24시간권",
+      "city": "도쿄",
+      "priceYen": 700,
+      "childPriceYen": 350,
+      "hours": 24,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "도쿄메트로 전 노선 (도에이 지하철은 제외)",
+      "url": "https://www.tokyometro.jp/ticket/value/1day/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 처음 개찰한 때부터 24시간."
+    },
+    {
+      "key": "tokyo-metro-toei-1day",
+      "name": "도쿄메트로·도에이 지하철 공통 1일 승차권",
+      "city": "도쿄",
+      "priceYen": 1100,
+      "childPriceYen": 550,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "東京都"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptLines": [
+            "日暮里・舎人ライナー"
+          ]
+        }
+      ],
+      "coverageDescription": "도쿄메트로 전 노선 + 도에이 지하철 전 노선",
+      "url": "https://www.tokyometro.jp/ticket/value/1day/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 쓰는 날의 첫차부터 막차까지."
+    },
+    {
+      "key": "toei-1day",
+      "name": "도에이 마루고토 킷푸 (도에이 1일 승차권)",
+      "city": "도쿄",
+      "priceYen": 700,
+      "childPriceYen": 350,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "東京都",
+            "都営バス"
+          ]
+        }
+      ],
+      "coverageDescription": "도에이 지하철·도에이 버스·도쿄 사쿠라 트램(도덴)·닛포리 도네리 라이너",
+      "url": "https://www.kotsu.metro.tokyo.jp/eng/tickets/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 도쿄메트로는 탈 수 없습니다."
+    },
+    {
+      "key": "tokyo-free-kippu",
+      "name": "도쿄 프리 킷푸",
+      "city": "도쿄",
+      "priceYen": 1720,
+      "childPriceYen": 860,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "東京地下鉄"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "東京都",
+            "都営バス"
+          ]
+        },
+        {
+          "operators": [
+            "東日本旅客鉄道"
+          ],
+          "categories": [
+            "JR"
+          ],
+          "boxes": "35.54,139.595,35.79,139.875;35.70,139.875,35.79,139.89"
+        }
+      ],
+      "coverageDescription": "도쿄메트로·도에이 지하철·도에이 버스·도덴·닛포리 도네리 라이너 + 도쿄 23구 안의 JR",
+      "url": "https://www.tokyometro.jp/ticket/value/1day/index.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다.",
+      "approximate": true,
+      "note": "JR 은 23구 안에서만 탈 수 있습니다. 23구의 경계는 사각형으로 대략 잡았습니다."
+    },
+    {
+      "key": "osaka-enjoy-eco-weekday",
+      "name": "오사카 엔조이 에코 카드 (평일)",
+      "city": "오사카",
+      "priceYen": 820,
+      "childPriceYen": 310,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "大阪市高速電気軌道"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptStations": [
+            "夢洲"
+          ]
+        },
+        {
+          "operators": [
+            "大阪シティバス"
+          ]
+        }
+      ],
+      "coverageDescription": "오사카메트로 전 노선(유메시마역 제외) + 오사카 시티버스(일부 노선 제외)",
+      "url": "https://subway.osakametro.co.jp/guide/page/enjoy-eco.php",
+      "verifiedAt": "2026-10-11",
+      "dayRule": "WEEKDAY",
+      "conditions": "평일용. 달력 기준이라 오봉·연말연시의 평일에도 평일권을 씁니다. 한큐·긴테쓰 등 직통하는 다른 회사 구간은 탈 수 없습니다."
+    },
+    {
+      "key": "osaka-enjoy-eco-holiday",
+      "name": "오사카 엔조이 에코 카드 (토·일·공휴일)",
+      "city": "오사카",
+      "priceYen": 620,
+      "childPriceYen": 310,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "大阪市高速電気軌道"
+          ],
+          "categories": [
+            "SUBWAY"
+          ],
+          "exceptStations": [
+            "夢洲"
+          ]
+        },
+        {
+          "operators": [
+            "大阪シティバス"
+          ]
+        }
+      ],
+      "coverageDescription": "오사카메트로 전 노선(유메시마역 제외) + 오사카 시티버스(일부 노선 제외)",
+      "url": "https://subway.osakametro.co.jp/guide/page/enjoy-eco.php",
+      "verifiedAt": "2026-10-11",
+      "dayRule": "HOLIDAY",
+      "conditions": "토·일·공휴일용. 한큐·긴테쓰 등 직통하는 다른 회사 구간은 탈 수 없습니다."
+    },
+    {
+      "key": "kyoto-subway-bus-1day",
+      "name": "교토 지하철·버스 1일권",
+      "city": "교토",
+      "priceYen": 1100,
+      "childPriceYen": 550,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "京都市"
+          ]
+        },
+        {
+          "operators": [
+            "京都バス"
+          ]
+        },
+        {
+          "operators": [
+            "京阪バス"
+          ]
+        },
+        {
+          "operators": [
+            "西日本ジェイアールバス"
+          ]
+        },
+        {
+          "operators": [
+            "西日本JRバス"
+          ]
+        }
+      ],
+      "coverageDescription": "교토 시영 지하철·시버스 전 노선 + 교토버스·게이한버스·서일본JR버스(일부 노선 제외)",
+      "url": "https://oneday-pass.kyoto/overview/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 쓰는 날 하루.",
+      "approximate": true,
+      "note": "교토버스·게이한버스·서일본JR버스는 빠지는 노선이 있습니다."
+    },
+    {
+      "key": "nagoya-bus-subway-1day",
+      "name": "나고야 버스·지하철 전선 1일 승차권",
+      "city": "나고야",
+      "priceYen": 870,
+      "childPriceYen": 430,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "名古屋市"
+          ]
+        }
+      ],
+      "coverageDescription": "나고야 시버스·시영 지하철 전 노선",
+      "url": "https://www.kotsu.city.nagoya.jp/rp/ticket/trp0000310.htm",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 메이테쓰·아오나미선·메이테쓰 버스는 탈 수 없습니다."
+    },
+    {
+      "key": "nagoya-subway-24h",
+      "name": "나고야 지하철 전선 24시간권",
+      "city": "나고야",
+      "priceYen": 760,
+      "childPriceYen": 380,
+      "hours": 24,
+      "coverage": [
+        {
+          "operators": [
+            "名古屋市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "나고야 시영 지하철 전 노선",
+      "url": "https://www.kotsu.city.nagoya.jp/rp/ticket/trp0000310.htm",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 처음 개찰한 때부터 24시간."
+    },
+    {
+      "key": "nagoya-donichi-eco",
+      "name": "나고야 도니치 에코 킷푸",
+      "city": "나고야",
+      "priceYen": 620,
+      "childPriceYen": 310,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "名古屋市"
+          ]
+        }
+      ],
+      "coverageDescription": "나고야 시버스·시영 지하철 전 노선",
+      "url": "https://www.kotsu.city.nagoya.jp/rp/ticket/trp0000310.htm",
+      "verifiedAt": "2026-10-11",
+      "dayRule": "HOLIDAY",
+      "extraDaysOfMonth": [
+        8
+      ],
+      "conditions": "토·일·공휴일과 매월 8일에만 쓸 수 있습니다."
+    },
+    {
+      "key": "nagoya-bus-1day",
+      "name": "나고야 버스 전선 1일 승차권",
+      "city": "나고야",
+      "priceYen": 620,
+      "childPriceYen": 310,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "名古屋市"
+          ],
+          "categories": [
+            "BUS"
+          ]
+        }
+      ],
+      "coverageDescription": "나고야 시버스 전 노선(관광 루트 버스 메구루 포함)",
+      "url": "https://www.kotsu.city.nagoya.jp/rp/ticket/trp0000310.htm",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 메이테쓰 버스는 탈 수 없습니다."
+    },
+    {
+      "key": "sapporo-subway-1day",
+      "name": "삿포로 지하철 전용 1일 승차권",
+      "city": "삿포로",
+      "priceYen": 830,
+      "childPriceYen": 420,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "札幌市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "삿포로 시영 지하철 전 노선 (노면전차·버스 제외)",
+      "url": "https://www.city.sapporo.jp/st/english/fareandticket.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다."
+    },
+    {
+      "key": "sapporo-donichika",
+      "name": "삿포로 도니치카 킷푸",
+      "city": "삿포로",
+      "priceYen": 520,
+      "childPriceYen": 260,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "札幌市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "삿포로 시영 지하철 전 노선 (노면전차·버스 제외)",
+      "url": "https://www.city.sapporo.jp/st/english/fareandticket.html",
+      "verifiedAt": "2026-10-11",
+      "dayRule": "HOLIDAY",
+      "yearEndAsHoliday": true,
+      "conditions": "토·일·공휴일과 12/29~1/3 에만 쓸 수 있습니다."
+    },
+    {
+      "key": "fukuoka-subway-1day",
+      "name": "후쿠오카 시 지하철 1일 승차권",
+      "city": "후쿠오카",
+      "priceYen": 640,
+      "childPriceYen": 320,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "福岡市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "후쿠오카 시 지하철 전 노선(공항선·하코자키선·나나쿠마선)",
+      "url": "https://subway.city.fukuoka.lg.jp/fare/card/oneday.php",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 쓰는 날의 첫차부터 막차까지."
+    },
+    {
+      "key": "sendai-subway-1day",
+      "name": "센다이 지하철 1일 승차권",
+      "city": "센다이",
+      "priceYen": 840,
+      "childPriceYen": 420,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "仙台市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "센다이 시 지하철 전 노선",
+      "url": "https://www.kotsu.city.sendai.jp/waribiki/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다."
+    },
+    {
+      "key": "sendai-subway-1day-holiday",
+      "name": "센다이 지하철 1일 승차권 (토·일·휴일용)",
+      "city": "센다이",
+      "priceYen": 620,
+      "childPriceYen": 310,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "仙台市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "센다이 시 지하철 전 노선",
+      "url": "https://www.kotsu.city.sendai.jp/waribiki/",
+      "verifiedAt": "2026-10-11",
+      "dayRule": "HOLIDAY",
+      "yearEndAsHoliday": true,
+      "conditions": "토·일·공휴일과 연말연시에만 쓸 수 있습니다."
+    },
+    {
+      "key": "hakodate-tram-1day",
+      "name": "하코다테 시덴 1일 승차권",
+      "city": "하코다테",
+      "priceYen": 800,
+      "childPriceYen": 400,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "函館市"
+          ],
+          "categories": [
+            "TRAM"
+          ]
+        }
+      ],
+      "coverageDescription": "하코다테 시덴(노면전차) 전 노선",
+      "url": "https://www.city.hakodate.hokkaido.jp/docs/2025060500015/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 2025-12-01 개정 가격."
+    },
+    {
+      "key": "hakodate-tram-24h",
+      "name": "하코다테 시덴 24시간 승차권",
+      "city": "하코다테",
+      "priceYen": 1130,
+      "childPriceYen": 570,
+      "hours": 24,
+      "coverage": [
+        {
+          "operators": [
+            "函館市"
+          ],
+          "categories": [
+            "TRAM"
+          ]
+        }
+      ],
+      "coverageDescription": "하코다테 시덴(노면전차) 전 노선",
+      "url": "https://www.city.hakodate.hokkaido.jp/docs/2025060500015/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "누구나 살 수 있습니다. 2025-12-01 개정 가격."
+    },
+    {
+      "key": "kumamoto-tram-24h",
+      "name": "구마모토 시덴 24시간 승차권 (모바일)",
+      "city": "구마모토",
+      "priceYen": 600,
+      "childPriceYen": 300,
+      "hours": 24,
+      "coverage": [
+        {
+          "operators": [
+            "熊本市"
+          ],
+          "categories": [
+            "TRAM"
+          ]
+        }
+      ],
+      "coverageDescription": "구마모토 시덴(노면전차) 전 노선",
+      "url": "https://www.kotsu-kumamoto.jp/kihon/pub/detail.aspx?c_id=66&id=1434",
+      "verifiedAt": "2026-10-11",
+      "conditions": "앱·웹에서만 파는 모바일 승차권입니다."
+    },
+    {
+      "key": "kobe-subway-1day",
+      "name": "고베 시영 지하철 QR 1일 승차권",
+      "city": "고베",
+      "priceYen": 980,
+      "days": 1,
+      "coverage": [
+        {
+          "operators": [
+            "神戸市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        }
+      ],
+      "coverageDescription": "고베 시영 지하철 전 노선",
+      "url": "https://kotsu.city.kobe.lg.jp/ensen-navi/bus-railway/kobecitysubwayqr1dayticket/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "스룻토 QRtto 사이트에서 파는 QR 승차권입니다(2026-04-01~2027-03-31 발매). 어른 요금만 있습니다."
+    },
+    {
+      "key": "japan-rail-pass-7d",
+      "name": "JAPAN RAIL PASS 7일 (보통차)",
+      "city": "전국",
+      "priceYen": 50000,
+      "childPriceYen": 25000,
+      "days": 7,
+      "coverage": [
+        {
+          "operators": [
+            "東日本旅客鉄道",
+            "東海旅客鉄道",
+            "西日本旅客鉄道",
+            "北海道旅客鉄道",
+            "四国旅客鉄道",
+            "九州旅客鉄道"
+          ],
+          "categories": [
+            "JR",
+            "SHINKANSEN"
+          ]
+        }
+      ],
+      "coverageDescription": "전국 JR 재래선과 신칸센(노조미·미즈호 제외). JR 버스·미야지마 페리는 계산에 넣지 않았습니다.",
+      "url": "https://japanrailpass.net/en/purchase/price/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "단기 체재 자격의 방일 외국인 전용. 온라인 구매 가격입니다(해외 대리점은 2026-10-01부터 7일 53,000엔 등으로 인상). 노조미·미즈호는 별도 전용권을 사야 탈 수 있습니다.",
+      "note": "신칸센 요금은 자유석 기준 추정이 섞여 있어, 아끼는 금액은 참고용입니다."
+    },
+    {
+      "key": "japan-rail-pass-14d",
+      "name": "JAPAN RAIL PASS 14일 (보통차)",
+      "city": "전국",
+      "priceYen": 80000,
+      "childPriceYen": 40000,
+      "days": 14,
+      "coverage": [
+        {
+          "operators": [
+            "東日本旅客鉄道",
+            "東海旅客鉄道",
+            "西日本旅客鉄道",
+            "北海道旅客鉄道",
+            "四国旅客鉄道",
+            "九州旅客鉄道"
+          ],
+          "categories": [
+            "JR",
+            "SHINKANSEN"
+          ]
+        }
+      ],
+      "coverageDescription": "전국 JR 재래선과 신칸센(노조미·미즈호 제외). JR 버스·미야지마 페리는 계산에 넣지 않았습니다.",
+      "url": "https://japanrailpass.net/en/purchase/price/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "단기 체재 자격의 방일 외국인 전용. 온라인 구매 가격입니다(해외 대리점은 2026-10-01부터 7일 53,000엔 등으로 인상). 노조미·미즈호는 별도 전용권을 사야 탈 수 있습니다.",
+      "note": "신칸센 요금은 자유석 기준 추정이 섞여 있어, 아끼는 금액은 참고용입니다."
+    },
+    {
+      "key": "japan-rail-pass-21d",
+      "name": "JAPAN RAIL PASS 21일 (보통차)",
+      "city": "전국",
+      "priceYen": 100000,
+      "childPriceYen": 50000,
+      "days": 21,
+      "coverage": [
+        {
+          "operators": [
+            "東日本旅客鉄道",
+            "東海旅客鉄道",
+            "西日本旅客鉄道",
+            "北海道旅客鉄道",
+            "四国旅客鉄道",
+            "九州旅客鉄道"
+          ],
+          "categories": [
+            "JR",
+            "SHINKANSEN"
+          ]
+        }
+      ],
+      "coverageDescription": "전국 JR 재래선과 신칸센(노조미·미즈호 제외). JR 버스·미야지마 페리는 계산에 넣지 않았습니다.",
+      "url": "https://japanrailpass.net/en/purchase/price/",
+      "verifiedAt": "2026-10-11",
+      "conditions": "단기 체재 자격의 방일 외국인 전용. 온라인 구매 가격입니다(해외 대리점은 2026-10-01부터 7일 53,000엔 등으로 인상). 노조미·미즈호는 별도 전용권을 사야 탈 수 있습니다.",
+      "note": "신칸센 요금은 자유석 기준 추정이 섞여 있어, 아끼는 금액은 참고용입니다."
+    },
+    {
+      "key": "kansai-railway-pass-lite-2d",
+      "name": "KANSAI RAILWAY PASS LITE 2일권",
+      "city": "간사이",
+      "priceYen": 5200,
+      "days": 2,
+      "coverage": [
+        {
+          "operators": [
+            "大阪市高速電気軌道"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "神戸市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "阪急電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "阪神電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "京阪電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "近畿日本鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ],
+          "boxes": "34.30,135.40,35.05,136.17"
+        },
+        {
+          "operators": [
+            "南海電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE",
+            "THIRD_SECTOR"
+          ]
+        },
+        {
+          "operators": [
+            "山陽電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "神戸電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "大阪モノレール"
+          ]
+        },
+        {
+          "operators": [
+            "神戸新交通"
+          ]
+        },
+        {
+          "operators": [
+            "北大阪急行電鉄"
+          ]
+        },
+        {
+          "operators": [
+            "能勢電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "阪堺電気軌道"
+          ]
+        }
+      ],
+      "coverageDescription": "오사카메트로와 간사이 주요 사철(한큐·한신·게이한·긴테쓰·난카이·산요·고베전철 등)의 지정 구간. JR·교토 시영 지하철·게이한 오쓰선·란덴·버스는 제외",
+      "url": "https://www.surutto.com/kansai_rwpl/en/krp.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "방일 외국인 대상 상품입니다. 2026-10-01~2027-03-31 발매분 기준이며 연속한 날에만 쓸 수 있습니다. 어린이 가격은 공식 안내에 없어 넣지 않았습니다.",
+      "approximate": true,
+      "note": "긴테쓰는 지정 구간(오사카·교토·나라 쪽, 이가칸베·쓰보사카야마까지)만 탈 수 있어 지역 경계로 대략 잡았습니다. 유료 특급은 별도 요금입니다."
+    },
+    {
+      "key": "kansai-railway-pass-lite-3d",
+      "name": "KANSAI RAILWAY PASS LITE 3일권",
+      "city": "간사이",
+      "priceYen": 6500,
+      "days": 3,
+      "coverage": [
+        {
+          "operators": [
+            "大阪市高速電気軌道"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "神戸市"
+          ],
+          "categories": [
+            "SUBWAY"
+          ]
+        },
+        {
+          "operators": [
+            "阪急電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "阪神電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "京阪電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "近畿日本鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ],
+          "boxes": "34.30,135.40,35.05,136.17"
+        },
+        {
+          "operators": [
+            "南海電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE",
+            "THIRD_SECTOR"
+          ]
+        },
+        {
+          "operators": [
+            "山陽電気鉄道"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "神戸電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "大阪モノレール"
+          ]
+        },
+        {
+          "operators": [
+            "神戸新交通"
+          ]
+        },
+        {
+          "operators": [
+            "北大阪急行電鉄"
+          ]
+        },
+        {
+          "operators": [
+            "能勢電鉄"
+          ],
+          "categories": [
+            "PRIVATE"
+          ]
+        },
+        {
+          "operators": [
+            "阪堺電気軌道"
+          ]
+        }
+      ],
+      "coverageDescription": "오사카메트로와 간사이 주요 사철(한큐·한신·게이한·긴테쓰·난카이·산요·고베전철 등)의 지정 구간. JR·교토 시영 지하철·게이한 오쓰선·란덴·버스는 제외",
+      "url": "https://www.surutto.com/kansai_rwpl/en/krp.html",
+      "verifiedAt": "2026-10-11",
+      "conditions": "방일 외국인 대상 상품입니다. 2026-10-01~2027-03-31 발매분 기준이며 연속한 날에만 쓸 수 있습니다. 어린이 가격은 공식 안내에 없어 넣지 않았습니다.",
+      "approximate": true,
+      "note": "긴테쓰는 지정 구간(오사카·교토·나라 쪽, 이가칸베·쓰보사카야마까지)만 탈 수 있어 지역 경계로 대략 잡았습니다. 유료 특급은 별도 요금입니다."
+    }
+  ]
+}

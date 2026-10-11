@@ -40,6 +40,7 @@ public class TransitController {
     private final GtfsImportService gtfsImportService;
     private final GtfsStore gtfsStore;
     private final TransitFeedRepository feedRepository;
+    private final com.travel.planner.service.FareDataService fareDataService;
 
     @GetMapping("/api/v1/transit/route")
     @Operation(summary = "두 지점 사이의 이동 방법·요금 추정",
@@ -229,7 +230,7 @@ public class TransitController {
     }
 
     @GetMapping("/api/v1/admin/transit/status")
-    @Operation(summary = "교통 데이터 상태", description = "철도망 역·연결 수, GTFS 정류장·노선 패턴·피드 수, 번역된 이름 수, 가져오기·번역 작업의 마지막 결과")
+    @Operation(summary = "교통 데이터 상태", description = "철도망 역·연결 수, GTFS 정류장·노선 패턴·피드 수, 번역된 이름 수, 등록된 요금 자료·패스 수, 가져오기·번역 작업의 마지막 결과")
     public Map<String, Object> status() {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("stations", railRouteService.stationCount());
@@ -239,6 +240,7 @@ public class TransitController {
         status.put("gtfsFeeds", feeds().size());
         status.put("odptKeyConfigured", gtfsImportService.hasOdptKey());
         status.put("translatedNames", nameService.translatedCount());
+        status.putAll(fareDataService.status());   // 요금표·역 쌍 요금·영업킬로 노선·패스 수
         status.put("importRunning", importService.isRunning());
         status.put("importMessage", importService.lastMessage());
         status.put("gtfsImportRunning", gtfsImportService.isRunning());

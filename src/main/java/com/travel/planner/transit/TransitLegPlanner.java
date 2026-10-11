@@ -178,29 +178,36 @@ public final class TransitLegPlanner {
                     } else {
                         networkRides++;
                         rides.add(lineLabel(step) + " " + from + " → " + to + " (" + s.stops + "정거장)");
+                        fillNetworkFare(step, s, route, names);
                     }
                     break;
             }
             leg.getSteps().add(step);
         }
+        leg.setFareRides(PassAdvisor.ridesOf(route));
         leg.setMode(String.join("·", categories));
         leg.setMinutes(route.minutes);
         leg.setFareYen(route.fareYen);
         leg.setChildFareYen(route.childFareYen);
         leg.setTransfers(route.transfers);
         leg.setSource(scheduledRides == 0 ? "rail-network" : networkRides == 0 ? "gtfs" : "rail-network+gtfs");
-        leg.setFareSource(route.estimatedFareRides == 0 ? "official" : route.confirmedFareRides == 0 ? "estimate" : "mixed");
+        leg.setFareSource(fareSource(route));
         leg.setSummary(String.join(" / 환승 / ", rides));
 
         StringBuilder note = new StringBuilder();
-        if (networkRides > 0) {
-            note.append("철도 구간은 전국 철도망 기준 추정입니다. 열차 시각·급행 운행·운영사별 실제 요금표는 반영하지 않았습니다.");
-        }
+        if (networkRides > 0) note.append(networkNote(route));
         if (scheduledRides > 0) {
             if (note.length() > 0) note.append(' ');
             note.append("버스 등은 운영사가 공개한 시각표 자료(GTFS)의 평균 소요 시간과 운행 간격으로 계산했습니다. 실제 출발 시각은 현지 시간표로 확인해 주세요.");
-            if (route.confirmedFareRides > 0) {
-                note.append(route.estimatedFareRides == 0 || networkRides == route.estimatedFareRides
+            int listed = 0;      // 요금표에 요금이 있는 버스 등의 승차 수
+            int unlisted = 0;
+            for (RailGraph.Step s : route.steps) {
+                if (s.kind != RailGraph.Step.Kind.RIDE || !s.scheduled) continue;
+                if (s.fareConfirmed) listed++;
+                else unlisted++;
+            }
+            if (listed > 0) {
+                note.append(unlisted == 0
                         ? " 버스 요금은 운영사 요금표(현금 성인) 기준입니다."
                         : " 요금표에 없는 구간의 요금은 거리 기준 추정입니다.");
             } else {
@@ -215,12 +222,71 @@ public final class TransitLegPlanner {
         return leg;
     }
 
+    /**
+     * 구간 전체 요금의 근거.
+     *  official: 모든 요금이 운영사가 정한 값 / table: 추정 없이 운영사 요금표(+계산 거리)로 구함
+     *  estimate: 전부 추정 / mixed: 추정이 일부 섞임
+     */
+    static String fareSource(RailGraph.Route route) {
+        int official = 0;
+        int table = 0;
+        int estimate = 0;
+        for (RailGraph.FareBlock block : route.fareBlocks) {
+            if (block.basis == FareBook.Basis.OFFICIAL) official++;
+            else if (block.basis == FareBook.Basis.TABLE) table++;
+            else estimate++;
+        }
+        if (estimate == 0) return table == 0 ? "official" : "table";
+        return official + table == 0 ? "estimate" : "mixed";
+    }
+
+    /** 철도망 구간의 요금을 어떻게 구했는지 설명하는 문장 */
+    private static String networkNote(RailGraph.Route route) {
+        boolean table = false;
+        boolean official = false;
+        boolean estimate = false;
+        boolean shinkansen = false;
+        for (RailGraph.FareBlock block : route.fareBlocks) {
+            if (block.scheduled) continue;
+            if (block.surchargeYen > 0) shinkansen = true;
+            if (block.tableKey != null) table = true;
+            else if (block.basis == FareBook.Basis.OFFICIAL) official = true;
+            else estimate = true;
+        }
+        if (!table && !official) {
+            // 등록된 요금 자료가 없는 운영사만 탔다
+            return "철도 구간은 전국 철도망 기준 추정입니다. 열차 시각·급행 운행·운영사별 실제 요금표는 반영하지 않았습니다.";
+        }
+        StringBuilder note = new StringBuilder("철도 구간의 시간은 전국 철도망 기준 추정이며 열차 시각·급행 운행은 반영하지 않았습니다.");
+        if (table) note.append(" 철도 요금은 운영사 요금표에 철도망에서 잰 거리를 넣어 계산했습니다(현금·승차권 기준, 요금 구간의 경계 근처에서는 한 단계 다를 수 있습니다).");
+        if (official) note.append(" 등록해 둔 역 사이 확정 요금을 쓴 구간이 있습니다.");
+        if (estimate) note.append(" 요금표가 등록되지 않은 운영사의 요금은 종류별 대표 요금표로 추정했습니다.");
+        if (shinkansen) note.append(" 신칸센은 자유석 기준이며, 특급요금은 확정 요금이 등록된 구간이 아니면 거리 구간별 추정입니다.");
+        return note.toString();
+    }
+
+    /** 철도망 승차 단계에 요금을 적는다. 같은 회사를 이어 타면 표 한 장이므로 묶음의 첫 승차에만 요금이 들어간다. */
+    private static void fillNetworkFare(TransitLegDto.Step step, RailGraph.Step s, RailGraph.Route route, Names names) {
+        if (s.fareBlock < 0 || s.fareBlock >= route.fareBlocks.size()) return;
+        RailGraph.FareBlock block = route.fareBlocks.get(s.fareBlock);
+        if (block.rides.isEmpty() || block.rides.get(0) != s) return;
+        step.setFareYen(block.fareYen);
+        step.setFareBasis(block.basis.code);
+        step.setFareConfirmed(block.basis == FareBook.Basis.OFFICIAL);
+        if (block.surchargeYen > 0) step.setSurchargeYen(block.surchargeYen);
+        if (block.rides.size() > 1) {
+            RailGraph.Step last = block.rides.get(block.rides.size() - 1);
+            if (last.to != null) step.setFareThroughTo(stationName(names, last.to));
+        }
+    }
+
     private static void fillScheduled(TransitLegDto.Step step, RailGraph.Step s) {
         step.setFromOriginal(s.from);
         step.setToOriginal(s.to);
         step.setHeadsign(s.headsign);
         step.setFareYen(s.fareYen);
         step.setFareConfirmed(s.fareConfirmed);
+        step.setFareBasis(s.fareConfirmed ? FareBook.Basis.OFFICIAL.code : FareBook.Basis.ESTIMATE.code);
         step.setTripsPerDay(s.tripsPerDay);
         step.setHeadwayMinutes(s.headwayMinutes);
         step.setFirstDeparture(clock(s.firstDeparture));

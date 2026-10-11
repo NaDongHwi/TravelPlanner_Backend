@@ -8,4 +8,6 @@ import java.util.List;
 @Repository
 public interface TransportPassRepository extends JpaRepository<TransportPass, Long> {
     List<TransportPass> findByCity(String city);
+    List<TransportPass> findBySource(String source);
+    List<TransportPass> findByPassKey(String passKey);
 }

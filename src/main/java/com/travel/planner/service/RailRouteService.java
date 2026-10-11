@@ -47,6 +47,7 @@ public class RailRouteService {
     private final TransitPatternRepository patternRepository;
     private final TransitFeedRepository feedRepository;
     private final TransitNameService names;
+    private final FareDataService fareData;
 
     private volatile RailGraph graph;
     private volatile boolean loaded;
@@ -198,7 +199,10 @@ public class RailRouteService {
     public TransitLegDto leg(double fromLat, double fromLng, String fromName, double toLat, double toLng, String toName,
                              String transportation, int scheduleMinutes, LocalDate date, Integer departMinute) {
         try {
-            return TransitLegPlanner.plan(graph(), nameLookup, fromLat, fromLng, fromName, toLat, toLng, toName,
+            RailGraph network = graph();
+            // 요금 자료는 교통망과 따로 바뀌므로(관리자가 요금표를 고치는 등) 쓸 때마다 최신 것을 물린다
+            if (network != null) network.setFareBook(fareData.fareBook());
+            return TransitLegPlanner.plan(network, nameLookup, fromLat, fromLng, fromName, toLat, toLng, toName,
                     transportation == null ? "대중교통" : transportation, scheduleMinutes, date, departMinute);
         } catch (Exception e) {
             System.out.println("[교통] 구간 계산 실패(" + fromName + " → " + toName + "): " + e.getMessage());

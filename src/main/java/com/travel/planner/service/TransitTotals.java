@@ -42,6 +42,7 @@ public final class TransitTotals {
         int unknownRoute = 0;
         int officialFare = 0;
         int railEstimate = 0;
+        int railTable = 0;
         for (AiRouteResponse.TimelineItem item : response.getTimeline()) {
             TransitLegDto leg = item.getTransit();
             if (leg == null) continue;
@@ -50,8 +51,16 @@ public final class TransitTotals {
                 if (leg.getFareYen() > 0) priced++;
             }
             if ("distance".equals(leg.getSource()) && leg.getFareYen() != null) unknownRoute++;
-            if ("official".equals(leg.getFareSource()) || "mixed".equals(leg.getFareSource())) officialFare++;
-            if (leg.getSource() != null && leg.getSource().startsWith("rail-network")) railEstimate++;
+            boolean rail = leg.getSource() != null && leg.getSource().startsWith("rail-network");
+            if (hasFareBasis(leg)) {
+                // 승차 단계마다 요금의 근거가 적혀 있다
+                if (hasListedBusFare(leg)) officialFare++;
+                if (rail && hasRailFare(leg, "estimate")) railEstimate++;
+                if (rail && (hasRailFare(leg, "table") || hasRailFare(leg, "official"))) railTable++;
+            } else {
+                if ("official".equals(leg.getFareSource()) || "mixed".equals(leg.getFareSource())) officialFare++;
+                if (rail) railEstimate++;
+            }
         }
         if (priced == 0) return;   // 전부 도보이거나 자동차 여행
 
@@ -60,8 +69,13 @@ public final class TransitTotals {
         if (!networkLoaded) {
             note.append(" 교통 데이터(전국 철도망·버스 노선)를 아직 가져오지 않아 모든 구간을 거리 기준으로만 계산했습니다.");
         } else {
+            if (railTable > 0) {
+                note.append(" 철도 ").append(railTable).append("개 구간은 운영사 요금표(현금·승차권 기준)에 철도망에서 잰 거리를 넣어 계산했습니다. 요금 구간의 경계 근처에서는 한 단계 다를 수 있습니다.");
+            }
             if (railEstimate > 0) {
-                note.append(" 철도 구간은 전국 철도망의 선로 거리와 종류별 요금표로 계산했고, 열차 시각·급행·패스 할인은 반영하지 않았습니다.");
+                note.append(railTable > 0
+                        ? " 요금표가 등록되지 않은 운영사와 신칸센 특급요금은 종류별 대표 요금표로 추정했습니다."
+                        : " 철도 구간은 전국 철도망의 선로 거리와 종류별 요금표로 계산했고, 열차 시각·급행·패스 할인은 반영하지 않았습니다.");
             }
             if (officialFare > 0) {
                 note.append(" 버스 등 ").append(officialFare).append("개 구간의 요금은 운영사가 공개한 요금표(현금 성인) 기준입니다.");
@@ -74,6 +88,29 @@ public final class TransitTotals {
         if (response.getReason() != null) {
             response.setReason(response.getReason() + " 교통비는 합계 약 " + yen(total) + "(성인 1인, 추정)입니다.");
         }
+    }
+
+    private static boolean hasFareBasis(TransitLegDto leg) {
+        for (TransitLegDto.Step step : leg.getSteps()) {
+            if (step.getFareBasis() != null) return true;
+        }
+        return false;
+    }
+
+    /** 버스 등 GTFS 노선 가운데 운영사 요금표에 요금이 있는 승차가 있는가 */
+    private static boolean hasListedBusFare(TransitLegDto leg) {
+        for (TransitLegDto.Step step : leg.getSteps()) {
+            if (step.getTripsPerDay() != null && Boolean.TRUE.equals(step.getFareConfirmed())) return true;
+        }
+        return false;
+    }
+
+    /** 철도망 승차 가운데 요금 근거가 basis 인 것이 있는가 */
+    private static boolean hasRailFare(TransitLegDto leg, String basis) {
+        for (TransitLegDto.Step step : leg.getSteps()) {
+            if (step.getTripsPerDay() == null && basis.equals(step.getFareBasis())) return true;
+        }
+        return false;
     }
 
     static String yen(int amount) {

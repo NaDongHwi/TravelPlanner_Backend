@@ -47,6 +47,7 @@ public class PlanGenerationService {
     private final WeatherService weatherService;
     private final PlaceDescriptionService placeDescriptionService;
     private final RailRouteService railRouteService;
+    private final PassAdvisorService passAdvisorService;
 
     public AiRouteResponse createPlan(String email, PlanRequest request) {
         // ------------------------------------------------------------------
@@ -142,6 +143,8 @@ public class PlanGenerationService {
         response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage(), request.getTransportation()));
         // 구간별 교통 정보에서 일자별·전체 교통비를 합산해 개요와 요약에 붙인다
         TransitTotals.apply(response, railRouteService.isNetworkLoaded());
+        // 여행 전체의 요금 합계와 견주어 이득인 교통 패스를 고른다
+        passAdvisorService.apply(response);
         response.setWarnings(warnings);
 
         Plan saved = planPersistenceService.saveNewPlan(user, request, tripPlan.getDays(), accommodationEntities, response.getReason());

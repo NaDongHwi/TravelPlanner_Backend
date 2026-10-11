@@ -1,5 +1,7 @@
 package com.travel.planner.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.travel.planner.transit.PassAdvisor;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -20,12 +22,17 @@ public class TransitLegDto {
     private Integer childFareYen;   // 아동 1인 요금(엔)
     private boolean estimated;      // 소요 시간이 추정값인가 (개별 출발 시각을 쓰지 않으므로 항상 true)
     private String source;          // "walk" / "rail-network"(전국 철도망) / "gtfs"(운영사 시각표 자료) / "rail-network+gtfs" / "distance"(노선 미확인, 거리 기준)
-    private String fareSource;      // "official"(운영사 요금표) / "estimate"(거리 기준 추정) / "mixed"(일부만 요금표). 도보·자동차는 null
+    private String fareSource;      // 요금의 근거. "official"(운영사가 정한 값: 버스 등의 요금표, 등록한 역 쌍 요금) / "table"(운영사 요금표에 계산한 거리를 넣은 값)
+                                    // / "estimate"(종류별 대표 요금표나 거리로 추정) / "mixed"(추정이 일부 섞임). 도보·자동차는 null
     private String summary;         // 한 줄 요약: "JR 야마노테선 신주쿠역 → 시부야역 (3정거장)"
     private String note;            // 주의할 점 (추정 기준, 운행 횟수가 적은 노선 등)
     private Double distanceKm;      // 직선거리
     private int transfers;          // 환승 횟수
     private List<Step> steps = new ArrayList<>();
+
+    /** 패스 추천 계산용: 이 구간에서 요금을 낸 단위들 (운영사·노선 원문, 좌표 포함). 응답에는 내보내지 않는다 */
+    @JsonIgnore
+    private List<PassAdvisor.Ride> fareRides = new ArrayList<>();
 
     @Getter
     @Setter
@@ -45,11 +52,16 @@ public class TransitLegDto {
         private String toOriginal;
         private String headsign;         // 행선지 표시 (일본어 원문)
         private Integer fareYen;         // 이 구간 요금
-        private Boolean fareConfirmed;   // true = 운영사 요금표, false = 거리 기준 추정
+        private Boolean fareConfirmed;   // true = 운영사가 정한 값, false = 요금표에 거리를 넣었거나 추정한 값
         private Integer tripsPerDay;     // 이 구간을 바로 가는 편의 하루 운행 횟수 (그 요일 기준)
         private Integer headwayMinutes;  // 평균 운행 간격(분)
         private String firstDeparture;   // 타는 정류장 기준 첫차 "06:35"
         private String lastDeparture;    // 막차 "21:10"
         private List<String> alternatives;   // 같은 구간을 바로 가는 다른 노선
+
+        // ---- 승차 단계의 요금 (철도는 같은 회사를 이어 타면 표 한 장이므로, 묶음의 첫 승차에만 요금이 들어간다) ----
+        private String fareBasis;        // "official" / "table" / "estimate" (위 fareSource 와 같은 뜻)
+        private String fareThroughTo;    // 이 요금으로 갈아타며 계속 가는 마지막 역 (한 번만 타면 null)
+        private Integer surchargeYen;    // fareYen 에 들어 있는 신칸센 자유석 특급요금 (없으면 null)
     }
 }

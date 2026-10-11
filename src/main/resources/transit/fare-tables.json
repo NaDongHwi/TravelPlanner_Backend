@@ -1,0 +1,1079 @@
+{
+  "version": "2026-10-11",
+  "tables": [
+    {
+      "key": "jr-east",
+      "name": "JR 동일본 간선",
+      "operators": [
+        "東日本旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:160,6:200,10:210,15:260,20:350,25:440,30:530,35:620,40:720,45:810,50:910,60:1040,70:1230,80:1410,90:1600,100:1790,120:2090,140:2420,160:2750,180:3190,200:3520,220:3850,240:4180,260:4620,280:5060,300:5390,320:5720,340:5940,360:6270,380:6600,400:6930,420:7260,440:7480,460:7810,480:8030,500:8360,520:8690,540:9020,560:9350,580:9570,600:9900,640:10230,680:10450,720:10780,760:11110,800:11440,840:11770,880:11990,920:12320,960:12650,1000:12980,1040:13310,1080:13640,1120:13860,1160:14190,1200:14520",
+      "childRoundDown": true,
+      "effectiveFrom": "2026-03-14",
+      "reference": "https://jr-group.jp/higashinihon-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음). 2026년 3월 개정으로 전차특정구간·야마노테선내 운임이 없어져 수도권도 이 표를 씁니다. 45km 까지는 JR 동일본의 개정 안내 책자(jreast.co.jp/2026unchin-kaitei)의 표와도 일치합니다."
+    },
+    {
+      "key": "jr-central",
+      "name": "JR 도카이 간선",
+      "operators": [
+        "東海旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:150,6:190,10:200,15:240,20:330,25:420,30:510,35:590,40:680,45:770,50:860,60:990,70:1170,80:1340,90:1520,100:1690,120:1980,140:2310,160:2640,180:3080,200:3410,220:3740,240:4070,260:4510,280:4840,300:5170,320:5500,340:5720,360:6050,380:6380,400:6600,420:6930,440:7150,460:7480,480:7700,500:8030,520:8360,540:8580,560:8910,580:9130,600:9460,640:9790,680:10010,720:10340,760:10670,800:11000,840:11330,880:11550,920:11880,960:12210,1000:12540,1040:12870,1080:13200,1120:13420,1160:13750,1200:14080",
+      "childRoundDown": true,
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://jr-group.jp/tokai-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음). 1,001km 이상 구간은 동일본 표와의 차(440엔)로 확인한 값입니다."
+    },
+    {
+      "key": "jr-west",
+      "name": "JR 서일본 간선",
+      "operators": [
+        "西日本旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:150,6:190,10:200,15:240,20:330,25:420,30:510,35:590,40:680,45:770,50:860,60:990,70:1170,80:1340,90:1520,100:1690,120:1980,140:2310,160:2640,180:3080,200:3410,220:3740,240:4070,260:4510,280:4840,300:5170,320:5500,340:5720,360:6050,380:6380,400:6600,420:6930,440:7150,460:7480,480:7700,500:8030,520:8360,540:8580,560:8910,580:9130,600:9460,640:9790,680:10010,720:10340,760:10670,800:11000,840:11330,880:11550,920:11880,960:12210,1000:12540,1040:12870,1080:13200,1120:13420,1160:13750,1200:14080",
+      "childRoundDown": true,
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://jr-group.jp/nishinihon-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음). 간사이공항선 가산운임(히네노~간사이공항 220엔, ~린쿠타운 160엔) 포함.",
+      "stationAdds": "関西空港:220,りんくうタウン:160"
+    },
+    {
+      "key": "jr-west-keihanshin",
+      "name": "JR 서일본 게이한신 전차특정구간",
+      "operators": [
+        "西日本旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:150,6:180,10:200,15:240,20:320,25:410,30:490,35:580,40:660,45:750,50:840,60:960,70:1120,80:1300,90:1460,100:1640,120:1880,140:2210,160:2540,180:2870,200:3200",
+      "childRoundDown": true,
+      "effectiveFrom": "2025-04-01",
+      "reference": "https://jr-group.jp/nishinihon-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "2025년 4월 개정 표(오사카 순환선내 운임 통합). 적용 범위(야스·가타타·가메오카·조요·마쓰이야마테·나라·와카야마·간사이공항·신산다·아보시 안쪽)를 사각형 다섯 개로 대략 잡았기 때문에 경계 밖의 지선 몇 역이 포함될 수 있습니다. 간선 표와의 차이는 구간당 10~80엔입니다.",
+      "boxes": "34.62,134.58,34.86,135.20;34.55,135.19,34.93,135.72;34.84,135.57,35.12,136.03;34.57,135.69,34.70,135.84;34.22,135.17,34.56,135.52",
+      "stationAdds": "関西空港:220,りんくうタウン:160"
+    },
+    {
+      "key": "jr-hokkaido",
+      "name": "JR 홋카이도 간선",
+      "operators": [
+        "北海道旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:210,6:270,10:310,15:360,20:470,25:580,30:680,35:800,40:920,45:1040,50:1210,60:1380,70:1590,80:1800,90:2020,100:2240,120:2530,140:3080,160:3520,180:3960,200:4400,220:4840,240:5170,260:5610,280:5940,300:6270,320:6600,340:6820,360:7150,380:7480,400:7700,420:8030,440:8250,460:8580,480:8800,500:9130,520:9460,540:9680,560:10010,580:10230,600:10560",
+      "childRoundDown": true,
+      "effectiveFrom": "2025-04-01",
+      "reference": "https://jr-group.jp/hokkaido-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음). 신치토세공항 가산운임 20엔 포함(삿포로–신치토세공항 1,230엔으로 대조).",
+      "stationAdds": "新千歳空港:20"
+    },
+    {
+      "key": "jr-shikoku",
+      "name": "JR 시코쿠",
+      "operators": [
+        "四国旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:190,6:240,10:280,15:330,20:430,25:530,30:630,35:740,40:850,45:980,50:1080,60:1240,70:1430,80:1640,90:1830,100:2010,120:2310,140:2750,160:3190,180:3630,200:3960,220:4400,240:4730,260:5170,280:5500,300:5830,320:6160,340:6380,360:6710,380:7040,400:7260",
+      "childRoundDown": true,
+      "effectiveFrom": "2023-05-20",
+      "reference": "https://jr-group.jp/shikoku-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음)."
+    },
+    {
+      "key": "jr-kyushu",
+      "name": "JR 규슈",
+      "operators": [
+        "九州旅客鉄道"
+      ],
+      "categories": [
+        "JR"
+      ],
+      "bands": "3:200,6:240,10:270,15:340,20:450,25:560,30:660,35:760,40:870,45:990,50:1090,60:1300,70:1510,80:1730,90:1930,100:2130,120:2420,140:2860,160:3300,180:3740,200:4180,220:4510,240:4950,260:5390,280:5830,300:6270,320:6600,340:6820,360:7150,380:7480,400:7700,420:8030,440:8250,460:8580,480:8800,500:9130",
+      "childRoundDown": true,
+      "effectiveFrom": "2025-04-01",
+      "reference": "https://jr-group.jp/kyushu-fare/",
+      "verifiedAt": "2026-10-11",
+      "note": "JR 그룹 운임을 정리한 안내 사이트(민간 운영)의 표를 옮겼고, 보도자료에 나온 구간 요금 몇 개와 맞는지 대조했습니다. 간선 표만 넣었습니다(지방교통선의 조금 비싼 표, 회사 사이를 넘어갈 때의 가산액은 반영하지 않음). 101~120km 는 원문에 \"2,42\"로 적혀 있어 2,420엔으로 읽었습니다."
+    },
+    {
+      "key": "tokyo-metro",
+      "name": "도쿄메트로",
+      "operators": [
+        "東京地下鉄"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "6:180,11:210,19:260,27:300,40:330",
+      "effectiveFrom": "2023-03-18",
+      "reference": "https://www.tokyometro.jp/ticket/types/regular/index.html",
+      "verifiedAt": "2026-10-11",
+      "note": "승차권(현금) 운임. IC 운임은 2~8엔 쌉니다."
+    },
+    {
+      "key": "toei-subway",
+      "name": "도에이 지하철",
+      "operators": [
+        "東京都"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "4:180,9:220,15:280,21:330,27:380,46:430",
+      "effectiveFrom": "2023-03-18",
+      "reference": "https://www.kotsu.metro.tokyo.jp/subway/fare/regular.html",
+      "verifiedAt": "2026-10-11",
+      "note": "닛포리·도네리 라이너는 요금 체계가 달라 이 표를 쓰지 않습니다.",
+      "exceptLines": [
+        "日暮里・舎人ライナー"
+      ]
+    },
+    {
+      "key": "osaka-metro",
+      "name": "오사카메트로 (지하철·뉴트램)",
+      "operators": [
+        "大阪市高速電気軌道"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "3:190,7:240,13:290,19:340,999:390",
+      "effectiveFrom": "2023-04-01",
+      "reference": "https://subway.osakametro.co.jp/guide/fare/fare/price.php",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "kyoto-subway",
+      "name": "교토 시영 지하철",
+      "operators": [
+        "京都市"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "3:220,7:260,11:290,15:330,999:360",
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://www2.city.kyoto.lg.jp/kotsu/webguide/ja/fare/fare_tika.html",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "nagoya-subway",
+      "name": "나고야 시영 지하철",
+      "operators": [
+        "名古屋市"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "3:210,7:240,11:270,15:310,999:340",
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://www.kotsu.city.nagoya.jp/rp/subway/trp0000172.htm",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "fukuoka-subway",
+      "name": "후쿠오카 시 지하철",
+      "operators": [
+        "福岡市"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "3:210,7:260,11:300,15:340,19:360,999:380",
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://subway.city.fukuoka.lg.jp/fare/futuken/",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "sapporo-subway",
+      "name": "삿포로 시영 지하철",
+      "operators": [
+        "札幌市"
+      ],
+      "categories": [
+        "SUBWAY"
+      ],
+      "bands": "3:210,7:250,11:290,15:330,19:360,999:380",
+      "effectiveFrom": "2019-10-01",
+      "reference": "https://pricey.jp/web/articles/4612",
+      "verifiedAt": "2026-10-11",
+      "note": "요금을 정리한 기사에서 옮긴 값입니다(마코마나이–삿포로 9.4km 290엔으로 대조)."
+    },
+    {
+      "key": "hankyu",
+      "name": "한큐 전철",
+      "operators": [
+        "阪急電鉄"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "4:170,9:200,14:240,19:280,26:290,33:330,42:390,51:410,60:480,70:540,76:640",
+      "effectiveFrom": "2023-04-01",
+      "reference": "https://www.hankyu.co.jp/files/upload/topics/230117Bar/230117_ft.pdf",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "hanshin",
+      "name": "한신 전철",
+      "operators": [
+        "阪神電気鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "4:160,8:200,13:250,18:280,24:300,30:320,34:330",
+      "effectiveFrom": "2023-04-01",
+      "reference": "https://www.hanshin.co.jp/safety/barrierfree/pdf/barrierfree_fare_hanshin.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "한신 난바선(니시쿠조~오사카난바) 가산운임을 역 4곳에 90엔으로 넣었습니다. 실제 가산은 가장 짧은 구간(1~4km)에서 60엔이라 그 구간은 30엔 높게 나옵니다.",
+      "stationAdds": "大阪難波:90,桜川:90,ドーム前:90,九条:90"
+    },
+    {
+      "key": "keihan",
+      "name": "게이한 전철 (게이한선)",
+      "operators": [
+        "京阪電気鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:180,7:240,12:320,17:360,22:400,28:420,34:440,40:460,46:480,52:490,54:500",
+      "effectiveFrom": "2025-10-01",
+      "reference": "https://www.keihan.co.jp/traffic/unchinkaitei_2025/pdf/sinsei_untin_2503.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "나카노시마선·오토선 가산운임 60엔 포함(그 노선의 역에서 타거나 내릴 때).",
+      "stationAdds": "中之島:60,渡辺橋:60,大江橋:60,なにわ橋:60,神宮丸太町:60,出町柳:60"
+    },
+    {
+      "key": "keihan-otsu",
+      "name": "게이한 전철 (오쓰선)",
+      "operators": [
+        "京阪電気鉄道"
+      ],
+      "categories": [
+        "TRAM"
+      ],
+      "bands": "5:200,10:280,15:380",
+      "effectiveFrom": "2025-10-01",
+      "reference": "https://www.keihan.co.jp/traffic/unchinkaitei_2025/pdf/sinsei_untin_2503.pdf",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "kintetsu",
+      "name": "긴테쓰",
+      "operators": [
+        "近畿日本鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:180,6:240,10:300,14:360,18:430,22:490,26:530,30:590,35:680,40:760,45:830,50:910,55:1000,60:1070,65:1140,70:1210,75:1290,80:1370,85:1450,90:1530,95:1600,100:1670,110:1740,120:1880,130:2040,140:2170,150:2310,160:2430,170:2560,180:2710,190:2860,200:3000,210:3130,220:3280,230:3410,240:3560,250:3690",
+      "effectiveFrom": "2023-04-01",
+      "reference": "https://www.kintetsu.co.jp/all_news/news_info/HP_unchinninka.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "특급요금과 요시노·유노야마·도바·시마·게이한나선의 가산운임은 포함하지 않습니다."
+    },
+    {
+      "key": "nankai",
+      "name": "난카이 전철",
+      "operators": [
+        "南海電気鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:180,7:240,11:290,15:370,19:420,23:490,27:540,31:610,35:650,39:690,44:740,49:790,54:850,59:880,64:930,69:970,74:1010,80:1060,86:1090,92:1140,98:1190,104:1230,110:1280,116:1320,122:1360,128:1400",
+      "effectiveFrom": "2023-10-01",
+      "reference": "https://www.nankai.co.jp/lib/company/news/pdf/230203.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "공항선 가산운임 230엔 포함(난바–간사이공항 970엔으로 대조). 센보쿠선은 이 표를 쓰지 않습니다.",
+      "stationAdds": "関西空港:230"
+    },
+    {
+      "key": "keikyu",
+      "name": "게이큐",
+      "operators": [
+        "京浜急行電鉄"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:150,6:180,10:230,15:280,20:320,25:350,30:410,35:460,40:510,45:570,50:620,55:670,60:710,67:740",
+      "effectiveFrom": "2023-10-01",
+      "reference": "https://www.keikyu.co.jp/cp/unchinkaitei/pdf/futsuu_unchin.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "하네다공항 제1·제2터미널역 가산운임 50엔 포함(제3터미널역은 가산 없음).",
+      "stationAdds": "羽田空港第1・第2ターミナル:50"
+    },
+    {
+      "key": "keio",
+      "name": "게이오 전철",
+      "operators": [
+        "京王電鉄"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "4:140,6:160,9:190,12:210,15:230,19:280,24:320,30:360,37:390,44:410,52:430",
+      "effectiveFrom": "2023-10-01",
+      "reference": "https://www.keio.co.jp/news/update/announce/announce2023/2023unchinkaitei.pdf",
+      "verifiedAt": "2026-10-11"
+    },
+    {
+      "key": "meitetsu",
+      "name": "메이테쓰 (나고야 본선)",
+      "operators": [
+        "名古屋鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:180,4:210,7:250,8:270,12:330,16:400,20:460,24:510,28:570,32:630,36:690,40:750,44:830,48:900,52:980,56:1050,60:1120,64:1190,68:1270,72:1320,76:1380,80:1430,85:1500,90:1550,95:1610,100:1670,110:1760,120:1860,130:1950,143:2050",
+      "effectiveFrom": "2024-03-16",
+      "reference": "https://www.mlit.go.jp/common/001625142.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "운임 개정 인가 신청 자료의 상한 운임입니다. 메이테쓰는 지선(B·C선)의 거리를 1.15~1.25배로 쳐서 요금을 내므로, 할증이 없는 나고야 본선만 탄 구간에만 이 표를 씁니다. 다른 노선(공항선·이누야마선 등)이 섞이면 추정으로 넘어갑니다.",
+      "lines": [
+        "名古屋本線"
+      ]
+    },
+    {
+      "key": "nishitetsu",
+      "name": "니시테쓰 전철",
+      "operators": [
+        "西日本鉄道"
+      ],
+      "categories": [
+        "PRIVATE"
+      ],
+      "bands": "3:180,6:240,9:300,13:360,17:420,21:480,26:540,31:600,36:660,41:720,46:780,51:840,56:900,61:960,66:1020,71:1080,75:1140",
+      "effectiveFrom": "2026-04-01",
+      "reference": "https://www.mlit.go.jp/common/001977918.pdf",
+      "verifiedAt": "2026-10-11",
+      "note": "2026년 4월 운임 개정 인가 신청 자료의 상한 운임입니다. 실제 시행 운임과 다르면 고쳐 주세요."
+    }
+  ],
+  "pairs": [
+    {
+      "group": "JR",
+      "a": "大阪",
+      "b": "京都",
+      "kind": "FARE",
+      "adultYen": 580,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로)"
+    },
+    {
+      "group": "JR",
+      "a": "大阪",
+      "b": "三ノ宮",
+      "kind": "FARE",
+      "adultYen": 420,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로)"
+    },
+    {
+      "group": "JR",
+      "a": "京都",
+      "b": "三ノ宮",
+      "kind": "FARE",
+      "adultYen": 1110,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로)"
+    },
+    {
+      "group": "JR",
+      "a": "JR難波",
+      "b": "奈良",
+      "kind": "FARE",
+      "adultYen": 580,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로)"
+    },
+    {
+      "group": "JR",
+      "a": "天王寺",
+      "b": "和歌山",
+      "kind": "FARE",
+      "adultYen": 900,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로)"
+    },
+    {
+      "group": "JR",
+      "a": "大阪",
+      "b": "宝塚",
+      "kind": "FARE",
+      "adultYen": 340,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://tabiris.com/archives/jrwest-fare2025/",
+      "note": "JR 서일본이 따로 정한 특정 구간 운임 (2025년 4월 개정 뒤에도 그대로) (개정 후 340엔)"
+    },
+    {
+      "group": "南海電気鉄道",
+      "a": "りんくうタウン",
+      "b": "関西空港",
+      "kind": "FARE",
+      "adultYen": 370,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.nankai.co.jp/lib/company/news/pdf/230203.pdf",
+      "note": "난카이가 따로 정한 특정 운임"
+    },
+    {
+      "group": "JR",
+      "a": "京都",
+      "b": "奈良",
+      "kind": "FARE",
+      "adultYen": 720,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://trafficnews.jp/post/521899/2",
+      "note": "JR 서일본의 특정 구간 운임 (2025년 4월 개정 뒤의 운임으로 보도된 값)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "西船橋",
+      "kind": "FARE",
+      "adultYen": 350,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新橋",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 910,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "浜松町",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 910,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "田町",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 910,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "品川",
+      "b": "東神奈川",
+      "kind": "FARE",
+      "adultYen": 350,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "品川",
+      "b": "横浜",
+      "kind": "FARE",
+      "adultYen": 350,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "西大井",
+      "b": "横浜",
+      "kind": "FARE",
+      "adultYen": 350,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "品川",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 810,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "大井町",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 810,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "西大井",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 810,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "横浜",
+      "b": "逗子",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "渋谷",
+      "b": "新子安",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "渋谷",
+      "b": "東神奈川",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "渋谷",
+      "b": "横浜",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "恵比寿",
+      "b": "東神奈川",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "恵比寿",
+      "b": "横浜",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "目黒",
+      "b": "横浜",
+      "kind": "FARE",
+      "adultYen": 440,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "渋谷",
+      "b": "吉祥寺",
+      "kind": "FARE",
+      "adultYen": 290,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "大久保",
+      "b": "八王子",
+      "kind": "FARE",
+      "adultYen": 620,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新宿",
+      "b": "八王子",
+      "kind": "FARE",
+      "adultYen": 620,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "大久保",
+      "b": "高尾",
+      "kind": "FARE",
+      "adultYen": 720,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "東中野",
+      "b": "高尾",
+      "kind": "FARE",
+      "adultYen": 720,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新宿",
+      "b": "高尾",
+      "kind": "FARE",
+      "adultYen": 720,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "大久保",
+      "b": "昭島",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "大久保",
+      "b": "拝島",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "東中野",
+      "b": "拝島",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新宿",
+      "b": "中神",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新宿",
+      "b": "昭島",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新宿",
+      "b": "拝島",
+      "kind": "FARE",
+      "adultYen": 530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://www.jreast.co.jp/press/2025/20250801_ho03.pdf",
+      "note": "JR 동일본이 2026년 3월 개정 뒤에도 유지한 특정 구간 운임. 보도자료에는 IC 운임(예: 616엔)이 실려 있어, 개정 규칙대로 10엔 단위로 올린 승차권 운임을 넣었습니다."
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "姫路",
+      "kind": "FARE",
+      "adultYen": 1520,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "신오사카역 발착이라도 오사카역 기준 거리로 계산하는 특례 구간 (자유석 합계에서 특급요금을 뺀 값으로 확인)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "岡山",
+      "kind": "FARE",
+      "adultYen": 3080,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "신오사카역 발착이라도 오사카역 기준 거리로 계산하는 특례 구간 (자유석 합계에서 특급요금을 뺀 값으로 확인)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "福山",
+      "kind": "FARE",
+      "adultYen": 4070,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "신오사카역 발착이라도 오사카역 기준 거리로 계산하는 특례 구간 (자유석 합계에서 특급요금을 뺀 값으로 확인)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "広島",
+      "kind": "FARE",
+      "adultYen": 5720,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "신오사카역 발착이라도 오사카역 기준 거리로 계산하는 특례 구간 (자유석 합계에서 특급요금을 뺀 값으로 확인)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "博多",
+      "kind": "FARE",
+      "adultYen": 9790,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "신오사카역 발착이라도 오사카역 기준 거리로 계산하는 특례 구간 (자유석 합계에서 특급요금을 뺀 값으로 확인)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "新横浜",
+      "kind": "SURCHARGE",
+      "adultYen": 870,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "小田原",
+      "kind": "SURCHARGE",
+      "adultYen": 1760,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "熱海",
+      "kind": "SURCHARGE",
+      "adultYen": 1760,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "三島",
+      "kind": "SURCHARGE",
+      "adultYen": 1760,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "静岡",
+      "kind": "SURCHARGE",
+      "adultYen": 2530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "浜松",
+      "kind": "SURCHARGE",
+      "adultYen": 3400,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "名古屋",
+      "kind": "SURCHARGE",
+      "adultYen": 4180,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "京都",
+      "kind": "SURCHARGE",
+      "adultYen": 4960,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "新大阪",
+      "kind": "SURCHARGE",
+      "adultYen": 4960,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "新神戸",
+      "kind": "SURCHARGE",
+      "adultYen": 4960,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "岡山",
+      "kind": "SURCHARGE",
+      "adultYen": 5930,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "広島",
+      "kind": "SURCHARGE",
+      "adultYen": 6500,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "東京",
+      "b": "博多",
+      "kind": "SURCHARGE",
+      "adultYen": 8140,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare02.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新横浜",
+      "b": "名古屋",
+      "kind": "SURCHARGE",
+      "adultYen": 4180,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare10.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新横浜",
+      "b": "京都",
+      "kind": "SURCHARGE",
+      "adultYen": 4620,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare10.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新横浜",
+      "b": "新大阪",
+      "kind": "SURCHARGE",
+      "adultYen": 4960,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare10.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "新神戸",
+      "kind": "SURCHARGE",
+      "adultYen": 870,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "姫路",
+      "kind": "SURCHARGE",
+      "adultYen": 1760,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "岡山",
+      "kind": "SURCHARGE",
+      "adultYen": 2530,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "福山",
+      "kind": "SURCHARGE",
+      "adultYen": 3400,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "広島",
+      "kind": "SURCHARGE",
+      "adultYen": 4170,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    },
+    {
+      "group": "JR",
+      "a": "新大阪",
+      "b": "博多",
+      "kind": "SURCHARGE",
+      "adultYen": 4960,
+      "verifiedAt": "2026-10-11",
+      "reference": "https://shinkansen.tabiris.com/fare20.html",
+      "note": "자유석 특급요금. 정규 요금 합계표에서 운임을 뺀 값 (2023년 4월판, 도카이도·산요는 이후 변동 없음)"
+    }
+  ],
+  "lineKm": [
+    {
+      "line": "東海道新幹線",
+      "stations": "東京:0,品川:6.8,新横浜:28.8,小田原:83.9,熱海:104.6,三島:120.7,新富士:146.2,静岡:180.2,掛川:229.3,浜松:257.1,豊橋:293.6,三河安城:336.3,名古屋:366.0,岐阜羽島:396.3,米原:445.9,京都:513.6,新大阪:552.6",
+      "reference": "https://ja.wikipedia.org/wiki/東海道新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 도쿄~나고야는 역 일람 자료와 대조했고, 나머지 4역은 도쿄 출발 요금 합계가 맞는 요금 구간에 드는지로 확인했습니다."
+    },
+    {
+      "line": "山陽新幹線",
+      "stations": "新大阪:0,新神戸:36.9,西明石:59.7,姫路:91.7,相生:112.4,岡山:180.3,新倉敷:205.5,福山:238.6,新尾道:258.7,三原:270.2,東広島:309.8,広島:341.6,新岩国:383.0,徳山:430.1,新山口:474.4,厚狭:509.5,新下関:536.1,小倉:555.1,博多:622.3",
+      "reference": "https://ja.wikipedia.org/wiki/山陽新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 역 일람 자료와 직접 대조하지 못했습니다. 신오사카 출발 요금 합계가 맞는 요금 구간에 드는지로만 확인했습니다."
+    },
+    {
+      "line": "東北新幹線",
+      "stations": "東京:0,上野:3.6,大宮:30.3,小山:80.6,宇都宮:109.5,那須塩原:157.8,新白河:185.4,郡山:226.7,福島:272.8,白石蔵王:306.8,仙台:351.8,古川:395.0,くりこま高原:416.2,一ノ関:445.1,水沢江刺:470.1,北上:487.5,新花巻:500.0,盛岡:535.3,いわて沼宮内:566.4,二戸:601.0,八戸:631.9,七戸十和田:668.0,新青森:713.7",
+      "reference": "https://ja.wikipedia.org/wiki/東北新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 도쿄~후쿠시마는 역 일람 자료와 대조했습니다. 그 뒤의 역은 대조하지 못한 값이니 확인이 필요합니다."
+    },
+    {
+      "line": "上越新幹線",
+      "stations": "大宮:0,熊谷:34.4,本庄早稲田:55.7,高崎:74.7,上毛高原:121.3,越後湯沢:168.9,浦佐:198.6,長岡:240.3,燕三条:263.5,新潟:303.6",
+      "reference": "https://ja.wikipedia.org/wiki/上越新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 오미야 기점. 역 일람 자료와 대조하지 못한 값입니다(도쿄–니가타 333.9km 로 끝점만 확인)."
+    },
+    {
+      "line": "北陸新幹線",
+      "stations": "高崎:0,安中榛名:18.5,軽井沢:41.8,佐久平:59.4,上田:84.2,長野:117.4,飯山:147.3,上越妙高:176.9,糸魚川:213.9,黒部宇奈月温泉:253.1,富山:286.9,新高岡:305.8,金沢:345.5,小松:372.6,加賀温泉:387.1,芦原温泉:403.3,福井:421.3,越前たけふ:440.3,敦賀:470.6",
+      "reference": "https://ja.wikipedia.org/wiki/北陸新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 다카사키 기점. 역 일람 자료와 대조하지 못한 값입니다(도쿄–가나자와 450.5km, 도쿄–쓰루가 575.6km 로 끝점만 확인)."
+    },
+    {
+      "line": "九州新幹線",
+      "stations": "博多:0,新鳥栖:28.6,久留米:35.7,筑後船小屋:51.5,新大牟田:69.3,新玉名:90.4,熊本:118.4,新八代:151.3,新水俣:194.1,出水:210.1,川内:242.8,鹿児島中央:288.9",
+      "reference": "https://ja.wikipedia.org/wiki/九州新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 하카타 기점. 역 일람 자료와 대조하지 못한 값입니다."
+    },
+    {
+      "line": "西九州新幹線",
+      "stations": "武雄温泉:0,嬉野温泉:10.9,新大村:32.2,諫早:44.7,長崎:69.6",
+      "reference": "https://ja.wikipedia.org/wiki/西九州新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 다케오온센 기점. 역 일람 자료와 대조하지 못한 값입니다."
+    },
+    {
+      "line": "北海道新幹線",
+      "stations": "新青森:0,奥津軽いまべつ:38.5,木古内:113.3,新函館北斗:148.8",
+      "reference": "https://ja.wikipedia.org/wiki/北海道新幹線",
+      "verifiedAt": "2026-10-11",
+      "note": "영업킬로(운임 계산 거리). 신아오모리 기점. 역 일람 자료와 대조하지 못한 값입니다."
+    }
+  ]
+}

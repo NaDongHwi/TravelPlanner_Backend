@@ -166,6 +166,38 @@ public final class RailGraph {
         public boolean outdated;
         /** 출발 시각이 첫차 전이거나 막차 뒤 */
         public boolean outsideServiceHours;
+
+        // ---- RIDE 단계의 위치와 요금 근거 ----
+        /** 타는 곳·내리는 곳 좌표 (RIDE 단계에만. 요금표의 적용 범위와 패스의 이용 범위를 가릴 때 쓴다) */
+        public boolean hasCoordinates;
+        public double fromLat;
+        public double fromLng;
+        public double toLat;
+        public double toLng;
+        /** 이 승차가 속한 요금 묶음 (Route.fareBlocks 의 순번). RIDE 가 아니면 -1 */
+        public int fareBlock = -1;
+    }
+
+    /**
+     * 요금을 한 번 내는 단위.
+     * 철도망 구간은 이어서 탄 같은 요금 단위(JR 전체, 또는 한 운영사)끼리 한 묶음이고, GTFS 노선은 탈 때마다 한 묶음이다.
+     */
+    public static final class FareBlock {
+        /** 요금 단위 이름: JR 은 "JR", 그 외에는 운영사 이름 원문 */
+        public String group;
+        /** GTFS 노선을 탄 묶음인가 */
+        public boolean scheduled;
+        public final List<Step> rides = new ArrayList<>();
+        /** 성인 요금 (신칸센 특급요금 포함) */
+        public int fareYen;
+        public int childFareYen;
+        /** 그중 신칸센 자유석 특급요금 */
+        public int surchargeYen;
+        public FareBook.Basis basis;
+        /** 쓴 요금표의 키 (없으면 null) */
+        public String tableKey;
+        /** 요금을 잰 거리(km) */
+        public double fareKm;
     }
 
     public static final class Route {
@@ -179,8 +211,15 @@ public final class RailGraph {
         /** 요금표로 확인한 승차 수 / 거리로 추정한 승차 수 */
         public int confirmedFareRides;
         public int estimatedFareRides;
+        /** 운영사 요금표에 계산한 거리를 넣어 구한 승차 수 (추정한 승차 수에 포함된다) */
+        public int tableFareRides;
         public final List<Step> steps = new ArrayList<>();
+        /** 요금을 낸 단위들. 요금의 합이 fareYen 이다 */
+        public final List<FareBlock> fareBlocks = new ArrayList<>();
     }
+
+    /** 등록된 요금 자료. 교통망과 따로 바뀔 수 있어 나중에 갈아 끼운다 (없으면 종류별 대표 요금표로만 추정) */
+    private volatile FareBook fareBook = FareBook.EMPTY;
 
     private final Station[] stations;
     private final List<List<Edge>> edges = new ArrayList<>();
@@ -533,6 +572,13 @@ public final class RailGraph {
         return boarding == RailCategory.SHINKANSEN ? SHINKANSEN_PENALTY : 0;
     }
 
+    /** 요금 자료를 바꾼다. 이후에 찾는 경로부터 적용된다 */
+    public void setFareBook(FareBook book) {
+        this.fareBook = book == null ? FareBook.EMPTY : book;
+    }
+
+    public FareBook fareBook() { return fareBook; }
+
     public int stationCount() { return stations.length; }
     public int rideLinkCount() { return rideLinks; }
     public int transferLinkCount() { return transferLinks; }
@@ -880,11 +926,16 @@ public final class RailGraph {
                         ride.operator = from.operator;
                         ride.line = from.line;
                         ride.from = from.name;
+                        ride.hasCoordinates = true;
+                        ride.fromLat = from.latitude;
+                        ride.fromLng = from.longitude;
                         exactMinutes = 0;
                         route.steps.add(ride);
                         transfer = null;
                     }
                     ride.to = to.name;
+                    ride.toLat = to.latitude;
+                    ride.toLng = to.longitude;
                     ride.km += s.km[node];
                     ride.stops++;
                     exactMinutes += s.minutes[node];
@@ -913,6 +964,9 @@ public final class RailGraph {
                     ride.fromKo = stops[before - stations.length].nameKo;
                     ride.fromIsStop = true;
                     ride.toIsStop = true;
+                    ride.hasCoordinates = true;
+                    ride.fromLat = stops[before - stations.length].latitude;
+                    ride.fromLng = stops[before - stations.length].longitude;
                     ride.irregular = pattern.irregular;
                     ride.outdated = pattern.feedExpired;
                     exactMinutes = 0;
@@ -936,6 +990,8 @@ public final class RailGraph {
                     GtfsFeed.Stop stop = stops[node - stations.length];
                     ride.to = stop.name;
                     ride.toKo = stop.nameKo;
+                    ride.toLat = stop.latitude;
+                    ride.toLng = stop.longitude;
                     ride.minutes = Math.max(1, (int) Math.round(exactMinutes));
                     int fare = pattern.fare(from, to);
                     ride.fareConfirmed = fare >= 0;
@@ -1060,56 +1116,79 @@ public final class RailGraph {
      *  - GTFS 노선: 탈 때마다 그 구간 요금을 낸다 (요금표에 없으면 거리 기준 추정).
      *  - 철도망 구간: 이어서 탄 같은 요금 단위(JR 전체, 또는 한 운영사)끼리 거리를 합쳐 한 번만 낸다.
      *    중간에 다른 회사나 버스를 타면 요금이 끊긴다. 신칸센을 탄 구간에는 특급요금이 붙는다.
+     *    요금은 등록된 요금 자료(역 쌍 요금 → 운영사 요금표)를 먼저 쓰고, 없으면 종류별 대표 요금표로 추정한다.
      */
-    private static void priceRoute(Route route) {
-        int rail = fareOf(route.steps);
-        int child = RailFareModel.childFare(rail);
-        int total = rail;
+    private void priceRoute(Route route) {
+        priceRoute(route, fareBook);
+    }
+
+    static void priceRoute(Route route, FareBook book) {
+        route.fareBlocks.clear();
+        route.confirmedFareRides = 0;
+        route.estimatedFareRides = 0;
+        route.tableFareRides = 0;
+        FareBlock open = null;      // 지금 이어지고 있는 철도망 묶음
         for (Step step : route.steps) {
             if (step.kind != Step.Kind.RIDE) continue;
-            if (!step.scheduled) {
-                route.estimatedFareRides++;
+            if (step.scheduled) {
+                open = null;
+                FareBlock block = new FareBlock();
+                block.group = step.operator;
+                block.scheduled = true;
+                block.rides.add(step);
+                block.fareYen = step.fareYen;
+                block.childFareYen = RailFareModel.childFare(step.fareYen);
+                block.basis = step.fareConfirmed ? FareBook.Basis.OFFICIAL : FareBook.Basis.ESTIMATE;
+                block.fareKm = step.km;
+                step.fareBlock = route.fareBlocks.size();
+                route.fareBlocks.add(block);
                 continue;
             }
-            total += step.fareYen;
-            child += RailFareModel.childFare(step.fareYen);
-            if (step.fareConfirmed) route.confirmedFareRides++;
-            else route.estimatedFareRides++;
+            String group = RailFareModel.fareGroup(step.category, step.operator);
+            if (open == null || !open.group.equals(group)) {
+                open = new FareBlock();
+                open.group = group;
+                route.fareBlocks.add(open);
+            }
+            step.fareBlock = route.fareBlocks.size() - 1;
+            open.rides.add(step);
+        }
+
+        int total = 0;
+        int child = 0;
+        for (FareBlock block : route.fareBlocks) {
+            if (!block.scheduled) {
+                FareBook.Quote quote = book.price(block.rides);
+                block.fareYen = quote.fareYen;
+                block.childFareYen = quote.childFareYen;
+                block.surchargeYen = quote.surchargeYen;
+                block.basis = quote.basis;
+                block.tableKey = quote.tableKey;
+                block.fareKm = quote.fareKm;
+            }
+            total += block.fareYen;
+            child += block.childFareYen;
+            if (block.basis == FareBook.Basis.OFFICIAL) {
+                route.confirmedFareRides += block.rides.size();
+            } else {
+                route.estimatedFareRides += block.rides.size();
+                if (block.basis == FareBook.Basis.TABLE) route.tableFareRides += block.rides.size();
+            }
         }
         route.fareYen = total;
         route.childFareYen = child;
     }
 
-    /** 철도망 구간의 요금 합 (GTFS 노선 구간은 세지 않고, 요금 묶음을 끊는 역할만 한다). */
+    /** 철도망 구간의 요금 합 (GTFS 노선 구간은 세지 않고, 요금 묶음을 끊는 역할만 한다). 등록된 요금 자료 없이 추정한 값이다. */
     static int fareOf(List<Step> steps) {
+        Route route = new Route();
+        route.steps.addAll(steps);
+        priceRoute(route, FareBook.EMPTY);
         int total = 0;
-        String group = null;
-        String operator = null;
-        RailCategory category = null;
-        double km = 0;
-        double shinkansenKm = 0;
-        for (Step step : steps) {
-            if (step.kind != Step.Kind.RIDE) continue;
-            String g = step.scheduled ? null : RailFareModel.fareGroup(step.category, step.operator);
-            if (group != null && !group.equals(g)) {
-                total += blockFare(category, operator, km, shinkansenKm);
-                km = 0;
-                shinkansenKm = 0;
-            }
-            group = g;
-            if (g == null) continue;
-            operator = step.operator;
-            // JR 재래선과 신칸센이 섞인 구간은 JR 로 계산한다
-            category = step.category == RailCategory.SHINKANSEN ? RailCategory.JR : step.category;
-            km += step.km;
-            if (step.category == RailCategory.SHINKANSEN) shinkansenKm += step.km;
+        for (FareBlock block : route.fareBlocks) {
+            if (!block.scheduled) total += block.fareYen;
         }
-        if (group != null) total += blockFare(category, operator, km, shinkansenKm);
         return total;
-    }
-
-    private static int blockFare(RailCategory category, String operator, double km, double shinkansenKm) {
-        return RailFareModel.fare(category, operator, km) + RailFareModel.shinkansenSurcharge(shinkansenKm);
     }
 
     // =====================================================================

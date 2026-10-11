@@ -22,6 +22,12 @@ public class AiRouteResponse {
     // 일자별 개요 (1일차부터 순서대로, 일수만큼)
     private List<DaySummary> days;
 
+    // 여행 전체 교통비 추정 합계 (성인 1인, 엔). 요금을 알 수 있는 구간이 하나도 없으면 null
+    private Integer transitFareYen;
+
+    // 교통비가 어떤 기준의 값인지 (추정 기준·노선 미확인 구간 수 등)
+    private String transitNote;
+
     private RouteInfoDto transportOptimization;
 
     // 저장된 여행 계획 ID (reroute / PDF 다운로드에 필요)
@@ -57,6 +63,9 @@ public class AiRouteResponse {
         private List<String> themes;       // 이 장소의 테마 (예: ["힐링", "자연"])
         private Double rating;             // 구글 평점 (없으면 null)
         private Integer userRatingCount;   // 구글 리뷰 수 (없으면 null)
+
+        // 직전 장소에서 여기까지 가는 방법 (노선·요금·단계). 첫 줄이나 이동이 없는 줄은 null
+        private TransitLegDto transit;
     }
 
     /** 하루 일정의 개요 */
@@ -77,5 +86,6 @@ public class AiRouteResponse {
         private String startTime;          // 출발 시각 "HH:mm"
         private String endTime;            // 도착 시각 "HH:mm"
         private Boolean badWeather;        // 비·눈 예보 (true/false, 예보 범위 밖이면 null)
+        private Integer transitFareYen;    // 그 날 교통비 추정 합계 (성인 1인, 엔). 알 수 없으면 null
     }
 }

@@ -142,8 +142,13 @@ public class PlanReplaceService {
             int dayNumber = entry.getKey();
             PlanService.DayContext ctx = contexts.get(dayNumber);
             if (save) planPersistenceService.replaceDay(plan, dayNumber, entry.getValue());
-            response.getUpdatedTimeline().addAll(timelineAssembler.toTimeline(dayNumber, ctx.getDate(), entry.getValue(), restored.getLanguage()));
-            response.getUpdatedDaySummaries().add(PlanSummarizer.summarizeDay(dayNumber, ctx.getDate(), ctx.getCity(), entry.getValue(), null, null));
+            List<com.travel.planner.dto.AiRouteResponse.TimelineItem> dayTimeline =
+                    timelineAssembler.toTimeline(dayNumber, ctx.getDate(), entry.getValue(), restored.getLanguage(), restored.getTransportation());
+            com.travel.planner.dto.AiRouteResponse.DaySummary daySummary =
+                    PlanSummarizer.summarizeDay(dayNumber, ctx.getDate(), ctx.getCity(), entry.getValue(), null, null);
+            TransitTotals.applyDay(daySummary, dayTimeline);
+            response.getUpdatedTimeline().addAll(dayTimeline);
+            response.getUpdatedDaySummaries().add(daySummary);
         }
         if (save) {
             plan.setRejectedPlaceIds(String.join(",", rejected));

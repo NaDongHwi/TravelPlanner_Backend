@@ -152,6 +152,33 @@ public class AiService {
     }
 
     // ============================================================================
+    // 2-2. 철도 역·노선·회사 이름의 한국어 표기 (국토교통성 데이터에는 일본어만 있다)
+    //      kind: "STATION" / "LINE" / "OPERATOR". 결과는 {일본어 원문: 한국어 표기}
+    // ============================================================================
+    public Map<String, String> translateRailNames(String kind, List<String> names) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("너는 일본 철도에 밝은 번역가야. 아래 일본어 ");
+        if ("LINE".equals(kind)) {
+            prompt.append("철도 노선명을 한국어로 옮겨.\n")
+                    .append("- 한국 여행자가 쓰는 통칭으로 적어. 예: 山手線→야마노테선, 東海道新幹線→도카이도 신칸센, 大阪環状線→오사카 순환선\n")
+                    .append("- '3号線銀座線', '1号線(御堂筋線)'처럼 번호가 붙은 이름은 번호와 괄호를 빼고 통칭만: 긴자선, 미도스지선\n")
+                    .append("- '線'은 '선', '本線'은 '본선'으로.\n");
+        } else if ("OPERATOR".equals(kind)) {
+            prompt.append("철도 운영 회사명을 한국어로 옮겨.\n")
+                    .append("- 한국에서 통용되는 짧은 이름으로. 예: 阪急電鉄→한큐 전철, 近畿日本鉄道→긴테쓰, 京浜急行電鉄→게이큐, 東京都→도에이(도쿄도 교통국)\n");
+        } else {
+            prompt.append("철도역 이름을 한국어로 옮겨.\n")
+                    .append("- 실제 역 이름의 일본어 읽기를 국립국어원 외래어 표기법에 따라 한글로 적어. 예: 新宿→신주쿠, 東京→도쿄, 梅田→우메다, 清水五条→기요미즈고조, 日本橋→니혼바시\n")
+                    .append("- 뜻으로 번역하지 말고 소리대로 적어. 끝에 '역'은 붙이지 마.\n");
+        }
+        prompt.append("- 결과는 반드시 일본어 원문을 키로, 한국어 표기를 값으로 하는 순수 JSON 객체 하나로만 반환해. 원문 키는 한 글자도 바꾸지 마. 마크다운(```json) 금지.\n\n[대상]\n");
+        for (String name : names) prompt.append(name).append("\n");
+
+        Map<String, String> result = callAi(prompt.toString(), new TypeReference<Map<String, String>>(){}, "RAIL_NAMES");
+        return result != null ? result : new HashMap<>();
+    }
+
+    // ============================================================================
     // 3. 관리자용 오프라인 전처리 (5대 카테고리 정제)
     // ============================================================================
     public Map<String, String> cleansePlaceCategories(List<Place> places) {

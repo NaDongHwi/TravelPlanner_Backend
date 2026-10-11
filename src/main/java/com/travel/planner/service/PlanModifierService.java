@@ -125,8 +125,9 @@ public class PlanModifierService {
                 response.setSuccess(true);
                 response.setRequireConfirmation(false);
                 response.setDroppedPlaces(droppedPlaces);
-                response.setUpdatedTimeline(timelineAssembler.toTimeline(dayNumber, ctx.getDate(), sim.getValidRoute(), restored.getLanguage()));
+                response.setUpdatedTimeline(timelineAssembler.toTimeline(dayNumber, ctx.getDate(), sim.getValidRoute(), restored.getLanguage(), restored.getTransportation()));
                 response.setUpdatedDaySummary(PlanSummarizer.summarizeDay(dayNumber, ctx.getDate(), ctx.getCity(), sim.getValidRoute(), null, null));
+                TransitTotals.applyDay(response.getUpdatedDaySummary(), response.getUpdatedTimeline());
                 response.setMessage(droppedPlaces.isEmpty()
                         ? "일정이 성공적으로 재계산되었습니다."
                         : "일정이 재계산되었습니다. 시간 부족으로 제외된 장소: " + String.join(", ", droppedPlaces));

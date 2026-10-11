@@ -46,6 +46,7 @@ public class PlanGenerationService {
     private final GoogleMapsService googleMapsService;
     private final WeatherService weatherService;
     private final PlaceDescriptionService placeDescriptionService;
+    private final RailRouteService railRouteService;
 
     public AiRouteResponse createPlan(String email, PlanRequest request) {
         // ------------------------------------------------------------------
@@ -138,7 +139,9 @@ public class PlanGenerationService {
         response.setTitle(PlanSummarizer.tripTitle(request, tripPlan.getDays()));
         response.setReason(PlanSummarizer.tripOverview(request, tripPlan.getDays()));
         response.setDays(PlanSummarizer.summarizeDays(tripPlan.getDays()));
-        response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage()));
+        response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage(), request.getTransportation()));
+        // 구간별 교통 정보에서 일자별·전체 교통비를 합산해 개요와 요약에 붙인다
+        TransitTotals.apply(response, railRouteService.isNetworkLoaded());
         response.setWarnings(warnings);
 
         Plan saved = planPersistenceService.saveNewPlan(user, request, tripPlan.getDays(), accommodationEntities, response.getReason());

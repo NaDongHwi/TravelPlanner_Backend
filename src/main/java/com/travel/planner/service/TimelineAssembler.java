@@ -1,6 +1,7 @@
 package com.travel.planner.service;
 
 import com.travel.planner.dto.AiRouteResponse;
+import com.travel.planner.dto.TransitLegDto;
 import com.travel.planner.entity.Place;
 import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.service.PlanService.SimulatedItinerary;
@@ -28,27 +29,34 @@ public class TimelineAssembler {
 
     private final GoogleMapsService googleMapsService;
     private final PlaceRepository placeRepository;
+    private final RailRouteService railRouteService;
 
-    public List<AiRouteResponse.TimelineItem> toTimeline(List<PlanService.DayPlan> days, String lang) {
+    /** @param transportation 사용자가 고른 이동수단 (구간별 교통 정보를 붙일 때 쓴다) */
+    public List<AiRouteResponse.TimelineItem> toTimeline(List<PlanService.DayPlan> days, String lang, String transportation) {
         int[] budget = {MAX_DETAIL_CALLS_PER_REQUEST};
         List<AiRouteResponse.TimelineItem> timeline = new ArrayList<>();
         for (PlanService.DayPlan day : days) {
-            timeline.addAll(toTimeline(day.getDayNumber(), day.getDate(), day.getItems(), lang, budget));
+            timeline.addAll(toTimeline(day.getDayNumber(), day.getDate(), day.getItems(), lang, transportation, budget));
         }
         return timeline;
     }
 
-    public List<AiRouteResponse.TimelineItem> toTimeline(int dayNumber, LocalDate date, List<SimulatedItinerary> items, String lang) {
-        return toTimeline(dayNumber, date, items, lang, new int[]{MAX_DETAIL_CALLS_PER_REQUEST});
+    public List<AiRouteResponse.TimelineItem> toTimeline(int dayNumber, LocalDate date, List<SimulatedItinerary> items, String lang,
+                                                         String transportation) {
+        return toTimeline(dayNumber, date, items, lang, transportation, new int[]{MAX_DETAIL_CALLS_PER_REQUEST});
     }
 
     private List<AiRouteResponse.TimelineItem> toTimeline(int dayNumber, LocalDate date, List<SimulatedItinerary> items,
-                                                          String lang, int[] budget) {
+                                                          String lang, String transportation, int[] budget) {
         boolean korean = lang == null || lang.isBlank() || lang.toLowerCase().startsWith("ko");
         List<AiRouteResponse.TimelineItem> timeline = new ArrayList<>();
+        // 줄마다 "직전 장소에서 여기까지" 가는 방법과 요금 (철도망 기준 추정)
+        List<TransitLegDto> legs = railRouteService.legsFor(items, transportation);
 
-        for (SimulatedItinerary sim : items) {
+        for (int index = 0; index < items.size(); index++) {
+            SimulatedItinerary sim = items.get(index);
             AiRouteResponse.TimelineItem item = new AiRouteResponse.TimelineItem();
+            item.setTransit(legs.get(index));
             item.setDay(dayNumber);
             item.setTime(sim.getTime());
             item.setEndTime(sim.getEndTime());

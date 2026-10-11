@@ -38,3 +38,6 @@ out/
 
 # API Keys
 application-secret.yml
+
+# 교통 원본 데이터 (국토수치정보 등, 용량이 커서 저장소에 올리지 않음)
+/data/

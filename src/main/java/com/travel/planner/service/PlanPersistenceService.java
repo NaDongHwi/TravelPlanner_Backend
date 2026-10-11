@@ -37,6 +37,7 @@ public class PlanPersistenceService {
     private final PlanRepository planRepository;
     private final PlaceRepository placeRepository;
     private final TrafficRepository trafficRepository;
+    private final RailRouteService railRouteService;
 
     /** 구글에서 새로 받은 장소를 DB 에 넣고(이미 있으면 기존 것을) 돌려준다. */
     @Transactional
@@ -122,8 +123,12 @@ public class PlanPersistenceService {
 
     private List<Traffic> appendDay(Plan plan, int dayNumber, List<SimulatedItinerary> items, String transport) {
         List<Traffic> traffics = new ArrayList<>();
+        // 구간별 이동 방법·요금 (응답에 나가는 값과 같은 계산)
+        List<com.travel.planner.dto.TransitLegDto> legs = railRouteService.legsFor(items, transport);
         int sequence = 1;
-        for (SimulatedItinerary sim : items) {
+        for (int index = 0; index < items.size(); index++) {
+            SimulatedItinerary sim = items.get(index);
+            com.travel.planner.dto.TransitLegDto leg = legs.get(index);
             Itinerary itinerary = new Itinerary();
             itinerary.setDayNumber(dayNumber);
             itinerary.setSequence(sequence++);   // 그 날 안에서의 순서 (1, 2, 3 …)
@@ -143,8 +148,9 @@ public class PlanPersistenceService {
 
             Traffic traffic = new Traffic();
             traffic.setItinerary(itinerary);
-            traffic.setTransportType(transport);
-            traffic.setEstimatedCost(0);
+            traffic.setTransportType(leg != null && leg.getMode() != null ? leg.getMode() : transport);
+            traffic.setEstimatedCost(leg != null && leg.getFareYen() != null ? leg.getFareYen() : 0);   // 성인 1인 추정 요금(엔)
+            traffic.setPathDetails(leg != null ? leg.getSummary() : null);
             traffic.setDurationMinutes(sim.getTravelMinutes());   // 엔진이 계산한 이동 시간을 그대로 저장
             traffics.add(traffic);
         }

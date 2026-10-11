@@ -3,13 +3,14 @@ package com.travel.planner.transit;
 import com.travel.planner.dto.TransitLegDto;
 import com.travel.planner.util.DistanceUtil;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 철도(전국 철도망 계산) / 노선 미확인(거리 기준) / 자동차.
+ * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 대중교통(철도망 + GTFS 노선 계산) / 노선 미확인(거리 기준) / 자동차.
  * DB·스프링과 무관한 순수 계산이다.
  */
 public final class TransitLegPlanner {
@@ -18,6 +19,14 @@ public final class TransitLegPlanner {
 
     /** 이 거리(km) 이하는 걸어간다 */
     static final double WALK_KM = 1.0;
+    /** 타는 곳·내리는 곳까지 걷는 거리가 전체 직선거리에서 차지할 수 있는 최대 비율 */
+    static final double MAX_WALK_SHARE = 0.5;
+    /** 걷는 것보다 빠른 경로가 없을 때, 걷는 시간이 이 분 이하이면 걸어가라고 안내한다 (그보다 멀면 거리 기준 추정으로 남긴다) */
+    static final int WALK_INSTEAD_MINUTES = 30;
+    /** 이 거리(km) 안에 정류장이 있으면 그곳은 버스 등의 노선 자료가 있는 곳으로 본다 */
+    static final double COVERED_KM = 0.6;
+    /** 하루 운행이 이 횟수 이하이면 "시간표를 꼭 확인하라"고 알린다 */
+    static final int FEW_TRIPS = 12;
 
     /** 일본어 이름 → 한국어 표기 */
     public interface Names {
@@ -33,13 +42,22 @@ public final class TransitLegPlanner {
         @Override public String operator(String ja) { return ja; }
     };
 
+    /** 날짜·출발 시각을 모를 때 (평일 운행 기준으로 계산한다) */
+    public static TransitLegDto plan(RailGraph graph, Names names, double fromLat, double fromLng, String fromName,
+                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes) {
+        return plan(graph, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, null, null);
+    }
+
     /**
-     * @param graph           전국 철도망. 아직 가져오지 않았으면 null (철도 경로 없이 거리 기준으로만 추정)
+     * @param graph           교통망. 아직 가져온 것이 없으면 null (경로 없이 거리 기준으로만 추정)
      * @param scheduleMinutes 일정 엔진이 이 구간에 잡아 둔 이동 시간(분)
+     * @param date            이동하는 날 (요일별 운행 횟수·계절 노선 판단). 모르면 null
+     * @param departMinute    출발 시각(0시부터의 분). 첫차·막차 밖인지 알리는 데 쓴다. 모르면 null
      * @return 같은 자리(50m 이내)면 null
      */
     public static TransitLegDto plan(RailGraph graph, Names names, double fromLat, double fromLng, String fromName,
-                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes) {
+                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
+                                     LocalDate date, Integer departMinute) {
         double km = DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng);
         if (km < 0.05) return null;
 
@@ -63,15 +81,31 @@ public final class TransitLegPlanner {
         }
         if (km <= WALK_KM || walkOnly) return walk(leg, fromName, toName, walkMinutes, km);
 
-        RailGraph.Route route = graph == null ? null : graph.route(fromLat, fromLng, toLat, toLng);
-        // 철도 경로를 쓰지 않는 경우:
+        // 타는 곳·내리는 곳까지 걷는 거리가 전체 직선거리의 절반을 넘는 경로는 찾지 않는다 (타는 곳이 멀어 사실상 걸어가는 경로).
+        // 그런 경로를 빼면, 역은 멀지만 바로 앞에 서는 버스 같은 다른 경로가 나온다.
+        double maxWalkKm = km * MAX_WALK_SHARE;
+        RailGraph.Route route = graph == null ? null : graph.route(fromLat, fromLng, toLat, toLng, date, departMinute, maxWalkKm);
+        // 찾은 경로를 쓰지 않는 경우:
         //  - 걷는 것보다 느리다
-        //  - 역까지·역에서 걷는 거리가 전체 직선거리의 절반을 넘는다 (역이 멀어 사실상 걸어가는 경로. 실제로는 버스를 탄다)
+        //  - 걷는 거리가 위 상한을 넘는다 (걸어서 갈아탄 끝에 실제로 타고 내리는 곳이 더 먼 경우)
         //  - 일정이 잡아 둔 시간보다 훨씬 길다
-        boolean useRail = route != null && route.minutes < walkMinutes
-                && route.walkKm <= km * 0.5
+        boolean useRoute = route != null && route.minutes < walkMinutes
+                && route.walkKm <= maxWalkKm
                 && route.minutes <= scheduleMinutes * 1.6 + 20;
-        if (useRail) return rail(leg, route, names, fromName, toName, scheduleMinutes);
+        if (useRoute) return transit(leg, route, names, fromName, toName, scheduleMinutes);
+
+        // 양쪽 모두 버스 등의 노선 자료가 있는 곳인데 걷는 것보다 빨리 가는 경로가 없다면(배차 간격이 길거나 노선이 맞지 않는다),
+        // 걸을 만한 거리에서는 걸어가라고 안내한다. 노선 자료가 없는 곳에서는 알 수 없으므로 아래의 거리 기준 추정으로 남긴다.
+        if (graph != null && walkMinutes <= WALK_INSTEAD_MINUTES
+                && graph.hasStopNear(fromLat, fromLng, COVERED_KM) && graph.hasStopNear(toLat, toLng, COVERED_KM)) {
+            walk(leg, fromName, toName, walkMinutes, km);
+            String note = "가져온 노선 자료에는 이 구간을 걷는 것보다 빨리 가는 대중교통이 없어 도보로 안내합니다.";
+            if (walkMinutes > scheduleMinutes + 10) {
+                note += " 걷는 시간(" + walkMinutes + "분)이 일정의 이동 시간(" + scheduleMinutes + "분)보다 깁니다.";
+            }
+            leg.setNote(note);
+            return leg;
+        }
 
         leg.setMode("버스 등");
         leg.setMinutes(scheduleMinutes);
@@ -79,8 +113,9 @@ public final class TransitLegPlanner {
         leg.setFareYen(fare);
         leg.setChildFareYen(RailFareModel.childFare(fare));
         leg.setSource("distance");
+        leg.setFareSource("estimate");
         leg.setSummary("버스 등 대중교통으로 약 " + scheduleMinutes + "분 (노선 미확인)");
-        leg.setNote("이 구간은 맞는 철도 경로가 없어 버스 등으로 이동한다고 보고 거리 기준으로 추정했습니다. 실제 노선과 요금은 확인되지 않았습니다.");
+        leg.setNote("이 구간은 가져온 노선 자료에서 맞는 경로를 찾지 못해 버스 등으로 이동한다고 보고 거리 기준으로 추정했습니다. 실제 노선과 요금은 확인되지 않았습니다.");
         return leg;
     }
 
@@ -101,35 +136,49 @@ public final class TransitLegPlanner {
         return leg;
     }
 
-    private static TransitLegDto rail(TransitLegDto leg, RailGraph.Route route, Names names, String fromName, String toName,
-                                      int scheduleMinutes) {
+    private static TransitLegDto transit(TransitLegDto leg, RailGraph.Route route, Names names, String fromName, String toName,
+                                         int scheduleMinutes) {
         Set<String> categories = new LinkedHashSet<>();
         List<String> rides = new ArrayList<>();
+        List<String> cautions = new ArrayList<>();
+        int scheduledRides = 0;
+        int networkRides = 0;
         for (RailGraph.Step s : route.steps) {
             TransitLegDto.Step step = new TransitLegDto.Step();
             step.setMinutes(s.minutes);
             step.setKm(Math.round(s.km * 10.0) / 10.0);
+            String from = s.from == null ? fromName : placeName(names, s.from, s.fromKo, s.fromIsStop);
+            String to = s.to == null ? toName : placeName(names, s.to, s.toKo, s.toIsStop);
+            step.setFrom(from);
+            step.setTo(to);
             switch (s.kind) {
                 case WALK:
                     step.setType("도보");
-                    step.setFrom(s.from == null ? fromName : stationName(names, s.from));
-                    step.setTo(s.to == null ? toName : stationName(names, s.to));
+                    break;
+                case WAIT:
+                    step.setType("대기");
+                    step.setKm(null);
                     break;
                 case TRANSFER:
                     step.setType("환승");
-                    step.setFrom(stationName(names, s.from));
-                    step.setTo(stationName(names, s.to));
                     break;
                 default:
                     step.setType("승차");
                     step.setCategory(s.category.label);
                     step.setOperator(names.operator(s.operator));
                     step.setLine(names.line(s.line));
-                    step.setFrom(stationName(names, s.from));
-                    step.setTo(stationName(names, s.to));
                     step.setStops(s.stops);
                     categories.add(s.category.label);
-                    rides.add(lineLabel(step) + " " + step.getFrom() + " → " + step.getTo() + " (" + s.stops + "정거장)");
+                    if (s.scheduled) {
+                        scheduledRides++;
+                        fillScheduled(step, s);
+                        rides.add(scheduledLabel(step) + " " + from + " → " + to + " (" + s.stops + "정거장, "
+                                + (s.fareConfirmed ? "" : "약 ") + String.format("%,d엔", s.fareYen) + ")");
+                        addCautions(cautions, step, s);
+                    } else {
+                        networkRides++;
+                        rides.add(lineLabel(step) + " " + from + " → " + to + " (" + s.stops + "정거장)");
+                    }
                     break;
             }
             leg.getSteps().add(step);
@@ -139,14 +188,64 @@ public final class TransitLegPlanner {
         leg.setFareYen(route.fareYen);
         leg.setChildFareYen(route.childFareYen);
         leg.setTransfers(route.transfers);
-        leg.setSource("rail-network");
+        leg.setSource(scheduledRides == 0 ? "rail-network" : networkRides == 0 ? "gtfs" : "rail-network+gtfs");
+        leg.setFareSource(route.estimatedFareRides == 0 ? "official" : route.confirmedFareRides == 0 ? "estimate" : "mixed");
         leg.setSummary(String.join(" / 환승 / ", rides));
-        String note = "전국 철도망 기준 추정입니다. 열차 시각·급행 운행·운영사별 실제 요금표는 반영하지 않았습니다.";
-        if (route.minutes > scheduleMinutes + 10) {
-            note += " 이 경로의 추정 시간(" + route.minutes + "분)이 일정의 이동 시간(" + scheduleMinutes + "분)보다 깁니다.";
+
+        StringBuilder note = new StringBuilder();
+        if (networkRides > 0) {
+            note.append("철도 구간은 전국 철도망 기준 추정입니다. 열차 시각·급행 운행·운영사별 실제 요금표는 반영하지 않았습니다.");
         }
-        leg.setNote(note);
+        if (scheduledRides > 0) {
+            if (note.length() > 0) note.append(' ');
+            note.append("버스 등은 운영사가 공개한 시각표 자료(GTFS)의 평균 소요 시간과 운행 간격으로 계산했습니다. 실제 출발 시각은 현지 시간표로 확인해 주세요.");
+            if (route.confirmedFareRides > 0) {
+                note.append(route.estimatedFareRides == 0 || networkRides == route.estimatedFareRides
+                        ? " 버스 요금은 운영사 요금표(현금 성인) 기준입니다."
+                        : " 요금표에 없는 구간의 요금은 거리 기준 추정입니다.");
+            } else {
+                note.append(" 이 노선은 요금표가 공개되어 있지 않아 요금은 거리 기준 추정입니다.");
+            }
+        }
+        for (String caution : cautions) note.append(' ').append(caution);
+        if (route.minutes > scheduleMinutes + 10) {
+            note.append(" 이 경로의 추정 시간(").append(route.minutes).append("분)이 일정의 이동 시간(").append(scheduleMinutes).append("분)보다 깁니다.");
+        }
+        leg.setNote(note.toString());
         return leg;
+    }
+
+    private static void fillScheduled(TransitLegDto.Step step, RailGraph.Step s) {
+        step.setFromOriginal(s.from);
+        step.setToOriginal(s.to);
+        step.setHeadsign(s.headsign);
+        step.setFareYen(s.fareYen);
+        step.setFareConfirmed(s.fareConfirmed);
+        step.setTripsPerDay(s.tripsPerDay);
+        step.setHeadwayMinutes(s.headwayMinutes);
+        step.setFirstDeparture(clock(s.firstDeparture));
+        step.setLastDeparture(clock(s.lastDeparture));
+        if (s.alternatives != null && !s.alternatives.isEmpty()) step.setAlternatives(new ArrayList<>(s.alternatives));
+    }
+
+    private static void addCautions(List<String> cautions, TransitLegDto.Step step, RailGraph.Step s) {
+        String label = scheduledLabel(step);
+        String hours = "첫차 " + step.getFirstDeparture() + " · 막차 " + step.getLastDeparture();
+        if (s.outsideServiceHours) {
+            cautions.add(label + "는 이 시간에 운행하지 않을 수 있습니다(" + hours + ").");
+        } else if (s.tripsPerDay <= FEW_TRIPS) {
+            cautions.add(label + "는 하루 " + s.tripsPerDay + "회(약 " + s.headwayMinutes + "분 간격)만 다닙니다. " + hours + " — 시간표를 꼭 확인해 주세요.");
+        }
+        if (s.irregular) cautions.add(label + "는 매일 다니지 않는 노선입니다(운행일 확인 필요).");
+        if (s.outdated) cautions.add(label + "의 시각표 자료는 유효 기간이 지났습니다. 지금은 달라졌을 수 있습니다.");
+    }
+
+    /** "버스 42" 처럼 종류와 노선을 붙인다. 노선명에 종류가 이미 들어 있으면 한 번만 쓴다. */
+    private static String scheduledLabel(TransitLegDto.Step step) {
+        String category = step.getCategory() == null ? "" : step.getCategory();
+        String line = step.getLine() == null ? "" : step.getLine();
+        if (line.isEmpty()) return category;
+        return line.contains(category) || line.contains("バス") && "버스".equals(category) ? line : category + " " + line;
     }
 
     /** "JR 동일본 야마노테선"처럼 운영 회사와 노선을 붙인다. 노선명에 회사 이름이 이미 들어 있으면 한 번만 쓴다. */
@@ -157,9 +256,23 @@ public final class TransitLegPlanner {
         return operator + " " + line;
     }
 
+    /** 역은 "신주쿠역", 정류장은 이름 그대로 */
+    private static String placeName(Names names, String ja, String korean, boolean stop) {
+        if (!stop) return stationName(names, ja);
+        if (korean != null && !korean.isBlank()) return korean;
+        String name = names.station(ja);
+        return name == null || name.isBlank() ? ja : name;
+    }
+
     static String stationName(Names names, String ja) {
         String name = names.station(ja);
         if (name == null || name.isBlank()) name = ja;
         return name.endsWith("역") || name.endsWith("駅") || name.endsWith("정류장") ? name : name + "역";
+    }
+
+    /** 0시부터의 분 → "06:35". 24시를 넘는 심야 운행은 "24:10" 처럼 그대로 적는다 */
+    static String clock(int minutes) {
+        if (minutes < 0) minutes = 0;
+        return String.format("%02d:%02d", minutes / 60, minutes % 60);
     }
 }

@@ -3,7 +3,9 @@ package com.travel.planner.service;
 import com.travel.planner.entity.TransitName;
 import com.travel.planner.entity.TransitStation;
 import com.travel.planner.repository.TransitNameRepository;
+import com.travel.planner.repository.TransitPatternRepository;
 import com.travel.planner.repository.TransitStationRepository;
+import com.travel.planner.repository.TransitStopRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -20,6 +22,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 역·노선·운영 회사 이름의 한국어 표기.
  * 원본 데이터에는 일본어만 있으므로 AI 로 한 번 번역해 DB(transit_name)에 저장해 두고 쓴다.
  * 아직 번역되지 않은 이름은 일본어 원문 그대로 나간다.
+ *
+ * GTFS 정류장은 대부분 원본의 읽기(가나)를 한글로 옮긴 표기를 이미 갖고 있어(transit_stop.name_ko) 여기서 번역하지 않는다.
+ * 읽기 자료가 없는 정류장과, 버스 노선명·운영사 이름만 번역 대상에 더한다.
  */
 @Service
 @RequiredArgsConstructor
@@ -46,6 +51,8 @@ public class TransitNameService {
 
     private final TransitNameRepository nameRepository;
     private final TransitStationRepository stationRepository;
+    private final TransitStopRepository stopRepository;
+    private final TransitPatternRepository patternRepository;
     private final AiService aiService;
 
     private final AtomicBoolean translating = new AtomicBoolean(false);
@@ -102,6 +109,14 @@ public class TransitNameService {
             all.get(TransitName.OPERATOR).add(s.getOperator());
             all.get(TransitName.LINE).add(s.getLine());
             all.get(TransitName.STATION).add(s.getName());
+        }
+        try {
+            // GTFS 노선: 일본어가 들어 있는 이름만 (계통 번호 "42" 같은 것은 번역할 것이 없다)
+            for (String name : patternRepository.findRouteNames()) if (hasJapanese(name)) all.get(TransitName.LINE).add(name);
+            for (String name : patternRepository.findAgencies()) if (hasJapanese(name)) all.get(TransitName.OPERATOR).add(name);
+            for (String name : stopRepository.findNamesWithoutKorean()) if (hasJapanese(name)) all.get(TransitName.STATION).add(name);
+        } catch (Exception e) {
+            System.out.println("[교통 이름 번역] GTFS 이름을 읽지 못해 철도 이름만 번역합니다: " + e.getMessage());
         }
         Map<String, Map<String, String>> done = names();
         Map<String, List<String>> pending = new HashMap<>();
@@ -176,6 +191,12 @@ public class TransitNameService {
             cache = null;
             System.out.println("[교통 이름 번역 종료] " + lastMessage);
         }
+    }
+
+    /** 가나나 한자가 들어 있는가 */
+    static boolean hasJapanese(String s) {
+        if (s == null || s.isBlank() || s.length() > 100) return false;
+        return s.chars().anyMatch(c -> (c >= 0x3040 && c <= 0x30FF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF));
     }
 
     /** AI 가 돌려준 표기를 다듬는다. 일본어가 그대로 남았거나 너무 길면 버린다. */

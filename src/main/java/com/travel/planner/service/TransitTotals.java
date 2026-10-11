@@ -29,9 +29,9 @@ public final class TransitTotals {
 
     /**
      * 여행 전체: 일자별 합계를 넣고, 전체 합계·기준 설명을 채운 뒤 여행 요약(reason) 끝에 한 문장을 붙인다.
-     * @param railNetworkLoaded 전국 철도망을 가져온 상태인가 (아니면 모든 구간이 거리 기준 추정이다)
+     * @param networkLoaded 교통망(전국 철도망이나 GTFS 피드)을 하나라도 가져온 상태인가 (아니면 모든 구간이 거리 기준 추정이다)
      */
-    public static void apply(AiRouteResponse response, boolean railNetworkLoaded) {
+    public static void apply(AiRouteResponse response, boolean networkLoaded) {
         if (response == null || response.getTimeline() == null) return;
         if (response.getDays() != null) {
             for (AiRouteResponse.DaySummary day : response.getDays()) applyDay(day, response.getTimeline());
@@ -40,6 +40,8 @@ public final class TransitTotals {
         int total = 0;
         int priced = 0;
         int unknownRoute = 0;
+        int officialFare = 0;
+        int railEstimate = 0;
         for (AiRouteResponse.TimelineItem item : response.getTimeline()) {
             TransitLegDto leg = item.getTransit();
             if (leg == null) continue;
@@ -48,17 +50,27 @@ public final class TransitTotals {
                 if (leg.getFareYen() > 0) priced++;
             }
             if ("distance".equals(leg.getSource()) && leg.getFareYen() != null) unknownRoute++;
+            if ("official".equals(leg.getFareSource()) || "mixed".equals(leg.getFareSource())) officialFare++;
+            if (leg.getSource() != null && leg.getSource().startsWith("rail-network")) railEstimate++;
         }
         if (priced == 0) return;   // 전부 도보이거나 자동차 여행
 
         response.setTransitFareYen(total);
-        String note = "성인 1인 기준 추정입니다. 철도 구간은 전국 철도망의 선로 거리와 종류별 요금표로 계산했고, 열차 시각·급행·패스 할인은 반영하지 않았습니다.";
-        if (!railNetworkLoaded) {
-            note = "성인 1인 기준 추정입니다. 전국 철도망 데이터를 아직 가져오지 않아 모든 구간을 거리 기준으로만 계산했습니다.";
-        } else if (unknownRoute > 0) {
-            note += " " + unknownRoute + "개 구간은 맞는 철도 경로가 없어 버스 등으로 보고 거리 기준으로 계산했습니다(노선 미확인).";
+        StringBuilder note = new StringBuilder("성인 1인 기준 추정입니다.");
+        if (!networkLoaded) {
+            note.append(" 교통 데이터(전국 철도망·버스 노선)를 아직 가져오지 않아 모든 구간을 거리 기준으로만 계산했습니다.");
+        } else {
+            if (railEstimate > 0) {
+                note.append(" 철도 구간은 전국 철도망의 선로 거리와 종류별 요금표로 계산했고, 열차 시각·급행·패스 할인은 반영하지 않았습니다.");
+            }
+            if (officialFare > 0) {
+                note.append(" 버스 등 ").append(officialFare).append("개 구간의 요금은 운영사가 공개한 요금표(현금 성인) 기준입니다.");
+            }
+            if (unknownRoute > 0) {
+                note.append(" ").append(unknownRoute).append("개 구간은 가져온 노선 자료에 맞는 경로가 없어 버스 등으로 보고 거리 기준으로 계산했습니다(노선 미확인).");
+            }
         }
-        response.setTransitNote(note);
+        response.setTransitNote(note.toString());
         if (response.getReason() != null) {
             response.setReason(response.getReason() + " 교통비는 합계 약 " + yen(total) + "(성인 1인, 추정)입니다.");
         }

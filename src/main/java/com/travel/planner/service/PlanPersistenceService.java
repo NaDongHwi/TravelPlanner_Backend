@@ -124,7 +124,8 @@ public class PlanPersistenceService {
     private List<Traffic> appendDay(Plan plan, int dayNumber, List<SimulatedItinerary> items, String transport) {
         List<Traffic> traffics = new ArrayList<>();
         // 구간별 이동 방법·요금 (응답에 나가는 값과 같은 계산)
-        List<com.travel.planner.dto.TransitLegDto> legs = railRouteService.legsFor(items, transport);
+        java.time.LocalDate date = plan.getStartDate() == null ? null : plan.getStartDate().plusDays(dayNumber - 1L);
+        List<com.travel.planner.dto.TransitLegDto> legs = railRouteService.legsFor(items, transport, date);
         int sequence = 1;
         for (int index = 0; index < items.size(); index++) {
             SimulatedItinerary sim = items.get(index);

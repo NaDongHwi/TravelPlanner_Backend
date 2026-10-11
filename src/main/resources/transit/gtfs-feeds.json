@@ -1,0 +1,509 @@
+[
+  {
+    "key": "toei-bus",
+    "name": "도에이 버스 (도쿄도 교통국)",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api-public.odpt.org/api/v4/files/Toei/data/ToeiBus-GTFS.zip",
+    "license": "CC BY 4.0 / 東京都交通局・公共交通オープンデータ協議会",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "toden-arakawa",
+    "name": "도덴 아라카와선 (도에이 철도 피드. 지하철 노선은 전국 철도망으로 계산하므로 노면전차만 가져옵니다)",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api-public.odpt.org/api/v4/files/Toei/data/Toei-Train-GTFS.zip",
+    "license": "CC BY 4.0 / 東京都交通局・公共交通オープンデータ協議会",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "keio-bus",
+    "name": "게이오 버스",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/KeioBus/AllLines.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 京王バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "odakyu-bus",
+    "name": "오다큐 버스",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/OdakyuBus/AIILines.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 小田急バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "seibu-bus",
+    "name": "세이부 버스",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/SeibuBus/data/SeibuBus-GTFS.zip?acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 西武バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kanto-bus",
+    "name": "간토 버스",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/KantoBus/AllLines.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 関東バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "taito-megurin",
+    "name": "다이토구 순환버스 메구린 (아사쿠사·우에노)",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api-public.odpt.org/api/v4/files/odpt/TokyoTaitoCity/megurinCCBY40.zip?date=current",
+    "license": "CC BY 4.0 / 台東区",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "minato-chiibus",
+    "name": "미나토구 치이버스 (롯폰기·아자부)",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://gtfs-jp.buskita.com/fxc/gtfs.zip",
+    "license": "フジエクスプレス (이용 조건 미표시: 사용 전 확인 필요)",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "tokyo-cruise",
+    "name": "도쿄 크루즈 수상버스 (아사쿠사–오다이바)",
+    "cities": [
+      "도쿄"
+    ],
+    "url": "https://api-public.odpt.org/api/v4/files/odpt/TokyoCruiseShip/AllLines.zip?date=current",
+    "license": "CC BY 4.0 / 東京都観光汽船",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "yokohama-bus",
+    "name": "요코하마 시영 버스",
+    "cities": [
+      "요코하마"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/YokohamaMunicipal/Bus.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 横浜市交通局",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kawasaki-bus",
+    "name": "가와사키 시영 버스",
+    "cities": [
+      "가와사키"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/TransportationBureau_CityOfKawasaki/AllLines.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 川崎市交通局",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kyoto-city-bus",
+    "name": "교토 시영 버스",
+    "cities": [
+      "교토"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/KyotoMunicipalTransportation/Kyoto_City_Bus_GTFS.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 京都市交通局",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kyoto-bus",
+    "name": "교토 버스 (아라시야마·오하라)",
+    "cities": [
+      "교토"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/KyotoBus/AllLines.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 京都バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "izuhakone-bus",
+    "name": "이즈하코네 버스 (하코네·이즈·미시마)",
+    "cities": [
+      "하코네",
+      "이즈",
+      "시즈오카"
+    ],
+    "url": "https://api.odpt.org/api/v4/files/odpt/IzuhakoneBus/IZHB.zip?date=current&acl:consumerKey=",
+    "license": "公共交通オープンデータ基本ライセンス (ODPT) / 伊豆箱根バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "fujikyu-mobility",
+    "name": "후지큐 모빌리티 (고텐바·후지노미야 방면)",
+    "cities": [
+      "시즈오카",
+      "후지"
+    ],
+    "url": "https://gtfs-jp.buskita.com/fmo/gtfs.zip",
+    "license": "富士急モビリティ (이용 조건 미표시: 사용 전 확인 필요)",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "fujikyu-bus",
+    "name": "후지큐 버스 (가와구치코·후지산 방면)",
+    "cities": [
+      "가와구치코",
+      "후지",
+      "야마나시"
+    ],
+    "url": "https://gtfs-jp.buskita.com/fjb/gtfs.zip",
+    "license": "富士急バス (이용 조건 미표시: 사용 전 확인 필요)",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "nagaden-bus-nagano",
+    "name": "나가덴 버스 나가노 (젠코지)",
+    "cities": [
+      "나가노"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/nagadenbus/feeds/nagadenbus-nagano/files/feed.zip",
+    "license": "CC BY 4.0 / 長電バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "nagaden-bus-exp",
+    "name": "나가덴 버스 급행 (시가고원·지고쿠다니)",
+    "cities": [
+      "나가노"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/nagadenbus/feeds/nagadenbus-exp/files/feed.zip",
+    "license": "CC BY 4.0 / 長電バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "matsumoto-bus-1",
+    "name": "마쓰모토 구룻토 마쓰모토 버스 (마쓰모토역 발착)",
+    "cities": [
+      "마쓰모토"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/matsumotocity/feeds/guruttomatsumotobus1/files/feed.zip",
+    "license": "CC BY 4.0 / 松本市",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "matsumoto-bus-2",
+    "name": "마쓰모토 타운 스니커",
+    "cities": [
+      "마쓰모토"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/matsumotocity/feeds/guruttomatsumotobus2/files/feed.zip",
+    "license": "CC BY 4.0 / 松本市",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "karuizawa-bus",
+    "name": "가루이자와 순환버스",
+    "cities": [
+      "가루이자와"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/karuizawatown/feeds/junkan-bus/files/feed.zip",
+    "license": "CC BY 4.0 / 軽井沢町",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "chikuma-bus",
+    "name": "지쿠마 버스 (가루이자와·사쿠·우에다)",
+    "cities": [
+      "가루이자와",
+      "나가노"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/chikuma-bus/feeds/rosenbus/files/feed.zip",
+    "license": "CC BY 4.0 / 千曲バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kanazawa-flatbus",
+    "name": "가나자와 후랏토 버스",
+    "cities": [
+      "가나자와"
+    ],
+    "url": "https://catalog-data.city.kanazawa.ishikawa.jp/dataset/1196beb4-f9f9-463c-9723-5b38d8127425/resource/9636cac5-1449-4656-893b-ec98d834eb23/download/flatbus20260401.zip",
+    "license": "CC BY 4.0 / 金沢市",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "hiroden-bus",
+    "name": "히로덴 버스 (히로시마 전철)",
+    "cities": [
+      "히로시마"
+    ],
+    "url": "https://ajt-mobusta-gtfs.mcapps.jp/static/8/current_data.zip",
+    "license": "CC BY 4.0 / 広島電鉄株式会社・広島県バス協会",
+    "page": "https://www.bus-kyo.or.jp/gtfs-open-data"
+  },
+  {
+    "key": "hiroshima-bus",
+    "name": "히로시마 버스",
+    "cities": [
+      "히로시마"
+    ],
+    "url": "https://ajt-mobusta-gtfs.mcapps.jp/static/9/current_data.zip",
+    "license": "CC BY 4.0 / 広島バス株式会社・広島県バス協会",
+    "page": "https://www.bus-kyo.or.jp/gtfs-open-data"
+  },
+  {
+    "key": "hiroshima-kotsu",
+    "name": "히로시마 교통",
+    "cities": [
+      "히로시마"
+    ],
+    "url": "https://ajt-mobusta-gtfs.mcapps.jp/static/10/current_data.zip",
+    "license": "CC BY 4.0 / 広島交通株式会社・広島県バス協会",
+    "page": "https://www.bus-kyo.or.jp/gtfs-open-data"
+  },
+  {
+    "key": "jr-chugoku-bus",
+    "name": "주고쿠 JR 버스",
+    "cities": [
+      "히로시마"
+    ],
+    "url": "https://ajt-mobusta-gtfs.mcapps.jp/static/15/current_data.zip",
+    "license": "CC BY 4.0 / 中国ジェイアールバス・広島県バス協会",
+    "page": "https://www.bus-kyo.or.jp/gtfs-open-data"
+  },
+  {
+    "key": "okinawa-bus",
+    "name": "오키나와 버스",
+    "cities": [
+      "오키나와",
+      "나하"
+    ],
+    "url": "https://api3.ottop.org/download/gtfs/ooXuXei4op7y/2360001000457",
+    "license": "CC BY 2.1 JP / 沖縄バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "toyo-bus",
+    "name": "도요 버스 (오키나와)",
+    "cities": [
+      "오키나와",
+      "나하"
+    ],
+    "url": "https://api3.ottop.org/download/gtfs/ooXuXei4op7y/2360001015810",
+    "license": "CC BY 2.1 JP / 東陽バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "yui-rail",
+    "name": "유이레일 (오키나와 도시 모노레일)",
+    "cities": [
+      "오키나와",
+      "나하"
+    ],
+    "url": "https://api3.ottop.org/download/gtfs/ooXuXei4op7y/4360001000447",
+    "license": "CC BY 2.1 JP / 沖縄都市モノレール",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/",
+    "includeRail": true
+  },
+  {
+    "key": "okinawa-airport-shuttle",
+    "name": "오키나와 에어포트 셔틀",
+    "cities": [
+      "오키나와",
+      "나하"
+    ],
+    "url": "https://api3.ottop.org/download/gtfs/ooXuXei4op7y/360005005779",
+    "license": "CC BY 2.1 JP / 沖縄エアポートシャトルLLP",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "yanbaru-express",
+    "name": "얀바루 급행 버스 (나하–추라우미)",
+    "cities": [
+      "오키나와",
+      "나하"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/yanbaru-expressbus/feeds/yanbaru-express-bus/files/feed.zip",
+    "license": "CC BY 4.0 / やんばる急行バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "hokkaido-chuo-bus",
+    "name": "홋카이도 주오 버스 (삿포로·오타루)",
+    "cities": [
+      "삿포로",
+      "오타루"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/dbadfccc-670e-49b9-be77-c3f346ee3160/download/hokkaido_chuo.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・北海道中央バス",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "jotetsu-bus",
+    "name": "조테쓰 버스 (삿포로·조잔케이)",
+    "cities": [
+      "삿포로"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/fef98fef-6fe2-472f-bde3-9d4f0a509a4a/download/joutetsu.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・じょうてつ",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "asahikawa-denki",
+    "name": "아사히카와 전기궤도 버스 (아사히야마 동물원)",
+    "cities": [
+      "아사히카와"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/41ea2ac6-c6e4-47b2-9c1c-b482feaee17c/download/asahikawa_denki.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・旭川電気軌道",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "furano-bus",
+    "name": "후라노 버스 (후라노·비에이)",
+    "cities": [
+      "후라노",
+      "비에이",
+      "아사히카와"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/3623aa5b-7d0b-4621-a3c8-b09e55863d27/download/furano_bus.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・ふらのバス",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "niseko-bus",
+    "name": "니세코 버스",
+    "cities": [
+      "니세코"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/c46f9cd8-4c92-42eb-89a5-26e3fabb1dce/download/niseko_bus.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・ニセコバス",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "kushiro-bus",
+    "name": "구시로 버스",
+    "cities": [
+      "구시로"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/dd2557d2-39f9-4e03-8703-117c64eaabe2/download/kushiro_bus.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・くしろバス",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "shari-bus",
+    "name": "샤리 버스 (시레토코)",
+    "cities": [
+      "시레토코",
+      "아바시리"
+    ],
+    "url": "https://ckan.hoda.jp/dataset/24d1dd70-5395-4d6b-b41f-0d83e8eabdb9/resource/d93cb12c-390f-4215-891d-c250db8f26d0/download/syari_bus.zip",
+    "license": "CC BY 4.0 / 北海道オープンデータ推進協議会・斜里バス",
+    "page": "https://ckan.hoda.jp/dataset/gtfs-data"
+  },
+  {
+    "key": "abashiri-bus",
+    "name": "아바시리 버스",
+    "cities": [
+      "아바시리"
+    ],
+    "url": "https://www.abashiribus.com/open_data/gtfs_abashiribus_latest.zip",
+    "license": "CC BY 4.0 / 網走バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "hakodate-tram",
+    "name": "하코다테 시영 전차",
+    "cities": [
+      "하코다테"
+    ],
+    "url": "https://api-public.odpt.org/api/v4/files/odpt/HakodateCity/Alllines.zip?date=current",
+    "license": "CC BY 4.0 / 函館市企業局交通部",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "aomori-city-bus",
+    "name": "아오모리 시영 버스",
+    "cities": [
+      "아오모리"
+    ],
+    "url": "https://aomoricitybus.com/opendata/gtfs-aomoricitybus.zip",
+    "license": "青森市 GTFS-JP 오픈데이터 (출처 표시)",
+    "page": "https://www.aomoricitybus.com/opendata/index.html"
+  },
+  {
+    "key": "nagoya-city-bus",
+    "name": "나고야 시영 버스",
+    "cities": [
+      "나고야"
+    ],
+    "url": "https://data.bodik.jp/dataset/c5794008-8053-42ab-99b9-ee7f6fdf9a9e/resource/125a1d12-7df6-489c-abde-911856e05d1b/download",
+    "license": "CC BY 4.0 / 名古屋市交通局",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "tottori-nihonkotsu",
+    "name": "돗토리 니혼 교통 버스",
+    "cities": [
+      "돗토리"
+    ],
+    "url": "https://odp-pref-tottori.tori-info.co.jp/bus_data/1.zip",
+    "license": "CC BY 2.1 JP / 鳥取県・日本交通",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "tottori-hinomaru",
+    "name": "돗토리 히노마루 버스",
+    "cities": [
+      "돗토리"
+    ],
+    "url": "https://odp-pref-tottori.tori-info.co.jp/bus_data/2.zip",
+    "license": "CC BY 2.1 JP / 鳥取県・日ノ丸自動車",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kotoden-bus",
+    "name": "고토덴 버스 (다카마쓰)",
+    "cities": [
+      "다카마쓰"
+    ],
+    "url": "https://www.kotoden.co.jp/publichtm/gtfs/gtfsdata/latest/gtfs_kb.zip",
+    "license": "CC BY 4.0 / ことでんバス株式会社",
+    "page": "https://www.kotoden.co.jp/publichtm/gtfs/index.html"
+  },
+  {
+    "key": "kagoshima-city-bus",
+    "name": "가고시마 시영 버스",
+    "cities": [
+      "가고시마"
+    ],
+    "url": "https://data.bodik.jp/dataset/a8d9d4cd-ee6d-4d79-98fe-6d37f046c537/resource/7e52d8fb-9a25-44ca-ad88-1f32bfb3d8b6/download/bus-kagoshimacity-kagoshima-jp-1.zip",
+    "license": "CC BY 4.0 / 鹿児島市交通局",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "kumamoto-sanko-bus",
+    "name": "산코 버스 (구마모토·아소)",
+    "cities": [
+      "구마모토"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/sankobus/feeds/sankobus/files/feed.zip?rid=current",
+    "license": "CC BY 4.0 / 産交バス",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  },
+  {
+    "key": "dazaifu-mahoroba",
+    "name": "다자이후 마호로바호",
+    "cities": [
+      "다자이후",
+      "후쿠오카"
+    ],
+    "url": "https://api.gtfs-data.jp/v2/organizations/dazaifucity/feeds/DazaifuCityCommunityBus/files/feed.zip",
+    "license": "CC BY 4.0 / 太宰府市",
+    "page": "https://bustime.jp/GtfsAgency/gtfs_list/"
+  }
+]

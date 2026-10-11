@@ -50,8 +50,8 @@ public class TimelineAssembler {
                                                           String lang, String transportation, int[] budget) {
         boolean korean = lang == null || lang.isBlank() || lang.toLowerCase().startsWith("ko");
         List<AiRouteResponse.TimelineItem> timeline = new ArrayList<>();
-        // 줄마다 "직전 장소에서 여기까지" 가는 방법과 요금 (철도망 기준 추정)
-        List<TransitLegDto> legs = railRouteService.legsFor(items, transportation);
+        // 줄마다 "직전 장소에서 여기까지" 가는 방법과 요금 (철도망·버스 노선 기준 추정. 그 날의 요일에 맞는 운행 횟수를 쓴다)
+        List<TransitLegDto> legs = railRouteService.legsFor(items, transportation, date);
 
         for (int index = 0; index < items.size(); index++) {
             SimulatedItinerary sim = items.get(index);

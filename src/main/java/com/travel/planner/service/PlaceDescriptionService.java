@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 일정에 들어간 장소 가운데 "AI 가 쓴 한 줄 소개"가 아직 없는 곳만 그 자리에서 채운다.
+ * 방문지와 그 여행의 숙소가 대상이다. 공항·역 같은 교통 거점은 소개를 만들지 않는다.
  *
  * 관리자 배치(enrich-summaries)를 돌리지 않았더라도 사용자가 받는 일정에는 장소별 설명이 붙게 하기 위한 것이다.
  * 한 번 채운 소개는 DB(place.summary)에 남으므로 같은 장소는 다시 묻지 않는다. 그래서 처음 몇 번만 느리고 점점 빨라진다.
@@ -61,7 +62,7 @@ public class PlaceDescriptionService {
             if (p == null || p.getPlaceId() == null || p.getName() == null) continue;
             if (PlaceDescriber.hasStoredSummary(p)) continue;
             String category = p.getCategory();
-            if ("숙소".equals(category) || "교통".equals(category) || PlanService.isPseudoCategory(category)) continue;
+            if ("교통".equals(category) || PlanService.isPseudoCategory(category)) continue;
             if (targets.size() >= MAX_PLACES) break;
             targets.putIfAbsent(p.getPlaceId(), p);
         }

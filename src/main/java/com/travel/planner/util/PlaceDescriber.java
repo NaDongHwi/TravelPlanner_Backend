@@ -164,13 +164,14 @@ public final class PlaceDescriber {
         return p != null && p.getSummary() != null && !p.getSummary().isBlank();
     }
 
-    /** 한 줄 소개. 저장된 값 우선, 없으면 유형 수준의 기본 문구. 숙소·교통은 null. */
+    /** 한 줄 소개. 저장된 값 우선, 없으면 유형 수준의 기본 문구. 교통(공항·역)은 null. */
     public static String summaryOf(Place p) {
         if (p == null) return null;
         if (hasStoredSummary(p)) return p.getSummary().trim();
 
         String category = p.getCategory() == null ? "" : p.getCategory();
-        if ("숙소".equals(category) || "교통".equals(category)) return null;
+        if ("교통".equals(category)) return null;
+        if ("숙소".equals(category)) return lodgingSummary(p.getName());
 
         String subType = subTypeOf(p);
         switch (PlaceKind.of(p)) {
@@ -190,6 +191,15 @@ public final class PlaceDescriber {
                 return "쇼핑".equals(subType) ? "쇼핑을 즐기는 곳" : "관광 명소".equals(subType) ? "관광 명소" : subType;
             }
         }
+    }
+
+    /** AI 소개가 아직 없는 숙소의 기본 문구 (이름에 종류가 드러나면 그 종류로) */
+    private static String lodgingSummary(String rawName) {
+        String name = rawName == null ? "" : rawName.toLowerCase();
+        if (name.contains("료칸") || name.contains("旅館") || name.contains("ryokan")) return "일본식 전통 숙소(료칸)";
+        if (name.contains("호스텔") || name.contains("hostel") || name.contains("게스트하우스") || name.contains("guesthouse")
+                || name.contains("guest house") || name.contains("ゲストハウス")) return "여행자용 호스텔·게스트하우스";
+        return "여행 중 머무는 숙소";
     }
 
     /** 장소의 테마 목록(저장된 테마, 없으면 추정). 응답 표시용. */

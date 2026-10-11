@@ -85,9 +85,17 @@ class PlanSummaryTest {
     }
 
     @Test
-    void lodgingAndTransportHaveATypeButNoSummary() {
+    void lodgingHasADefaultSummaryAndTransportHasNone() {
         assertEquals("숙소", PlaceDescriber.subTypeOf(place("Hotel Associa Shizuoka", "숙소")));
-        assertNull(PlaceDescriber.summaryOf(place("Hotel Associa Shizuoka", "숙소")));
+        assertEquals("여행 중 머무는 숙소", PlaceDescriber.summaryOf(place("Hotel Associa Shizuoka", "숙소")));
+        assertEquals("일본식 전통 숙소(료칸)", PlaceDescriber.summaryOf(place("슈젠지 온천 아라이 료칸", "숙소")));
+        assertEquals("여행자용 호스텔·게스트하우스", PlaceDescriber.summaryOf(place("K's House Tokyo Hostel", "숙소")));
+        // AI 가 채운 소개와 세부 유형이 있으면 그것이 먼저다
+        Place described = place("Hotel Associa Shizuoka", "숙소");
+        described.setSubType("호텔");
+        described.setSummary("시즈오카역과 이어진 대형 호텔");
+        assertEquals("호텔", PlaceDescriber.subTypeOf(described));
+        assertEquals("시즈오카역과 이어진 대형 호텔", PlaceDescriber.summaryOf(described));
         assertEquals("공항", PlaceDescriber.subTypeOf(place("간사이 국제공항", "교통")));
         assertNull(PlaceDescriber.summaryOf(place("간사이 국제공항", "교통")));
     }

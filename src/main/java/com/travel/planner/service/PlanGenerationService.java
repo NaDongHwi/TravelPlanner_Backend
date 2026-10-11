@@ -131,9 +131,7 @@ public class PlanGenerationService {
         // Step 7. 응답 조립 + DB 저장
         // ------------------------------------------------------------------
         // 일정에 들어간 장소 중 AI 소개가 아직 없는 곳만 지금 채운다 (DB 에 남으므로 같은 장소는 다시 묻지 않는다)
-        placeDescriptionService.fillMissing(tripPlan.getDays().stream().flatMap(d -> d.getItems().stream())
-                .filter(i -> i.getType() == PlanService.SimulatedItinerary.Type.VISIT && i.getPlace() != null)
-                .map(PlanService.SimulatedItinerary::getPlace).collect(Collectors.toList()));
+        placeDescriptionService.fillMissing(placesToDescribe(tripPlan.getDays()));
 
         AiRouteResponse response = new AiRouteResponse();
         // 어떤 여행인지: 전체 요약(reason)·제목·일자별 개요. 일정 결과에서 바로 만들므로 AI 호출이 없다.
@@ -359,6 +357,26 @@ public class PlanGenerationService {
         place.setLatitude(airport.latitude);
         place.setLongitude(airport.longitude);
         return saveAnchor(place, "교통");
+    }
+
+    /**
+     * AI 소개를 붙일 장소: 방문지 전부와 그 여행의 숙소.
+     * 숙소는 "숙소 출발"·"숙소 도착" 줄에만 나오므로 방문지와 따로 골라 넣는다. 공항은 넣지 않는다.
+     */
+    static List<Place> placesToDescribe(List<PlanService.DayPlan> days) {
+        List<Place> out = new ArrayList<>();
+        for (PlanService.DayPlan day : days) {
+            for (PlanService.SimulatedItinerary item : day.getItems()) {
+                Place place = item.getPlace();
+                if (place == null) continue;
+                PlanService.SimulatedItinerary.Type type = item.getType();
+                boolean visit = type == PlanService.SimulatedItinerary.Type.VISIT;
+                boolean lodging = (type == PlanService.SimulatedItinerary.Type.START || type == PlanService.SimulatedItinerary.Type.END)
+                        && "숙소".equals(place.getCategory());
+                if (visit || lodging) out.add(place);
+            }
+        }
+        return out;
     }
 
     // =====================================================================

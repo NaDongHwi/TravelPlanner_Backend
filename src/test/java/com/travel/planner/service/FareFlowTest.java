@@ -72,6 +72,20 @@ class FareFlowTest {
     }
 
     @Test
+    void lodgingRowsSayWhatKindOfPlaceTheLodgingIs() {
+        AiRouteResponse response = planDay(LocalDate.of(2026, 10, 17));
+        AiRouteResponse.TimelineItem leave = response.getTimeline().get(0);
+        AiRouteResponse.TimelineItem back = response.getTimeline().get(response.getTimeline().size() - 1);
+        assertEquals("숙소 출발", leave.getDescription());
+        assertEquals("숙소 도착 및 휴식", back.getDescription());
+        // AI 소개가 아직 없는 숙소도 한 줄 소개가 비지 않는다 (AI 가 채우면 그 문장이 대신 나간다)
+        assertEquals("여행 중 머무는 숙소", leave.getSummary());
+        assertEquals("여행 중 머무는 숙소", back.getSummary());
+        assertEquals("숙소", leave.getSubType());
+        assertEquals("오사카시", leave.getFormattedAddress());
+    }
+
+    @Test
     void sameDayOnAWeekdayIsNotWorthThePass() {
         // 수요일에는 평일권(820엔)이라 40엔 차이뿐: 추천하지 않는다
         AiRouteResponse response = planDay(LocalDate.of(2026, 10, 14));

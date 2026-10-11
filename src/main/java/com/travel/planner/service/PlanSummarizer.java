@@ -118,11 +118,11 @@ public final class PlanSummarizer {
         List<String> sentences = new ArrayList<>();
         String inCity = city == null ? "" : city + "에서 ";
         if (arrival && departure) {
-            sentences.add(first.getName() + "에 도착해 " + (city == null ? "" : city + " ") + "일정을 마친 뒤 그날 출국하는 당일 일정입니다.");
+            sentences.add(first.shownName() + "에 도착해 " + (city == null ? "" : city + " ") + "일정을 마친 뒤 그날 출국하는 당일 일정입니다.");
         } else if (arrival) {
-            sentences.add(first.getName() + "에 도착해 " + (city == null ? "" : city + " ") + "일정을 시작하는 날입니다.");
+            sentences.add(first.shownName() + "에 도착해 " + (city == null ? "" : city + " ") + "일정을 시작하는 날입니다.");
         } else if (departure) {
-            sentences.add(inCity + "마지막 일정을 보낸 뒤 " + last.getName() + "에서 출국하는 날입니다.");
+            sentences.add(inCity + "마지막 일정을 보낸 뒤 " + last.shownName() + "에서 출국하는 날입니다.");
         } else if (moving) {
             sentences.add(previousCity + "에서 " + city + josa(city, "으로", "로") + " 넘어가 보내는 날입니다.");
         } else if (visits.isEmpty()) {
@@ -224,13 +224,13 @@ public final class PlanSummarizer {
         Place in = anchor(days, true);
         Place out = anchor(days, false);
         if (in != null && out != null) {
-            sentences.add(in.getName().equals(out.getName())
-                    ? "입·출국은 모두 " + in.getName() + " 기준입니다."
-                    : in.getName() + josa(in.getName(), "으로", "로") + " 들어가 " + out.getName() + "에서 나오는 일정입니다.");
+            sentences.add(in.shownName().equals(out.shownName())
+                    ? "입·출국은 모두 " + in.shownName() + " 기준입니다."
+                    : in.shownName() + josa(in.shownName(), "으로", "로") + " 들어가 " + out.shownName() + "에서 나오는 일정입니다.");
         } else if (in != null) {
-            sentences.add("입국은 " + in.getName() + " 기준입니다.");
+            sentences.add("입국은 " + in.shownName() + " 기준입니다.");
         } else if (out != null) {
-            sentences.add("출국은 " + out.getName() + " 기준입니다.");
+            sentences.add("출국은 " + out.shownName() + " 기준입니다.");
         }
         return String.join(" ", sentences);
     }
@@ -271,7 +271,7 @@ public final class PlanSummarizer {
         List<SimulatedItinerary> ranked = new ArrayList<>(distinct);
         ranked.sort(Comparator.comparingInt((SimulatedItinerary s) -> reviewCount(s.getPlace())).reversed());   // 안정 정렬
         Set<SimulatedItinerary> picked = new LinkedHashSet<>(ranked.subList(0, Math.min(max, ranked.size())));
-        return distinct.stream().filter(picked::contains).map(s -> s.getPlace().getName()).collect(Collectors.toList());
+        return distinct.stream().filter(picked::contains).map(s -> s.getPlace().shownName()).collect(Collectors.toList());
     }
 
     private static int reviewCount(Place p) {
@@ -360,7 +360,7 @@ public final class PlanSummarizer {
             SimulatedItinerary end = items.isEmpty() ? null : items.get(items.size() - 1);
             boolean lodging = end != null && end.getType() == SimulatedItinerary.Type.END
                     && end.getPlace() != null && !PlanService.isAirport(end.getPlace());
-            names.add(lodging ? end.getPlace().getName() : null);
+            names.add(lodging ? end.getPlace().shownName() : null);
         }
         List<String> legs = new ArrayList<>();
         int from = 0;

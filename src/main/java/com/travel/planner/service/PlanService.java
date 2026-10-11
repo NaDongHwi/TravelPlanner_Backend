@@ -238,7 +238,10 @@ public class PlanService {
         public Double getLongitude() { return longitude; }
         public String getTime() { return TimeUtil.format(startMin); }
         public String getEndTime() { return endMin == null ? null : TimeUtil.format(endMin); }
-        public String getDisplayName() { return place != null ? place.getName() : title; }
+        /** 화면에 보여 줄 이름 (장소에 한국어 이름이 따로 있으면 그 이름) */
+        public String getDisplayName() { return place != null ? place.shownName() : title; }
+        /** DB 에 저장된 원래 이름 (구글에서 받은 그대로) */
+        public String getOriginalName() { return place != null ? place.getName() : title; }
 
         public String getCategory() {
             switch (type) {
@@ -1063,7 +1066,7 @@ public class PlanService {
             String theme = ds.seed.matched.stream()
                     .min(Comparator.comparingInt(t -> st.themeCounts.getOrDefault(t, 0))).orElse("요청");
             warnings.add(String.format("Day %d: 시내에 '%s' 테마 장소가 부족해 도심에서 약 %dkm 떨어진 '%s'을(를) 넣었습니다. 이동 시간이 깁니다.",
-                    ctx.dayNumber, theme, Math.round(ds.seed.distFromCenter), ds.seed.place.getName()));
+                    ctx.dayNumber, theme, Math.round(ds.seed.distFromCenter), ds.seed.place.shownName()));
         }
         finishDay(ctx, ds, dayPlan, warnings);
         return dayPlan;
@@ -1947,7 +1950,7 @@ public class PlanService {
             Replacement r = new Replacement();
             r.sequence = i + 1;
             r.oldPlace = target.hasLocation() ? target.place : null;
-            r.oldName = target.place != null && target.hasLocation() ? target.place.getName() : target.title;
+            r.oldName = target.place != null && target.hasLocation() ? target.place.shownName() : target.title;
             result.replacements.add(r);
 
             boolean replaceable = target.type == SimulatedItinerary.Type.VISIT || target.type == SimulatedItinerary.Type.MEAL
@@ -2303,16 +2306,16 @@ public class PlanService {
             }
 
             if (start < 0) {
-                return fail(result, p, "[" + p.getName() + "] 도착 예상 " + TimeUtil.format(ds.cur + travel) + " 기준으로 영업시간 안에 방문을 마칠 수 없습니다.");
+                return fail(result, p, "[" + p.shownName() + "] 도착 예상 " + TimeUtil.format(ds.cur + travel) + " 기준으로 영업시간 안에 방문을 마칠 수 없습니다.");
             }
             int end = start + dwell;
             if (end > ctx.endMin) {
-                return fail(result, p, "[" + p.getName() + "] 방문이 " + TimeUtil.format(end) + " 에 끝나 일과 종료 시각(" + TimeUtil.format(ctx.endMin) + ")을 넘깁니다.");
+                return fail(result, p, "[" + p.shownName() + "] 방문이 " + TimeUtil.format(end) + " 에 끝나 일과 종료 시각(" + TimeUtil.format(ctx.endMin) + ")을 넘깁니다.");
             }
             if (ctx.endAnchor != null && ctx.hardDeadlineMin != null) {
                 int back = travel(ctx, p.getLatitude(), p.getLongitude(), ctx.endAnchor.getLatitude(), ctx.endAnchor.getLongitude());
                 if (end + buffer + back > ctx.hardDeadlineMin) {
-                    return fail(result, p, "[" + p.getName() + "] 방문 후 공항 도착이 " + TimeUtil.format(end + buffer + back)
+                    return fail(result, p, "[" + p.shownName() + "] 방문 후 공항 도착이 " + TimeUtil.format(end + buffer + back)
                             + " 로, 출국 수속 마감(" + TimeUtil.format(ctx.hardDeadlineMin) + ")을 넘깁니다.");
                 }
             }

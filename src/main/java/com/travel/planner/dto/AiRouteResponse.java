@@ -50,7 +50,8 @@ public class AiRouteResponse {
         private String endTime;     // 종료 시각 "HH:mm" (숙소/공항 등은 null)
         private Integer travelMinutes; // 직전 항목에서 여기까지의 예상 이동 시간(분)
         private String placeId;     // 장소 고유 ID 필드
-        private String placeName;   // 예: "아사쿠사"
+        private String placeName;   // 예: "아사쿠사". 원래 이름이 영어·일본어뿐인 곳은 한국어로 옮긴 이름
+        private String placeNameOriginal; // 한국어로 옮기기 전의 원래 이름 (예: "駿府城公園"). 옮기지 않았으면 null
         private String category;    // 예: "관광"
         private String description; // 예: "1줄 설명"
 

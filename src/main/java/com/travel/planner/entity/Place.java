@@ -16,6 +16,16 @@ public class Place {
     @Column(nullable = false)
     private String name;
 
+    // 화면·문서에 보여 줄 한국어 이름. 원래 이름(name)이 영어·일본어일 때만 AI 가 채운다.
+    // name 은 구글에서 받은 그대로 두고(검색·분류·중복 판단에 계속 쓴다), 보여 줄 때만 이 값을 쓴다.
+    @Column(length = 255)
+    private String nameKo;
+
+    /** 화면에 보여 줄 이름: 한국어 이름이 있으면 그것, 없으면 원래 이름 */
+    public String shownName() {
+        return nameKo != null && !nameKo.isBlank() ? nameKo : name;
+    }
+
     @Column
     private String city;
 

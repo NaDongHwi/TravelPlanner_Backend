@@ -14,7 +14,10 @@ import com.itextpdf.layout.element.Text;
 import com.itextpdf.layout.properties.TextAlignment;
 import com.itextpdf.layout.properties.UnitValue;
 import com.travel.planner.entity.Itinerary;
+import com.travel.planner.entity.Place;
 import com.travel.planner.entity.Plan;
+import com.travel.planner.util.PlaceNames;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -24,10 +27,33 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class PdfExportService {
+
+    private final PlaceNameService placeNameService;
+
+    /** 일정표에 적을 장소 이름: 자유 시간·식사·고정 일정은 저장된 표시 이름, 장소는 한국어로 옮긴 이름(없으면 원래 이름) */
+    static String placeTitle(Itinerary itinerary) {
+        if (itinerary.getCustomTitle() != null) return itinerary.getCustomTitle();
+        return itinerary.getPlace() != null ? itinerary.getPlace().shownName() : "-";
+    }
+
+    /** 일정에 나오는 장소 (자유 시간 같은 자리 표시용 장소는 뺀다) */
+    static List<Place> placesOf(Plan plan) {
+        return plan.getItineraries().stream().map(Itinerary::getPlace)
+                .filter(p -> p != null && !PlanService.isPseudoCategory(p.getCategory())).collect(Collectors.toList());
+    }
 
     public byte[] generatePlanPdf(Plan plan) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        // 이름이 영어·일본어뿐인 장소에 보여 줄 한국어 이름을 붙인다 (이미 있으면 AI 를 부르지 않는다. 예전에 만든 일정도 한국어로 나온다)
+        List<Place> places = placesOf(plan);
+        try {
+            placeNameService.fillMissing(places);
+        } catch (Exception e) {
+            System.out.println("[장소 이름] 한국어 이름을 붙이지 못해 원래 이름으로 문서를 만듭니다: " + e.getMessage());
+        }
 
         try {
             // 1. PDF 작성기 초기화
@@ -67,7 +93,8 @@ public class PdfExportService {
 
             // AI 추천 사유 추가
             if (plan.getAiReason() != null) {
-                Text aiReasonText = new Text("\n[AI 플래너의 추천 코멘트]\n" + plan.getAiReason()).simulateItalic();
+                // 예전에 저장한 요약에는 원래 이름이 들어 있을 수 있다
+                Text aiReasonText = new Text("\n[AI 플래너의 추천 코멘트]\n" + PlaceNames.localize(plan.getAiReason(), places)).simulateItalic();
                 Paragraph aiReason = new Paragraph(aiReasonText);
                 aiReason.setFontSize(11);
                 aiReason.setMarginBottom(20);
@@ -108,8 +135,7 @@ public class PdfExportService {
                 for (Itinerary iti : dayItineraries) {
                     // 종료 시각이 있으면 "09:00~10:30" 으로, 자유시간·식사·고정 일정은 저장된 표시 이름으로 출력
                     String time = iti.getEndTime() != null ? iti.getTime() + "~" + iti.getEndTime() : iti.getTime();
-                    String placeName = iti.getCustomTitle() != null ? iti.getCustomTitle()
-                            : (iti.getPlace() != null ? iti.getPlace().getName() : "-");
+                    String placeName = placeTitle(iti);
                     Paragraph timeP = new Paragraph(time);
                     Paragraph placeP = new Paragraph(placeName);
                     Paragraph descP = new Paragraph(iti.getAiComment() != null ? iti.getAiComment() : "");

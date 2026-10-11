@@ -28,6 +28,7 @@ public class PlanModifierService {
     private final PlanService planService;
     private final PlanPersistenceService planPersistenceService;
     private final TimelineAssembler timelineAssembler;
+    private final PlaceNameService placeNameService;
 
     /**
      * 특정 일차에 장소 하나를 끼워 넣는다.
@@ -111,6 +112,12 @@ public class PlanModifierService {
         insertIndex = Math.max(0, Math.min(insertIndex, draftRoute.size()));
         draftRoute.add(insertIndex, newPlace);
 
+        // 그 날에 나오는 장소 가운데 이름이 영어·일본어뿐인 곳에 보여 줄 한국어 이름을 붙인다 (안내 문장과 응답에 쓰인다)
+        List<Place> shownPlaces = new ArrayList<>(draftRoute);
+        if (startAnchor != null) shownPlaces.add(startAnchor);
+        if (endAnchor != null) shownPlaces.add(endAnchor);
+        placeNameService.fillMissing(shownPlaces);
+
         // 4. 저장해 둔 원래 요청 조건(테마·동행·선호 시간·고정 일정·이동수단)을 복원
         PlanRequest restored = planPersistenceService.restoreRequest(plan);
 
@@ -149,13 +156,13 @@ public class PlanModifierService {
                 // 강제 삭제 동의가 없으면 여기서 멈추고 프론트에 확인 창을 띄운다. (아무것도 저장하지 않음)
                 response.setSuccess(false);
                 response.setRequireConfirmation(true);
-                response.setMessage(sim.getReason() + " [" + problem.getName() + "] 일정을 포기하고 추가하시겠습니까?");
+                response.setMessage(sim.getReason() + " [" + problem.shownName() + "] 일정을 포기하고 추가하시겠습니까?");
                 return response;
             }
 
             // 사용자 동의 상태: 문제가 된 기존 장소를 빼고 다시 계산
             draftRoute.remove(problem);
-            droppedPlaces.add(problem.getName());
+            droppedPlaces.add(problem.shownName());
         }
     }
 }

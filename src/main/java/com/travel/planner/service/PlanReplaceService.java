@@ -47,6 +47,7 @@ public class PlanReplaceService {
     private final PlanPersistenceService planPersistenceService;
     private final TimelineAssembler timelineAssembler;
     private final PlaceDescriptionService placeDescriptionService;
+    private final PlaceNameService placeNameService;
 
     @Transactional
     public ReplaceResponse replace(String email, Long planId, ReplaceRequest request) {
@@ -94,6 +95,7 @@ public class PlanReplaceService {
         Map<Integer, List<SimulatedItinerary>> newDays = new TreeMap<>();
         Map<Integer, PlanService.DayContext> contexts = new TreeMap<>();
         List<Place> newPlaces = new ArrayList<>();
+        Map<ReplaceResponse.Change, Place[]> changePlaces = new java.util.IdentityHashMap<>();   // 바꾼 줄마다 {이전 장소, 새 장소}
 
         for (Map.Entry<Integer, Set<Integer>> entry : targets.entrySet()) {
             int dayNumber = entry.getKey();
@@ -116,12 +118,13 @@ public class PlanReplaceService {
                 if (r.oldPlace != null) change.setOldPlaceId(r.oldPlace.getPlaceId());
                 if (r.newPlace != null) {
                     change.setNewPlaceId(r.newPlace.getPlaceId());
-                    change.setNewPlaceName(r.newPlace.getName());
+                    change.setNewPlaceName(r.newPlace.shownName());
                     newPlaces.add(r.newPlace);
                     tripPlaces.add(r.newPlace);                                    // 다른 날에서 같은 곳을 또 고르지 않도록
                     if (r.oldPlace != null) rejected.add(r.oldPlace.getPlaceId()); // 다시 추천하지 않는다
                 }
                 change.setMessage(r.message);
+                changePlaces.put(change, new Place[]{r.oldPlace, r.newPlace});
                 response.getChanges().add(change);
             }
             if (result.replacements.stream().anyMatch(r -> r.changed)) {
@@ -136,6 +139,19 @@ public class PlanReplaceService {
 
         // 새로 들어간 장소에 AI 소개가 없으면 지금 채운다
         placeDescriptionService.fillMissing(newPlaces);
+        // 바뀐 날에 나오는 장소(새 장소, 빠진 장소, 그대로인 장소) 가운데 이름이 영어·일본어뿐인 곳에 보여 줄 한국어 이름을 붙인다
+        List<Place> shownPlaces = new ArrayList<>(newPlaces);
+        for (Place[] pair : changePlaces.values()) if (pair[0] != null) shownPlaces.add(pair[0]);
+        for (List<SimulatedItinerary> items : newDays.values()) {
+            for (SimulatedItinerary item : items) if (item.getPlace() != null) shownPlaces.add(item.getPlace());
+        }
+        placeNameService.fillMissing(shownPlaces);
+        for (ReplaceResponse.Change change : response.getChanges()) {
+            Place[] pair = changePlaces.get(change);
+            if (pair == null) continue;
+            if (pair[0] != null) change.setOldPlaceName(pair[0].shownName());
+            if (pair[1] != null) change.setNewPlaceName(pair[1].shownName());
+        }
 
         boolean save = changed > 0 && !request.isPreview();
         for (Map.Entry<Integer, List<SimulatedItinerary>> entry : newDays.entrySet()) {

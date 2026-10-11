@@ -61,7 +61,11 @@ public class TimelineAssembler {
             item.setTime(sim.getTime());
             item.setEndTime(sim.getEndTime());
             item.setTravelMinutes(sim.getTravelMinutes());
-            item.setPlaceName(sim.getDisplayName());
+            // 한국어 화면에는 한국어로 옮긴 이름을, 그 밖의 언어에는 원래 이름을 보여 준다. 옮긴 경우 원래 이름도 함께 준다(현지 간판·지도 검색용)
+            item.setPlaceName(korean ? sim.getDisplayName() : sim.getOriginalName());
+            if (korean && sim.getPlace() != null && !sim.getDisplayName().equals(sim.getOriginalName())) {
+                item.setPlaceNameOriginal(sim.getOriginalName());
+            }
             item.setCategory(sim.getCategory());
             item.setDescription(describe(sim));
             item.setLatitude(sim.getLatitude());

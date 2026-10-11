@@ -153,6 +153,34 @@ public class AiService {
     }
 
     // ============================================================================
+    // 2-1b. 장소 이름의 한국어 표기 (구글에 한국어 이름이 없어 영어·일본어로만 저장된 곳)
+    //       화면·문서에 보여 줄 이름만 만든다. 결과는 {장소 ID: 한국어 이름}
+    // ============================================================================
+    public Map<String, String> translatePlaceNames(List<Place> places) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("너는 일본 여행 가이드북의 한국어판 편집자야. 아래 일본 장소들의 이름(영어·일본어)을 한국 여행자가 읽을 수 있는 한국어 이름으로 옮겨.\n\n");
+        prompt.append("【 규칙 】\n");
+        prompt.append("1. 고유명사는 뜻으로 풀지 말고 일본어 읽기(영어 이름은 그 발음)를 국립국어원 외래어 표기법에 따라 한글로 적어. ")
+                .append("예: 駿府城公園→슨푸성 공원, 清水寺→기요미즈데라, 三保の松原→미호노마쓰바라, Hotel Associa Shizuoka→호텔 아소시아 시즈오카\n");
+        prompt.append("2. 종류를 나타내는 말은 한국어로 옮겨. 예: 公園→공원, 神社→신사, 美術館→미술관, 商店街→상점가, 駅→역, 本店→본점, ○○店→○○점, ")
+                .append("Park→공원, Museum→박물관, Castle→성, Shrine→신사, Station→역\n");
+        prompt.append("3. 한국에서 널리 쓰는 이름이 있으면 그 이름으로. 예: Tokyo Tower→도쿄 타워, Universal Studios Japan→유니버설 스튜디오 재팬, Starbucks Coffee→스타벅스 커피, ドン・キホーテ→돈키호테\n");
+        prompt.append("4. 한자 읽기가 여러 가지면 도시·주소를 참고해 그 지역에서 쓰는 읽기로 적어. 숫자와 지점 이름은 빠뜨리지 마.\n");
+        prompt.append("5. 이름만 적어. 설명·괄호 안의 원문·따옴표를 덧붙이지 마. 원래 이름에 없는 말을 지어내지 마.\n");
+        prompt.append("6. 결과는 반드시 장소 ID를 키로, 한국어 이름을 값으로 하는 순수 JSON 객체 하나로만 반환해. 마크다운(```json) 금지.\n");
+        prompt.append("예시: {\"ChIJ1234\": \"슨푸성 공원\", \"ChIJ5678\": \"멘야 무사시 신주쿠 본점\"}\n\n[대상 목록]\n");
+        for (Place p : places) {
+            prompt.append("- ID: ").append(p.getPlaceId()).append(" / 이름: ").append(p.getName());
+            if (p.getCity() != null && !p.getCity().isBlank()) prompt.append(" / 도시: ").append(p.getCity());
+            if (p.getCategory() != null && !p.getCategory().isBlank()) prompt.append(" / 분류: ").append(p.getCategory());
+            if (p.getAddress() != null && !p.getAddress().isBlank()) prompt.append(" / 주소: ").append(p.getAddress());
+            prompt.append("\n");
+        }
+        Map<String, String> result = callAi(prompt.toString(), new TypeReference<Map<String, String>>(){}, "PLACE_NAMES");
+        return result != null ? result : new HashMap<>();
+    }
+
+    // ============================================================================
     // 2-2. 철도 역·노선·회사 이름의 한국어 표기 (국토교통성 데이터에는 일본어만 있다)
     //      kind: "STATION" / "LINE" / "OPERATOR". 결과는 {일본어 원문: 한국어 표기}
     // ============================================================================

@@ -3,9 +3,11 @@ package com.travel.planner.repository;
 import com.travel.planner.entity.Place;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -48,4 +50,10 @@ public interface PlaceRepository extends JpaRepository<Place, Long> {
     List<Place> findRefreshTargets(@Param("threshold") java.time.LocalDateTime threshold, Pageable pageable);
 
     List<Place> findByNameContaining(String keyword);
+
+    // 보여 줄 한국어 이름만 고친다. 다른 칸(원래 이름·소개 등)은 건드리지 않으므로, 같은 장소를 다른 작업이 동시에 저장해도 서로 덮어쓰지 않는다.
+    @Modifying
+    @Transactional
+    @Query("UPDATE Place p SET p.nameKo = :nameKo WHERE p.id = :id")
+    int updateNameKo(@Param("id") Long id, @Param("nameKo") String nameKo);
 }

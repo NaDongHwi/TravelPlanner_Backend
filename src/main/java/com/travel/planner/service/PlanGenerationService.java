@@ -8,6 +8,7 @@ import com.travel.planner.entity.Plan;
 import com.travel.planner.entity.User;
 import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.repository.UserRepository;
+import com.travel.planner.util.PlaceNames;
 import com.travel.planner.util.AirportDirectory;
 import com.travel.planner.util.DistanceUtil;
 import com.travel.planner.util.ThemeVocabulary;
@@ -46,6 +47,7 @@ public class PlanGenerationService {
     private final GoogleMapsService googleMapsService;
     private final WeatherService weatherService;
     private final PlaceDescriptionService placeDescriptionService;
+    private final PlaceNameService placeNameService;
     private final RailRouteService railRouteService;
     private final PassAdvisorService passAdvisorService;
 
@@ -130,8 +132,19 @@ public class PlanGenerationService {
         // ------------------------------------------------------------------
         // Step 7. 응답 조립 + DB 저장
         // ------------------------------------------------------------------
-        // 일정에 들어간 장소 중 AI 소개가 아직 없는 곳만 지금 채운다 (DB 에 남으므로 같은 장소는 다시 묻지 않는다)
+        // 일정에 들어간 장소 중 이름이 영어·일본어뿐인 곳에 보여 줄 한국어 이름을 붙이고, AI 소개가 아직 없는 곳은 소개를 채운다.
+        // 둘 다 DB 에 남으므로 같은 장소는 다시 묻지 않는다. 서로 기다리지 않도록 이름은 따로 돌린다.
+        List<Place> shownPlaces = placesInPlan(tripPlan.getDays());
+        java.util.concurrent.CompletableFuture<Integer> naming =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> placeNameService.fillMissing(shownPlaces));
         placeDescriptionService.fillMissing(placesToDescribe(tripPlan.getDays()));
+        try {
+            naming.join();
+        } catch (Exception e) {
+            System.out.println("[장소 이름] 한국어 이름을 붙이지 못해 원래 이름으로 응답합니다: " + e.getMessage());
+        }
+        // 엔진이 일정을 짜면서 남긴 안내 문장에는 원래 이름이 들어 있다
+        warnings.replaceAll(w -> PlaceNames.localize(w, shownPlaces));
 
         AiRouteResponse response = new AiRouteResponse();
         // 어떤 여행인지: 전체 요약(reason)·제목·일자별 개요. 일정 결과에서 바로 만들므로 AI 호출이 없다.
@@ -357,6 +370,17 @@ public class PlanGenerationService {
         place.setLatitude(airport.latitude);
         place.setLongitude(airport.longitude);
         return saveAnchor(place, "교통");
+    }
+
+    /** 일정에 나오는 모든 장소 (방문지·숙소·공항). 보여 줄 한국어 이름을 붙일 대상이다. */
+    static List<Place> placesInPlan(List<PlanService.DayPlan> days) {
+        List<Place> out = new ArrayList<>();
+        for (PlanService.DayPlan day : days) {
+            for (PlanService.SimulatedItinerary item : day.getItems()) {
+                if (item.getPlace() != null) out.add(item.getPlace());
+            }
+        }
+        return out;
     }
 
     /**

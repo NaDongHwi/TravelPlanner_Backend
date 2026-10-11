@@ -31,6 +31,31 @@ public class Plan {
     @Column(nullable = false)
     private LocalDate endDate;
 
+    // 날짜를 정하지 않고 "몇 박 며칠"만 정한 일정이면 여행 일수(3박 4일 = 4). 날짜를 정한 일정은 null.
+    // 이 값이 있으면 위의 startDate·endDate 는 실제 날짜가 아니라 자리 표시(UNDATED_BASE 부터 일수만큼)다.
+    // (두 칸이 DB 에서 NOT NULL 이라 비워 둘 수 없어서 이렇게 둔다. 화면에 보여 줄 때는 반드시 undated() 를 먼저 본다)
+    @Column
+    private Integer tripDays;
+
+    /** 날짜가 정해지지 않은 일정의 1일차 자리에 넣는 날짜. 실제 날짜가 아니다. */
+    public static final LocalDate UNDATED_BASE = LocalDate.of(1970, 1, 1);
+
+    /** 날짜를 정하지 않은 일정인가 */
+    public boolean undated() {
+        return tripDays != null;
+    }
+
+    /** 여행 일수 */
+    public int totalDays() {
+        if (tripDays != null) return tripDays;
+        return (int) java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1;
+    }
+
+    /** N일차의 실제 날짜. 날짜를 정하지 않은 일정이면 null */
+    public LocalDate dateOfDay(int dayNumber) {
+        return undated() || startDate == null ? null : startDate.plusDays(dayNumber - 1L);
+    }
+
     // 테마 (힐링, 액티비티 등)
     private String theme;
 

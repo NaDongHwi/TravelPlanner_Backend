@@ -66,7 +66,7 @@ public class PlanReplaceService {
             }
         }
 
-        int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(plan.getStartDate(), plan.getEndDate()) + 1;
+        int totalDays = plan.totalDays();
 
         // 일차별 일정 (그 날 화면 순서대로)
         Map<Integer, List<Itinerary>> byDay = new TreeMap<>();

@@ -40,6 +40,7 @@ public class WeatherScheduler {
         List<Plan> activePlans = planRepository.findDetailByStartDateBetween(today, today.plusDays(2));
 
         for (Plan plan : activePlans) {
+            if (plan.undated()) continue;   // 날짜를 정하지 않은 일정은 예보를 볼 날짜가 없다
             String token = plan.getUser() != null ? plan.getUser().getFcmToken() : null;
             if (token == null || token.isBlank()) continue;
 

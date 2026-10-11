@@ -52,8 +52,16 @@ public class PlanPersistenceService {
         Plan plan = new Plan();
         plan.setUser(user);
         plan.setTitle(String.join(", ", request.getCities()) + " 여행");
-        plan.setStartDate(request.getStartDate());
-        plan.setEndDate(request.getEndDate());
+        if (PlanService.isUndated(request)) {
+            // 날짜를 정하지 않은 일정: 날짜 칸(NOT NULL)에는 자리 표시 날짜를 넣고, 일수를 따로 적어 "날짜 미정"임을 표시한다
+            int totalDays = request.getTripDays();
+            plan.setTripDays(totalDays);
+            plan.setStartDate(Plan.UNDATED_BASE);
+            plan.setEndDate(Plan.UNDATED_BASE.plusDays(totalDays - 1L));
+        } else {
+            plan.setStartDate(request.getStartDate());
+            plan.setEndDate(request.getEndDate());
+        }
         plan.setInCity(request.getInCity());
         plan.setOutCity(request.getOutCity());
         plan.setInTime(request.getInTime() != null ? request.getInTime() : "미정");
@@ -124,7 +132,7 @@ public class PlanPersistenceService {
     private List<Traffic> appendDay(Plan plan, int dayNumber, List<SimulatedItinerary> items, String transport) {
         List<Traffic> traffics = new ArrayList<>();
         // 구간별 이동 방법·요금 (응답에 나가는 값과 같은 계산)
-        java.time.LocalDate date = plan.getStartDate() == null ? null : plan.getStartDate().plusDays(dayNumber - 1L);
+        java.time.LocalDate date = plan.dateOfDay(dayNumber);   // 날짜를 정하지 않은 일정이면 null (평일 운행 기준)
         List<com.travel.planner.dto.TransitLegDto> legs = railRouteService.legsFor(items, transport, date);
         int sequence = 1;
         for (int index = 0; index < items.size(); index++) {
@@ -185,8 +193,12 @@ public class PlanPersistenceService {
     /** 저장된 Plan 에서 원래 요청 조건을 복원한다 (reroute 용). */
     public PlanRequest restoreRequest(Plan plan) {
         PlanRequest req = new PlanRequest();
-        req.setStartDate(plan.getStartDate());
-        req.setEndDate(plan.getEndDate());
+        if (plan.undated()) {
+            req.setTripDays(plan.getTripDays());       // 날짜 미정: 날짜 칸의 자리 표시 값은 쓰지 않는다
+        } else {
+            req.setStartDate(plan.getStartDate());
+            req.setEndDate(plan.getEndDate());
+        }
         req.setInCity(plan.getInCity());
         req.setOutCity(plan.getOutCity());
         req.setInTime(plan.getInTime());

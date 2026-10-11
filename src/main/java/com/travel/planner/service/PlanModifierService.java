@@ -48,7 +48,7 @@ public class PlanModifierService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인의 일정만 수정할 수 있습니다.");
         }
 
-        int totalDays = (int) java.time.temporal.ChronoUnit.DAYS.between(plan.getStartDate(), plan.getEndDate()) + 1;
+        int totalDays = plan.totalDays();
         int dayNumber = request.getDayNumber();
         if (dayNumber < 1 || dayNumber > totalDays) {
             throw new IllegalArgumentException("수정할 일차가 여행 기간(1~" + totalDays + "일차)을 벗어납니다.");

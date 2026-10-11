@@ -19,6 +19,10 @@ public class AiRouteResponse {
     // 여행 제목 (예: "시즈오카·하마마쓰 5박 6일 온천·자연 여행")
     private String title;
 
+    // 여행 일수 (3박 4일 = 4)
+    private Integer tripDays;
+    // 날짜를 정하지 않고 일수만 정한 일정인가. true 면 days[].date·dayOfWeek 가 비어 있고, 날씨·요일별 휴무·계절 일몰이 반영되지 않았다
+    private boolean dateUndecided;
     // 일자별 개요 (1일차부터 순서대로, 일수만큼)
     private List<DaySummary> days;
 

@@ -20,6 +20,10 @@ public class PlanRequest {
     @Schema(description = "여행 종료일 (Step 1)", example = "2026-07-05")
     private LocalDate endDate;
 
+    @Schema(description = "여행 일수 (1~30). 날짜가 아직 정해지지 않았을 때 startDate·endDate 대신 보낸다. 3박 4일이면 4. "
+            + "이 값만 보내면 날씨·요일별 휴무·계절별 일몰은 반영하지 않고 일정을 만든다. startDate·endDate 를 보내면 이 값은 쓰지 않는다.", example = "4")
+    private Integer tripDays;
+
     @Schema(description = "여행 도시 목록 (Step 2)", example = "[\"오사카\", \"교토\"]")
     private List<String> cities;
 
@@ -105,5 +109,9 @@ public class PlanRequest {
         private String address;
         private LocalDate checkIn;
         private LocalDate checkOut;
+        @Schema(description = "체크인 일차 (1부터). 날짜가 정해지지 않은 일정(tripDays)에서 checkIn 대신 쓴다. 비우면 1일차", example = "1")
+        private Integer checkInDay;
+        @Schema(description = "체크아웃 일차. 날짜가 정해지지 않은 일정(tripDays)에서 checkOut 대신 쓴다. 비우면 마지막 날", example = "3")
+        private Integer checkOutDay;
     }
 }

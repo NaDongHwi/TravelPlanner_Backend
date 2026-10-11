@@ -38,6 +38,15 @@ public class PdfExportService {
         return itinerary.getPlace() != null ? itinerary.getPlace().shownName() : "-";
     }
 
+    /** "2026년 10월 17일 ~ 2026년 10월 20일" 또는, 날짜를 정하지 않은 일정이면 "3박 4일 (날짜 미정)" */
+    static String periodLabel(Plan plan, DateTimeFormatter formatter) {
+        if (plan.undated()) {
+            int days = plan.totalDays();
+            return (days <= 1 ? "당일치기" : (days - 1) + "박 " + days + "일") + " (날짜 미정)";
+        }
+        return plan.getStartDate().format(formatter) + " ~ " + plan.getEndDate().format(formatter);
+    }
+
     /** 일정에 나오는 장소 (자유 시간 같은 자리 표시용 장소는 뺀다) */
     static List<Place> placesOf(Plan plan) {
         return plan.getItineraries().stream().map(Itinerary::getPlace)
@@ -81,7 +90,7 @@ public class PdfExportService {
 
             // 3. 여행 기본 정보
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy년 MM월 dd일");
-            String period = plan.getStartDate().format(formatter) + " ~ " + plan.getEndDate().format(formatter);
+            String period = periodLabel(plan, formatter);
 
             Paragraph periodPara = new Paragraph("여행 기간: " + period);
             periodPara.setFontSize(12);

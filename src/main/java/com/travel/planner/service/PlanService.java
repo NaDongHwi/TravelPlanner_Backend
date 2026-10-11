@@ -315,8 +315,22 @@ public class PlanService {
     // 요청 → 시간 창
     // =====================================================================================
 
+    /** 날짜를 정하지 않고 여행 일수(tripDays)만 정한 요청인가 */
+    public static boolean isUndated(PlanRequest request) {
+        return request.getStartDate() == null;
+    }
+
     public int totalDays(PlanRequest request) {
+        if (isUndated(request)) return request.getTripDays() == null ? 0 : request.getTripDays();
         return (int) ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
+    }
+
+    /**
+     * 숙박 기간처럼 "며칠째"를 날짜로 계산해야 할 때의 1일차 날짜.
+     * 날짜를 정하지 않은 요청이면 실제 날짜가 아닌 자리 표시 날짜(Plan.UNDATED_BASE)다. 화면에 보여 주는 데는 쓰지 않는다.
+     */
+    public static LocalDate baseDate(PlanRequest request) {
+        return isUndated(request) ? com.travel.planner.entity.Plan.UNDATED_BASE : request.getStartDate();
     }
 
     private int dailyStartMin(PlanRequest request) {
@@ -356,7 +370,8 @@ public class PlanService {
     public DayContext buildDayContext(PlanRequest request, int dayNumber, int totalDays, Place startAnchor, Place endAnchor) {
         DayContext ctx = new DayContext();
         ctx.dayNumber = dayNumber;
-        ctx.date = request.getStartDate().plusDays(dayNumber - 1L);
+        // 날짜를 정하지 않은 일정이면 null: 요일·계절·날씨에 따라 달라지는 판단을 하지 않는다
+        ctx.date = isUndated(request) ? null : request.getStartDate().plusDays(dayNumber - 1L);
         ctx.startAnchor = startAnchor;
         ctx.endAnchor = endAnchor;
         ctx.startMin = dailyStartMin(request);
@@ -1407,8 +1422,9 @@ public class PlanService {
         return iv;
     }
 
-    /** 야경을 보기 시작할 만한 시각 (월별 일몰 근사) */
+    /** 야경을 보기 시작할 만한 시각 (월별 일몰 근사). 날짜를 모르면 봄·가을 기준(17:30) */
     private static int nightViewFrom(LocalDate date) {
+        if (date == null) return 17 * 60 + 30;
         int month = date.getMonthValue();
         if (month == 11 || month == 12 || month == 1) return 17 * 60;
         if (month == 2 || month == 3 || month == 10) return 17 * 60 + 30;

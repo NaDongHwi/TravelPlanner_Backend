@@ -52,12 +52,47 @@ public final class OpeningHours {
         return text == null || text.isBlank() || text.contains("없음") || text.equals(CHECKED_NO_DATA);
     }
 
-    /** 해당 날짜의 영업 구간. null=정보 없음, 빈 리스트=휴무. */
+    /**
+     * 해당 날짜의 영업 구간. null=정보 없음, 빈 리스트=휴무.
+     * 날짜를 모르면(null) 요일을 알 수 없으므로 "보통 날"의 영업 구간을 돌려준다 ({@link #typicalIntervals}).
+     */
     public static List<int[]> intervalsOn(Place place, LocalDate date) {
-        DayOfWeek dow = date.getDayOfWeek();
+        if (date == null) return typicalIntervals(place);
+        return intervalsOn(place, date.getDayOfWeek());
+    }
+
+    /** 그 요일의 영업 구간. null=정보 없음, 빈 리스트=휴무. */
+    public static List<int[]> intervalsOn(Place place, DayOfWeek dow) {
         List<int[]> fromPeriods = fromPeriodsJson(place.getOpeningPeriods(), dow);
         if (fromPeriods != null) return fromPeriods;
         return fromWeekdayText(place.getOpeningHours(), dow);
+    }
+
+    /**
+     * 요일을 모를 때 쓰는 "보통 날"의 영업 구간: 일주일 중 가장 여러 요일에 해당하는 영업 구간.
+     * 문을 여는 요일이 하루라도 있으면 휴무일은 세지 않는다(정기 휴무는 반영할 수 없다. 날짜가 정해지면 그때 걸러진다).
+     * null=정보 없음, 빈 리스트=일주일 내내 휴무.
+     */
+    public static List<int[]> typicalIntervals(Place place) {
+        java.util.Map<String, List<int[]>> patterns = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+        boolean anyInfo = false;
+        for (DayOfWeek dow : DayOfWeek.values()) {
+            List<int[]> iv = intervalsOn(place, dow);
+            if (iv == null) continue;
+            anyInfo = true;
+            if (iv.isEmpty()) continue;
+            StringBuilder key = new StringBuilder();
+            for (int[] range : iv) key.append(range[0]).append('-').append(range[1]).append(',');
+            patterns.putIfAbsent(key.toString(), iv);
+            counts.merge(key.toString(), 1, Integer::sum);
+        }
+        if (!anyInfo) return null;
+        String best = null;
+        for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) {       // 같은 횟수면 앞 요일(월요일 쪽)의 것
+            if (best == null || e.getValue() > counts.get(best)) best = e.getKey();
+        }
+        return best == null ? new ArrayList<>() : patterns.get(best);
     }
 
     // ------------------------------------------------------------------
@@ -129,10 +164,11 @@ public final class OpeningHours {
         return merge(result);
     }
 
-    /** 화면 표시용: 그 요일의 영업시간 한 줄. */
+    /** 화면 표시용: 그 요일의 영업시간 한 줄. 날짜를 모르면 요일별 영업시간 전체를 그대로 돌려준다. */
     public static String describe(Place place, LocalDate date) {
         String text = place.getOpeningHours();
         if (isUnknownText(text)) return LEGACY_DEFAULT;
+        if (date == null) return text.trim();
         String segment = findSegment(text.split("\\|"), date.getDayOfWeek().getValue() - 1);
         return segment != null ? segment.trim() : LEGACY_DEFAULT;
     }

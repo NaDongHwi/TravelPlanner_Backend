@@ -156,6 +156,9 @@ public class PlanGenerationService {
         TransitTotals.apply(response, railRouteService.isNetworkLoaded());
         // 여행 전체의 요금 합계와 견주어 이득인 교통 패스를 고른다
         passAdvisorService.apply(response);
+        response.setTripDays(totalDays);
+        response.setDateUndecided(PlanService.isUndated(request));
+        if (PlanService.isUndated(request)) warnings.add(0, UNDATED_NOTICE);
         response.setWarnings(warnings);
 
         Plan saved = planPersistenceService.saveNewPlan(user, request, tripPlan.getDays(), accommodationEntities, response.getReason());
@@ -167,16 +170,54 @@ public class PlanGenerationService {
     // 입력 검증
     // =====================================================================
 
-    private void validate(PlanRequest request) {
-        if (request == null) throw new IllegalArgumentException("요청 본문이 비어 있습니다.");
-        if (request.getStartDate() == null || request.getEndDate() == null) {
-            throw new IllegalArgumentException("여행 시작일과 종료일을 입력해주세요.");
+    /** 날짜가 정해지지 않은 일정의 응답에 붙이는 안내 */
+    static final String UNDATED_NOTICE = "여행 날짜가 정해지지 않아 날씨, 요일별 정기 휴무, 계절에 따른 일몰 시각은 반영하지 않았습니다. "
+            + "버스·열차는 평일 운행 기준이고, 특정 요일에만 쓸 수 있는 교통 패스는 추천에서 뺐습니다. 날짜가 정해지면 날짜를 넣어 다시 만들어 주세요.";
+
+    /**
+     * 여행 기간을 정한다. 두 가지 방식 가운데 하나여야 한다.
+     *  - 날짜를 정한 일정: startDate + endDate (또는 startDate + tripDays)
+     *  - 날짜를 정하지 않은 일정: tripDays 만 (startDate·endDate 는 비워 둔다)
+     * 돌아온 뒤에는 "startDate 가 null 이면 날짜 미정"이다 ({@link PlanService#isUndated}).
+     */
+    static void normalizePeriod(PlanRequest request) {
+        LocalDate start = request.getStartDate();
+        LocalDate end = request.getEndDate();
+        Integer days = request.getTripDays();
+        if (days != null && days < 1) throw new IllegalArgumentException("여행 일수(tripDays)는 1 이상이어야 합니다.");
+
+        if (start != null && end != null) {
+            request.setTripDays(null);                 // 날짜를 정한 일정: 일수는 날짜에서 계산한다
+            return;
         }
-        if (request.getEndDate().isBefore(request.getStartDate())) {
+        if (start != null && days != null) {           // 시작일 + 일수
+            request.setEndDate(start.plusDays(days - 1L));
+            request.setTripDays(null);
+            return;
+        }
+        if (start == null && end == null && days != null) return;   // 날짜 미정
+        if (start == null && end != null) {
+            throw new IllegalArgumentException("여행 시작일을 입력해주세요. 날짜가 정해지지 않았으면 startDate·endDate 를 비우고 여행 일수(tripDays)만 보내주세요.");
+        }
+        throw new IllegalArgumentException("여행 시작일과 종료일을 입력해주세요. 날짜가 정해지지 않았으면 여행 일수(tripDays)를 보내주세요.");
+    }
+
+    private static LocalDate dayToDate(PlanRequest.AccommodationInput acc, int day, LocalDate tripStart, int totalDays) {
+        if (day < 1 || day > Math.max(1, totalDays)) {
+            throw new IllegalArgumentException("[" + acc.getName() + "] 숙소의 일차가 여행 기간(1~" + totalDays + "일차)을 벗어납니다: " + day);
+        }
+        return tripStart.plusDays(day - 1L);
+    }
+
+    void validate(PlanRequest request) {
+        if (request == null) throw new IllegalArgumentException("요청 본문이 비어 있습니다.");
+        normalizePeriod(request);
+        boolean undated = PlanService.isUndated(request);
+        if (!undated && request.getEndDate().isBefore(request.getStartDate())) {
             throw new IllegalArgumentException("여행 종료일이 시작일보다 빠릅니다.");
         }
         if (planService.totalDays(request) > MAX_TRIP_DAYS) {
-            throw new IllegalArgumentException("여행 기간은 최대 " + MAX_TRIP_DAYS + "일까지 지원합니다.");
+            throw new IllegalArgumentException("여행 기간은 최대 " + MAX_TRIP_DAYS + "일(" + (MAX_TRIP_DAYS - 1) + "박 " + MAX_TRIP_DAYS + "일)까지 지원합니다.");
         }
 
         List<String> cities = request.getCities() == null ? new ArrayList<>()
@@ -204,6 +245,9 @@ public class PlanGenerationService {
                 if (!f.getEndTime().isAfter(f.getStartTime())) {
                     throw new IllegalArgumentException("고정 일정 [" + f.getName() + "]의 종료 시간이 시작 시간보다 빠릅니다.");
                 }
+                if (undated && f.getDate() != null) {
+                    throw new IllegalArgumentException("날짜가 정해지지 않은 일정에서는 고정 일정 [" + f.getName() + "]을(를) 날짜 대신 일차(dayNumber)로 지정해주세요.");
+                }
                 if (f.getDate() != null && (f.getDate().isBefore(request.getStartDate()) || f.getDate().isAfter(request.getEndDate()))) {
                     throw new IllegalArgumentException("고정 일정 [" + f.getName() + "]의 날짜가 여행 기간을 벗어납니다.");
                 }
@@ -216,17 +260,27 @@ public class PlanGenerationService {
         }
 
         if (request.getAccommodations() != null && !request.getAccommodations().isEmpty()) {
+            // 숙박 기간은 날짜로 계산한다. 날짜를 정하지 않은 일정은 일차(checkInDay·checkOutDay)를 자리 표시 날짜로 바꿔서 같은 계산을 탄다.
+            int totalDays = planService.totalDays(request);
+            LocalDate tripStart = PlanService.baseDate(request);
+            LocalDate tripEnd = tripStart.plusDays(totalDays - 1L);
             for (PlanRequest.AccommodationInput acc : request.getAccommodations()) {
                 if (acc == null || isBlank(acc.getName())) throw new IllegalArgumentException("숙소 이름을 입력해주세요.");
-                // 날짜가 비어 있으면 여행 전체 기간 숙박으로 본다
-                if (acc.getCheckIn() == null) acc.setCheckIn(request.getStartDate());
-                if (acc.getCheckOut() == null) acc.setCheckOut(request.getEndDate());
-                if (!acc.getCheckOut().isAfter(acc.getCheckIn()) && !request.getStartDate().equals(request.getEndDate())) {
+                if (undated && (acc.getCheckIn() != null || acc.getCheckOut() != null)) {
+                    throw new IllegalArgumentException("날짜가 정해지지 않은 일정에서는 [" + acc.getName()
+                            + "] 숙소의 기간을 날짜 대신 일차(checkInDay, checkOutDay)로 입력해주세요.");
+                }
+                if (acc.getCheckIn() == null && acc.getCheckInDay() != null) acc.setCheckIn(dayToDate(acc, acc.getCheckInDay(), tripStart, totalDays));
+                if (acc.getCheckOut() == null && acc.getCheckOutDay() != null) acc.setCheckOut(dayToDate(acc, acc.getCheckOutDay(), tripStart, totalDays));
+                // 기간이 비어 있으면 여행 전체 기간 숙박으로 본다
+                if (acc.getCheckIn() == null) acc.setCheckIn(tripStart);
+                if (acc.getCheckOut() == null) acc.setCheckOut(tripEnd);
+                if (!acc.getCheckOut().isAfter(acc.getCheckIn()) && totalDays > 1) {
                     throw new IllegalArgumentException("[" + acc.getName() + "] 숙소의 체크아웃이 체크인보다 빠르거나 같습니다.");
                 }
             }
             PlanValidationService.ValidationResult accValidation = planValidationService.validateAccommodations(
-                    request.getAccommodations(), request.getStartDate(), request.getEndDate());
+                    request.getAccommodations(), tripStart, tripEnd);
             if (accValidation.isWarning) throw new IllegalArgumentException(accValidation.warningMessage);
         }
     }
@@ -433,7 +487,7 @@ public class PlanGenerationService {
             if (entity.getAddress() == null) entity.setAddress(lodging.getAddress());
 
             for (int night = 1; night < totalDays; night++) {
-                LocalDate date = request.getStartDate().plusDays(night - 1L);
+                LocalDate date = PlanService.baseDate(request).plusDays(night - 1L);
                 if (!date.isBefore(acc.getCheckIn()) && date.isBefore(acc.getCheckOut())) {
                     lodgingByNight.put(night, lodging);
                 }
@@ -476,7 +530,7 @@ public class PlanGenerationService {
                 continue;
             }
             lodgingByNight.put(night, hotel);
-            LocalDate date = request.getStartDate().plusDays(night - 1L);
+            LocalDate date = PlanService.baseDate(request).plusDays(night - 1L);
             if (current == null || !current.getPlaceId().equals(hotel.getPlaceId())) {
                 entity = new Accommodation();
                 entity.setName(hotel.getName());
@@ -522,9 +576,10 @@ public class PlanGenerationService {
     // 날씨
     // =====================================================================
 
-    private Map<LocalDate, Boolean> forecast(PlanRequest request, int totalDays, List<String> dayCities,
+    Map<LocalDate, Boolean> forecast(PlanRequest request, int totalDays, List<String> dayCities,
                                              Map<String, double[]> centers, String mainCity) {
         Map<LocalDate, Boolean> result = new HashMap<>();
+        if (PlanService.isUndated(request)) return result;   // 날짜를 모르면 예보를 볼 수 없다
         Map<String, Map<LocalDate, Boolean>> byCity = new HashMap<>();
         for (int day = 1; day <= totalDays; day++) {
             String city = dayCities.get(day - 1) != null ? dayCities.get(day - 1) : mainCity;

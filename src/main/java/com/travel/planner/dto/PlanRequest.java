@@ -24,6 +24,9 @@ public class PlanRequest {
             + "이 값만 보내면 날씨·요일별 휴무·계절별 일몰은 반영하지 않고 일정을 만든다. startDate·endDate 를 보내면 이 값은 쓰지 않는다.", example = "4")
     private Integer tripDays;
 
+    @Schema(description = "어른 인원 (1~10, 기본 1). 숙박비 조회와 1인 경비 계산에 쓴다", example = "2")
+    private Integer adults;
+
     @Schema(description = "여행 도시 목록 (Step 2)", example = "[\"오사카\", \"교토\"]")
     private List<String> cities;
 
@@ -109,6 +112,8 @@ public class PlanRequest {
         private String address;
         private LocalDate checkIn;
         private LocalDate checkOut;
+        @Schema(description = "숙박비 (선택). 이 숙소에 묵는 기간 전체의 합계, 일행 전체, 엔. 비우면 라쿠텐 트래블에서 최저가를 찾아 본다", example = "36000")
+        private Integer priceYen;
         @Schema(description = "체크인 일차 (1부터). 날짜가 정해지지 않은 일정(tripDays)에서 checkIn 대신 쓴다. 비우면 1일차", example = "1")
         private Integer checkInDay;
         @Schema(description = "체크아웃 일차. 날짜가 정해지지 않은 일정(tripDays)에서 checkOut 대신 쓴다. 비우면 마지막 날", example = "3")

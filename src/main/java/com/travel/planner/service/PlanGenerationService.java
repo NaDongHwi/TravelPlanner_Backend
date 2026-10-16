@@ -50,6 +50,7 @@ public class PlanGenerationService {
     private final PlaceNameService placeNameService;
     private final RailRouteService railRouteService;
     private final PassAdvisorService passAdvisorService;
+    private final LodgingCostService lodgingCostService;
 
     public AiRouteResponse createPlan(String email, PlanRequest request) {
         // ------------------------------------------------------------------
@@ -102,6 +103,11 @@ public class PlanGenerationService {
                 suggestHotels(request, totalDays, dayCities, centers, mainCity, lodgingByNight, accommodationEntities, warnings);
             }
         }
+
+        // 숙박비는 라쿠텐에 묻느라 시간이 걸리므로(호출 사이 1초) 일정 엔진·AI 와 동시에 돌린다
+        int adults = request.getAdults() == null ? 1 : request.getAdults();
+        java.util.concurrent.CompletableFuture<LodgingCostService.Result> lodgingCost = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> lodgingCostService.estimate(accommodationEntities, PlanService.baseDate(request), PlanService.isUndated(request), adults));
 
         // ------------------------------------------------------------------
         // Step 5. 방문일 예보 (예보 범위 밖이면 날씨 가감 없음)
@@ -156,6 +162,14 @@ public class PlanGenerationService {
         TransitTotals.apply(response, railRouteService.isNetworkLoaded());
         // 여행 전체의 요금 합계와 견주어 이득인 교통 패스를 고른다
         passAdvisorService.apply(response);
+        LodgingCostService.Result lodging;
+        try {
+            lodging = lodgingCost.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            System.out.println("[숙박비] 시간 안에 숙박비를 다 찾지 못했습니다: " + e.getClass().getSimpleName());
+            lodging = new LodgingCostService.Result();
+        }
+        LodgingCostService.apply(response, lodging, adults);
         response.setTripDays(totalDays);
         response.setDateUndecided(PlanService.isUndated(request));
         if (PlanService.isUndated(request)) warnings.add(0, UNDATED_NOTICE);
@@ -216,6 +230,9 @@ public class PlanGenerationService {
         if (!undated && request.getEndDate().isBefore(request.getStartDate())) {
             throw new IllegalArgumentException("여행 종료일이 시작일보다 빠릅니다.");
         }
+        if (request.getAdults() != null && (request.getAdults() < 1 || request.getAdults() > 10)) {
+            throw new IllegalArgumentException("어른 인원(adults)은 1~10명 사이로 입력해주세요.");
+        }
         if (planService.totalDays(request) > MAX_TRIP_DAYS) {
             throw new IllegalArgumentException("여행 기간은 최대 " + MAX_TRIP_DAYS + "일(" + (MAX_TRIP_DAYS - 1) + "박 " + MAX_TRIP_DAYS + "일)까지 지원합니다.");
         }
@@ -266,6 +283,9 @@ public class PlanGenerationService {
             LocalDate tripEnd = tripStart.plusDays(totalDays - 1L);
             for (PlanRequest.AccommodationInput acc : request.getAccommodations()) {
                 if (acc == null || isBlank(acc.getName())) throw new IllegalArgumentException("숙소 이름을 입력해주세요.");
+                if (acc.getPriceYen() != null && acc.getPriceYen() < 0) {
+                    throw new IllegalArgumentException("[" + acc.getName() + "] 숙소의 숙박비는 0 이상이어야 합니다.");
+                }
                 if (undated && (acc.getCheckIn() != null || acc.getCheckOut() != null)) {
                     throw new IllegalArgumentException("날짜가 정해지지 않은 일정에서는 [" + acc.getName()
                             + "] 숙소의 기간을 날짜 대신 일차(checkInDay, checkOutDay)로 입력해주세요.");
@@ -470,6 +490,8 @@ public class PlanGenerationService {
             entity.setAddress(acc.getAddress());
             entity.setCheckIn(acc.getCheckIn());
             entity.setCheckOut(acc.getCheckOut());
+            entity.setPriceYen(acc.getPriceYen());
+            if (acc.getPriceYen() != null) entity.setPriceSource("user");
             entities.add(entity);
 
             String query = isBlank(acc.getAddress()) ? acc.getName() + " " + mainCity : acc.getName() + " " + acc.getAddress();
@@ -484,6 +506,8 @@ public class PlanGenerationService {
             found.setCity(nearestCity(found, centers, mainCity));
             Place lodging = saveAnchor(found, "숙소");
             entity.setPlaceId(lodging.getPlaceId());
+            entity.setLatitude(lodging.getLatitude());
+            entity.setLongitude(lodging.getLongitude());
             if (entity.getAddress() == null) entity.setAddress(lodging.getAddress());
 
             for (int night = 1; night < totalDays; night++) {
@@ -536,6 +560,8 @@ public class PlanGenerationService {
                 entity.setName(hotel.getName());
                 entity.setAddress(hotel.getAddress());
                 entity.setPlaceId(hotel.getPlaceId());
+                entity.setLatitude(hotel.getLatitude());
+                entity.setLongitude(hotel.getLongitude());
                 entity.setCheckIn(date);
                 entities.add(entity);
                 current = hotel;

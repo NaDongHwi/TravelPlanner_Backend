@@ -24,7 +24,7 @@
 | place | opening_periods, address, phone, rating, user_rating_count, sub_type, summary, name_ko |
 | plan | cities, companion, transportation, preferred_start_time, preferred_end_time, excluded_themes, fixed_schedules_json, language, meal_count, exclude_cafe, rejected_place_ids, trip_days |
 | itinerary | end_time, custom_title |
-| accommodation | place_id |
+| accommodation | place_id, price_yen, price_source |
 | (새 테이블) transit_station | 철도역: 노선별 한 건 (역명·운영 회사·노선·종류·좌표·그룹 코드) |
 | (새 테이블) transit_link | 같은 노선의 이웃 역 쌍과 선로 거리 |
 | (새 테이블) transit_name | 역·노선·회사 이름의 한국어 표기 |
@@ -104,6 +104,7 @@
 | 철도 요금의 근거 | 전부 추정 | `transit.fareSource` 에 **`table`**(운영사 요금표로 계산) 추가. 승차 단계에 `fareBasis`·`fareThroughTo`·`surchargeYen` (4-14 참고) |
 | 교통 패스 추천 | 없음 | 일정 생성 응답 최상위에 `passes`(이득인 패스 목록), `transitFareWithPassesYen`(패스를 썼을 때의 교통비 합계). 추천이 없으면 `passes` 는 빈 목록 (4-14 참고) |
 | 패스 목록 조회 | 없음 | `GET /api/v1/transit/passes` (+ 선택 `city=도쿄`) — 등록된 패스의 가격·기간·범위·조건 |
+| 숙박비·1인 경비 | 없음 | 요청에 `adults`(인원), 숙소에 `priceYen`(직접 입력한 숙박비). 응답에 `lodgings`, `lodgingCostYen`, `lodgingCostComplete`, `tripCostPerPersonYen`, `costNote` (4-18 참고) |
 | 날짜 없이 일정 만들기 | `startDate`·`endDate` 필수 | 날짜가 정해지지 않았으면 **`tripDays`(여행 일수, 1~30)만** 보내면 됩니다. 응답에 `tripDays`·`dateUndecided` 추가, 날짜 미정이면 `days[].date`·`dayOfWeek` 는 null (4-17 참고) |
 | 영어·일본어로 된 장소 이름 | DB 의 이름 그대로 | `placeName` 에 **한국어로 옮긴 이름**, 새 필드 `placeNameOriginal` 에 원래 이름(옮긴 경우에만, 아니면 null). 요약·개요·구간 안내·PDF 에도 옮긴 이름이 나옵니다 (4-16 참고) |
 | 숙소 줄(숙소 출발·도착)의 소개 | `summary` 가 null | `summary` 에 숙소 한 줄 소개, `subType` 에 숙소 종류("비즈니스 호텔", "료칸" 등). `description` 은 그대로 "숙소 출발"·"숙소 도착 및 휴식" (4-15 참고) |
@@ -963,6 +964,68 @@ DB 의 장소 이름 가운데 영어·일본어로만 된 것(구글에 한국�
 - 정기 휴무를 모르고 넣은 장소가 실제 방문일에 쉬는 날일 수 있습니다. 응답의 요일별 영업시간과 안내 문구가 그 대비책입니다.
 - 주말에만 여는 곳도 "여는 날의 영업시간"으로 일정에 들어갈 수 있습니다.
 
+### 4-18. 숙박비와 1인 경비
+
+교통비에 숙박비를 더해 여행 경비를 보여 줍니다. 숙박비는 **라쿠텐 트래블 API** 로 찾습니다(구글 장소 검색에는 객실 요금이 없음).
+
+**설정** — `application-secret.yml` (깃허브에 올리지 않습니다)
+
+```yaml
+rakuten:
+  application-id: "앱 ID"
+  access-key: "액세스 키"
+  affiliate-id: "제휴사 ID (선택)"
+  referer: "앱에 등록한 애플리케이션 URL (예: https://github.com/계정/저장소)"
+```
+
+세 값(application-id, access-key, referer) 중 하나라도 없으면 숙박비를 조회하지 않고 "숙박비 조회가 설정되지 않았습니다"로 표시합니다. 일정 생성은 그대로 됩니다.
+API 주소는 기본값으로 `https://openapi.rakuten.co.jp/engine/api/Travel/SimpleHotelSearch/20170426`, `…/VacantHotelSearch/20170426` 을 씁니다. 라쿠텐 개발자 사이트의 테스트 화면 주소와 다르면 `rakuten.simple-hotel-url`, `rakuten.vacant-hotel-url` 로 바꿀 수 있습니다.
+
+**숙박비를 정하는 순서**
+
+| 경우 | 숙박비 | `source` |
+|---|---|---|
+| 숙소를 직접 입력하면서 `priceYen`(그 숙소 숙박 기간 전체 합계, 일행 전체, 엔)을 적음 | 그 값 | `user` |
+| 날짜를 정한 일정 | 그 날짜·인원으로 예약할 수 있는 방 가운데 **가장 싼 요금**(첫날 밤 요금 × 박 수) | `rakuten` |
+| 날짜를 정했지만 그 날 예약 가능한 방이 없음 | 숙소의 표시 최저가(1실 1박) × 방 수 × 박 수. 만실일 수 있다고 적음 | `rakuten-estimate` |
+| 날짜 미정 일정 | 숙소의 표시 최저가 × 방 수 × 박 수 | `rakuten-estimate` |
+| 라쿠텐에서 그 숙소를 못 찾음, 위치를 모름, 조회 실패 | 비워 둠(null). 추정값을 지어내지 않음 | null |
+
+- 구글에서 찾은 숙소와 라쿠텐 숙소는 **좌표로 가장 가까운 곳(100m 이내)** 을 같은 숙소로 봅니다. 찾은 라쿠텐 숙소 이름을 `matchedHotelName` 으로 돌려주니 화면에서 확인할 수 있게 보여 주세요.
+- 방 수는 2명당 1실로 잡습니다(1~2명 1실, 3~4명 2실 …).
+- 라쿠텐 호출 사이를 1초씩 띄우고, 일정 하나에서 숙소 6곳까지만 조회합니다. 일정 엔진·AI 와 동시에 돌려서 응답이 그만큼 늦어지지는 않게 했습니다.
+- 사용자가 금액을 비워 둔 숙소도 라쿠텐에서 찾아봅니다.
+
+**요청**: `adults`(어른 인원, 1~10, 기본 1), `accommodations[].priceYen`(선택).
+
+**응답**
+
+```json
+{
+  "adults": 2,
+  "lodgings": [ { "name": "호텔 아소시아 시즈오카", "checkInDay": 1, "checkOutDay": 4, "checkIn": "2026-10-17", "checkOut": "2026-10-20",
+                  "nights": 3, "totalYen": 57000, "perNightYen": 19000, "source": "rakuten",
+                  "basis": "그 날짜에 2명이 예약할 수 있는 가장 싼 요금 (첫날 밤 요금 × 3박)",
+                  "matchedHotelName": "ホテルアソシア静岡", "url": "https://travel.rakuten.co.jp/HOTEL/…" } ],
+  "lodgingCostYen": 57000,
+  "lodgingCostComplete": true,
+  "tripCostPerPersonYen": 30800,
+  "costNote": "1인 경비 = 교통비(성인 1인, 추천 패스 사용) + 숙박비 ÷ 2명. 식비·입장료는 들어 있지 않습니다. …"
+}
+```
+
+- `lodgingCostYen` 은 일행 전체, `tripCostPerPersonYen` 은 1인 기준입니다(교통비가 1인 기준이라서).
+- `lodgingCostComplete` 가 false 면 숙박비를 모르는 숙소가 있어 합계가 일부만 더한 값입니다.
+- 숙박비는 `accommodation.price_yen` 에도 저장됩니다.
+
+**알아 둘 점**
+
+- 가장 싼 방 요금이라 실제로 고를 방(조식, 방 크기, 취소 조건)에 따라 더 비쌀 수 있습니다. `costNote` 에 이 안내가 들어갑니다.
+- 연박이면 첫날 밤 요금에 박 수를 곱합니다(라쿠텐 빈방 검색은 첫날 요금만 돌려줌). 주말이 끼면 실제와 다를 수 있습니다.
+- 같은 건물·옆 건물에 다른 숙소가 있으면 엉뚱한 숙소와 짝지어질 수 있습니다. 그래서 `matchedHotelName` 을 같이 줍니다.
+- 일정 일부 바꾸기·reroute 에서는 숙박비를 다시 계산하지 않습니다.
+- 숙박세(도쿄·오사카·교토 등)가 요금에 들어 있는지는 숙소마다 다릅니다.
+
 ## 5. 엔진 규칙 요약 (`PlanService`)
 
 조정하고 싶은 값은 클래스 맨 위 상수에 모여 있습니다.
@@ -984,7 +1047,7 @@ DB 의 장소 이름 가운데 영어·일본어로만 된 것(구글에 한국�
 
 - 실제 컴파일: 이 PC 의 Gradle 캐시에 있는 라이브러리(Spring Boot 4.1.0, Spring 7.0.8, Security 7.1.0, Hibernate 7.4.1, Lombok 1.18.46 등)로
   `src/main/java` 138개 파일 전체가 오류 없이 컴파일됩니다. (JDK 21 로 컴파일했습니다. 프로젝트 설정은 25 입니다.)
-- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 205개 통과 (영업시간 해석 9, 엔진 시나리오 32, 보조 로직 15, 장소 소개·요약 12, AI 호출 순서 6, 일정 일부 바꾸기 7, 소개 자동 채우기 4, 철도망·경로·요금 12, GTFS 읽기·버스 경로 14, 교통 정보 연결·피드 저장 8, 요금표·역 쌍 요금 18, 요금 묶음과 경로 5, 패스 추천 16, 요금 자료 저장·기본 자료 13, 패스 안내 문장 8, 일정 → 요금 → 패스 흐름 4, 한국어 표시 이름 13, 날짜 미정 일정 9)
+- 실제 JUnit 6.0.3 엔진으로 `src/test/java` 의 테스트 213개 통과 (영업시간 해석 9, 엔진 시나리오 32, 보조 로직 15, 장소 소개·요약 12, AI 호출 순서 6, 일정 일부 바꾸기 7, 소개 자동 채우기 4, 철도망·경로·요금 12, GTFS 읽기·버스 경로 14, 교통 정보 연결·피드 저장 8, 요금표·역 쌍 요금 18, 요금 묶음과 경로 5, 패스 추천 16, 요금 자료 저장·기본 자료 13, 패스 안내 문장 8, 일정 → 요금 → 패스 흐름 4, 한국어 표시 이름 13, 날짜 미정 일정 9, 숙박비 8)
 - 실제 jjwt 로 토큰 발급·관리자 권한 판정 동작 확인
 - 인메모리 저장소와 가짜 외부 API 로 생성 → 저장 → 재탐색 → 삭제 흐름 실행
 - 실제로 문제가 됐던 시즈오카 조건을 테스트 데이터로 옮겨 회귀 테스트 추가 (호텔·역·슈퍼 제외, 50km 제한, 일몰, 숙소 근처 저녁)
@@ -1034,6 +1097,8 @@ DB 의 장소 이름 가운데 영어·일본어로만 된 것(구글에 한국�
 12. 요즘 피드(GTFS-JP 3판)의 세부 차이: 검증에 쓴 표본은 2019년 형식입니다. 현행 형식의 `translations.txt` 는 문서의 형식대로 구현하고 가상 데이터로 테스트했지만 실제 요즘 피드로는 읽어 보지 못했습니다. 정류장의 한국어 표기가 비어 나오면(`SELECT name, name_ko FROM transit_stop LIMIT 30`) 알려 주세요.
 13. 도에이 버스처럼 큰 피드(시각 약 200만 줄)의 처리 시간과 메모리: 표본 중 가장 큰 것(시각 약 9만 줄)이 0.7초였습니다. 큰 피드는 수십 초, 메모리 수백 MB 를 쓸 수 있습니다.
 
+19. (4-18) 라쿠텐 API 실제 응답: 문서의 형식대로 읽고, 요청 주소·Referer 머리말·값 인코딩은 로컬 가짜 서버로 확인했지만 실제 라쿠텐 서버로는 호출해 보지 못했습니다(제 환경에서 접속 불가).
+    숙소가 있는 일정을 하나 만든 뒤 응답의 `lodgings` 와 서버 로그의 `[숙박비]` 줄을 확인해 주세요. `HTTP 400 wrong_parameter` 나 `HTTP 403` 이 나오면 그 줄을 그대로 보내 주세요.
 18. (4-17) 날짜 미정 일정을 실제 서버로 만들어 보는 것: 검증·엔진·응답 조립·저장·복원은 각각 테스트했지만, 일정 생성 전체(`POST /api/v1/plans`)를 실제 DB 로 돌려 보지는 못했습니다.
     `{"tripDays": 3, "cities": ["오사카"], "themes": ["맛집"]}` 처럼 보내 일정이 만들어지는지, `SELECT id, start_date, end_date, trip_days FROM plan ORDER BY id DESC LIMIT 3` 에서 `trip_days = 3`, `start_date = 1970-01-01` 로 들어갔는지 확인해 주세요. 그 일정으로 PDF 내려받기와 일정 일부 바꾸기도 한 번씩 눌러 봐 주세요.
 17. (4-16) 실제 AI 가 장소 이름을 얼마나 정확히 옮기는지: 프롬프트·거르는 규칙·저장 흐름은 가짜 AI 로 테스트했지만 실제 응답은 확인하지 못했습니다. 일정을 하나 만든 뒤 로그의 `[장소 이름] 영어·일본어 이름 N곳 중 M곳에 한국어 이름을 붙였습니다` 와 위 4-16 의 확인 쿼리 결과를 봐 주세요.

@@ -33,4 +33,16 @@ public class Accommodation {
 
     @Column(nullable = false)
     private LocalDate checkOut; // 체크아웃 날짜
+
+    @Column
+    private Integer priceYen;       // 이 숙소의 숙박비 합계 (일행 전체, 엔). 모르면 null
+
+    @Column(length = 20)
+    private String priceSource;     // user / rakuten / rakuten-estimate
+
+    // 숙박비 조회에만 쓰는 좌표 (DB 에 저장하지 않는다. 구글에서 찾은 숙소 위치)
+    @Transient
+    private Double latitude;
+    @Transient
+    private Double longitude;
 }

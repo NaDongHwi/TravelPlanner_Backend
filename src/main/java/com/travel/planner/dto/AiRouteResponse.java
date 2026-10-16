@@ -38,6 +38,18 @@ public class AiRouteResponse {
     // 추천 패스를 모두 샀을 때의 교통비 합계 (성인 1인, 엔). 추천 패스가 없으면 null
     private Integer transitFareWithPassesYen;
 
+    // 어른 인원 (요청 값, 없으면 1)
+    private Integer adults;
+    // 숙소별 숙박비 (숙소가 없으면 빈 목록)
+    private List<LodgingCostDto> lodgings;
+    // 숙박비 합계 (일행 전체, 엔). 금액을 아는 숙소가 하나도 없으면 null
+    private Integer lodgingCostYen;
+    // 모든 숙소의 숙박비를 알았는가 (false 면 lodgingCostYen 은 일부 숙소만 더한 값)
+    private boolean lodgingCostComplete;
+    // 1인 경비 = 교통비(1인, 추천 패스를 쓰면 그 값) + 숙박비 ÷ 인원. 식비·입장료 제외
+    private Integer tripCostPerPersonYen;
+    // 경비 계산 기준 안내
+    private String costNote;
     private RouteInfoDto transportOptimization;
 
     // 저장된 여행 계획 ID (reroute / PDF 다운로드에 필요)

@@ -404,7 +404,7 @@ class TransitServiceTest {
 
         RailRouteService routeService() {
             return new RailRouteService(empty(TransitStationRepository.class), empty(TransitLinkRepository.class), stops(), patterns(), feeds(),
-                    nameService(), FareMemory.emptyService());
+                    nameService(), FareMemory.emptyService(), new BusStopService());
         }
     }
 

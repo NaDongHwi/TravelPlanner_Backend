@@ -159,7 +159,7 @@ class PlaceNameDisplayTest {
                 empty(TransitStopRepository.class), empty(TransitPatternRepository.class), null);
         RailRouteService routes = new RailRouteService(empty(TransitStationRepository.class), empty(TransitLinkRepository.class),
                 empty(TransitStopRepository.class), empty(TransitPatternRepository.class), empty(TransitFeedRepository.class), names,
-                FareMemory.emptyService());
+                FareMemory.emptyService(), new BusStopService());
         return routes;
     }
 

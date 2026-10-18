@@ -117,7 +117,7 @@ class FareFlowTest {
         TransitNameService names = new TransitNameService(empty(TransitNameRepository.class), empty(TransitStationRepository.class),
                 empty(TransitStopRepository.class), empty(TransitPatternRepository.class), null);
         RailRouteService routes = new RailRouteService(stations(), links(), empty(TransitStopRepository.class), empty(TransitPatternRepository.class),
-                empty(TransitFeedRepository.class), names, fareData);
+                empty(TransitFeedRepository.class), names, fareData, new BusStopService());
         TimelineAssembler assembler = new TimelineAssembler(null, null, routes);
 
         Place hotel = place("난바 호텔", "숙소", NAMBA);

@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 대중교통(철도망 + GTFS 노선 계산) / 노선 미확인(거리 기준) / 자동차.
+ * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 대중교통(철도망 + GTFS 노선 계산) / 버스(전국 버스 정류장 자료) / 노선 미확인(거리 기준) / 자동차.
  * DB·스프링과 무관한 순수 계산이다.
  */
 public final class TransitLegPlanner {
@@ -58,6 +58,15 @@ public final class TransitLegPlanner {
     public static TransitLegDto plan(RailGraph graph, Names names, double fromLat, double fromLng, String fromName,
                                      double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
                                      LocalDate date, Integer departMinute) {
+        return plan(graph, null, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute);
+    }
+
+    /**
+     * @param buses 전국 버스 정류장 색인 (국토수치정보). 철도망·GTFS 로 경로를 못 찾은 구간에서 버스 노선을 찾는 데 쓴다. 없으면 null
+     */
+    public static TransitLegDto plan(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
+                                     LocalDate date, Integer departMinute) {
         double km = DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng);
         if (km < 0.05) return null;
 
@@ -94,10 +103,20 @@ public final class TransitLegPlanner {
                 && route.minutes <= scheduleMinutes * 1.6 + 20;
         if (useRoute) return transit(leg, route, names, fromName, toName, scheduleMinutes);
 
+        // 시각표 자료(GTFS)가 없는 곳: 전국 버스 정류장 자료에서 두 곳을 잇는 노선을 찾는다
+        if (buses != null) {
+            BusStopIndex.Trip trip = buses.find(fromLat, fromLng, toLat, toLng, Math.max(0.15, maxWalkKm));
+            if (trip != null && trip.minutes < walkMinutes && trip.minutes <= scheduleMinutes * 1.6 + 20) {
+                return bus(leg, trip, names, fromName, toName, scheduleMinutes);
+            }
+        }
+
         // 양쪽 모두 버스 등의 노선 자료가 있는 곳인데 걷는 것보다 빨리 가는 경로가 없다면(배차 간격이 길거나 노선이 맞지 않는다),
         // 걸을 만한 거리에서는 걸어가라고 안내한다. 노선 자료가 없는 곳에서는 알 수 없으므로 아래의 거리 기준 추정으로 남긴다.
-        if (graph != null && walkMinutes <= WALK_INSTEAD_MINUTES
-                && graph.hasStopNear(fromLat, fromLng, COVERED_KM) && graph.hasStopNear(toLat, toLng, COVERED_KM)) {
+        boolean covered = graph != null && graph.hasStopNear(fromLat, fromLng, COVERED_KM) && graph.hasStopNear(toLat, toLng, COVERED_KM);
+        // 전국 버스 정류장 자료로 보아도 양쪽에 정류장이 있는데 걷는 것보다 빠른 노선이 없으면 마찬가지로 걸어가라고 안내한다
+        boolean busCovered = buses != null && buses.hasStopNear(fromLat, fromLng, COVERED_KM) && buses.hasStopNear(toLat, toLng, COVERED_KM);
+        if (walkMinutes <= WALK_INSTEAD_MINUTES && (covered || busCovered)) {
             walk(leg, fromName, toName, walkMinutes, km);
             String note = "가져온 노선 자료에는 이 구간을 걷는 것보다 빨리 가는 대중교통이 없어 도보로 안내합니다.";
             if (walkMinutes > scheduleMinutes + 10) {
@@ -116,6 +135,87 @@ public final class TransitLegPlanner {
         leg.setFareSource("estimate");
         leg.setSummary("버스 등 대중교통으로 약 " + scheduleMinutes + "분 (노선 미확인)");
         leg.setNote("이 구간은 가져온 노선 자료에서 맞는 경로를 찾지 못해 버스 등으로 이동한다고 보고 거리 기준으로 추정했습니다. 실제 노선과 요금은 확인되지 않았습니다.");
+        return leg;
+    }
+
+    /** 전국 버스 정류장 자료로 찾은 버스 경로 (시각표 없음: 시간·요금은 거리 기준 추정) */
+    private static TransitLegDto bus(TransitLegDto leg, BusStopIndex.Trip trip, Names names, String fromName, String toName,
+                                     int scheduleMinutes) {
+        List<String> rides = new ArrayList<>();
+        int fare = 0;
+        int childFare = 0;
+        boolean community = false;
+        String previous = fromName;
+        for (int i = 0; i < trip.rides.size(); i++) {
+            BusStopIndex.Ride r = trip.rides.get(i);
+            String board = placeName(names, r.from, null, true);
+            String alight = placeName(names, r.to, null, true);
+            double walkKm = i == 0 ? trip.walkInKm : trip.transferKm;
+            int walkMin = i == 0 ? trip.walkInMinutes() : trip.transferMinutes();
+            if (walkKm > 0.05) {
+                TransitLegDto.Step walk = new TransitLegDto.Step();
+                walk.setType(i == 0 ? "도보" : "환승");
+                walk.setFrom(previous);
+                walk.setTo(board);
+                walk.setMinutes(walkMin);
+                walk.setKm(Math.round(walkKm * 10.0) / 10.0);
+                leg.getSteps().add(walk);
+            }
+            TransitLegDto.Step wait = new TransitLegDto.Step();
+            wait.setType("대기");
+            wait.setFrom(board);
+            wait.setTo(board);
+            wait.setMinutes(BusStopIndex.WAIT_MINUTES);
+            leg.getSteps().add(wait);
+
+            int rideFare = RailFareModel.unknownLocalFare(r.km / BusStopIndex.ROAD_FACTOR);
+            TransitLegDto.Step ride = new TransitLegDto.Step();
+            ride.setType("승차");
+            ride.setCategory("버스");
+            String operator = names.operator(BusStopIndex.cleanOperator(r.operator));
+            ride.setOperator(operator);
+            ride.setLine(names.line(r.line));
+            ride.setFrom(board);
+            ride.setTo(alight);
+            ride.setFromOriginal(r.from);
+            ride.setToOriginal(r.to);
+            ride.setMinutes(r.minutes);
+            ride.setKm(r.km);
+            ride.setFareYen(rideFare);
+            ride.setFareConfirmed(false);
+            ride.setFareBasis(FareBook.Basis.ESTIMATE.code);
+            leg.getSteps().add(ride);
+            fare += rideFare;
+            childFare += RailFareModel.childFare(rideFare);
+            if (r.busType == BusStopIndex.TYPE_COMMUNITY) community = true;
+            rides.add(operator + " " + ride.getLine() + " " + board + " → " + alight);
+            previous = alight;
+        }
+        if (trip.walkOutKm > 0.05) {
+            TransitLegDto.Step walk = new TransitLegDto.Step();
+            walk.setType("도보");
+            walk.setFrom(previous);
+            walk.setTo(toName);
+            walk.setMinutes(trip.walkOutMinutes());
+            walk.setKm(Math.round(trip.walkOutKm * 10.0) / 10.0);
+            leg.getSteps().add(walk);
+        }
+        leg.setMode("버스");
+        leg.setMinutes(trip.minutes);
+        leg.setFareYen(fare);
+        leg.setChildFareYen(childFare);
+        leg.setTransfers(trip.rides.size() - 1);
+        leg.setSource("bus-stops");
+        leg.setFareSource("estimate");
+        leg.setSummary(String.join(" / 환승 / ", rides) + " (버스, 시각 미확인)");
+        StringBuilder note = new StringBuilder("버스 노선은 국토수치정보 버스 정류장 자료(2022년)에서 두 정류장에 함께 서는 노선을 찾은 것입니다. ")
+                .append("시각표가 없어 기다림 ").append(BusStopIndex.WAIT_MINUTES).append("분과 도로 거리로 시간을 추정했고, 요금도 거리 기준 추정입니다. ")
+                .append("노선·방향·운행 횟수가 바뀌었을 수 있으니 현지 시간표로 확인해 주세요.");
+        if (community) note.append(" 커뮤니티 버스는 하루 운행 횟수가 적을 수 있습니다.");
+        if (trip.minutes > scheduleMinutes + 10) {
+            note.append(" 이 경로의 추정 시간(").append(trip.minutes).append("분)이 일정의 이동 시간(").append(scheduleMinutes).append("분)보다 깁니다.");
+        }
+        leg.setNote(note.toString());
         return leg;
     }
 

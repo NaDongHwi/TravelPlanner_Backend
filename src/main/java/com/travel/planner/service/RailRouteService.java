@@ -34,6 +34,7 @@ import java.util.Map;
  * 교통망은 DB 에서 한 번 읽어 메모리에 올려 두고 쓴다.
  *   - 전국 철도망: transit_station, transit_link (역 약 1만 개)
  *   - GTFS 로 가져온 버스·노면전차·배: transit_stop, transit_pattern
+ *   - 전국 버스 정류장(국토수치정보 P11, data 폴더의 zip): 위 두 자료로 경로를 못 찾은 구간에서 버스 노선을 찾는다 ({@link BusStopService})
  * 아직 아무것도 가져오지 않았으면 경로 없이 거리 기준 추정만 한다.
  * 일정 엔진의 시간 계산은 건드리지 않는다: 여기서 구한 값은 안내·예산용이다.
  */
@@ -48,6 +49,7 @@ public class RailRouteService {
     private final TransitFeedRepository feedRepository;
     private final TransitNameService names;
     private final FareDataService fareData;
+    private final BusStopService busStops;
 
     private volatile RailGraph graph;
     private volatile boolean loaded;
@@ -202,7 +204,7 @@ public class RailRouteService {
             RailGraph network = graph();
             // 요금 자료는 교통망과 따로 바뀌므로(관리자가 요금표를 고치는 등) 쓸 때마다 최신 것을 물린다
             if (network != null) network.setFareBook(fareData.fareBook());
-            return TransitLegPlanner.plan(network, nameLookup, fromLat, fromLng, fromName, toLat, toLng, toName,
+            return TransitLegPlanner.plan(network, busStops.index(), nameLookup, fromLat, fromLng, fromName, toLat, toLng, toName,
                     transportation == null ? "대중교통" : transportation, scheduleMinutes, date, departMinute);
         } catch (Exception e) {
             System.out.println("[교통] 구간 계산 실패(" + fromName + " → " + toName + "): " + e.getMessage());
@@ -225,6 +227,10 @@ public class RailRouteService {
         Double lat = null;
         Double lng = null;
         String name = null;
+        // 위치가 없는 줄(자유 식사 등)로 옮겨 가는 데 쓴 이동 시간. 다음 장소까지의 이동에 더한다.
+        // (예: 카페 → "숙소 근처에서 저녁"(45분) → 숙소(0분)이면 숙소 줄의 이동은 카페에서 출발한 45분이다. 이전에는 "약 0분"으로 나왔다)
+        int carried = 0;
+        Integer carriedDepart = null;
         for (SimulatedItinerary item : items) {
             TransitLegDto leg = null;
             boolean fixedWithPlace = item.getType() == SimulatedItinerary.Type.FIXED && item.getTravelMinutes() > 0;
@@ -232,13 +238,18 @@ public class RailRouteService {
             if (located) {
                 if (lat != null) {
                     // 이 장소에 도착하는 시각에서 이동 시간을 뺀 때가 출발 시각이다
-                    int depart = Math.max(0, item.getStartMin() - item.getTravelMinutes());
+                    int depart = carriedDepart != null ? carriedDepart : Math.max(0, item.getStartMin() - item.getTravelMinutes());
                     leg = leg(lat, lng, name, item.getLatitude(), item.getLongitude(), item.getDisplayName(), transportation,
-                            item.getTravelMinutes(), date, depart);
+                            item.getTravelMinutes() + carried, date, depart);
                 }
                 lat = item.getLatitude();
                 lng = item.getLongitude();
                 name = item.getDisplayName();
+                carried = 0;
+                carriedDepart = null;
+            } else if (lat != null && item.getTravelMinutes() > 0) {
+                if (carriedDepart == null) carriedDepart = Math.max(0, item.getStartMin() - item.getTravelMinutes());
+                carried += item.getTravelMinutes();
             }
             legs.add(leg);
         }

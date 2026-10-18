@@ -464,7 +464,7 @@ class UndatedPlanTest {
     private static RailRouteService routes() {
         TransitNameService names = names();
         return new RailRouteService(empty(TransitStationRepository.class), empty(TransitLinkRepository.class), empty(TransitStopRepository.class),
-                empty(TransitPatternRepository.class), empty(TransitFeedRepository.class), names, FareMemory.emptyService());
+                empty(TransitPatternRepository.class), empty(TransitFeedRepository.class), names, FareMemory.emptyService(), new BusStopService());
     }
 
     private static <T> T empty(Class<T> type) {

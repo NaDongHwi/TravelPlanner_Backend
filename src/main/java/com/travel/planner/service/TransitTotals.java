@@ -40,6 +40,7 @@ public final class TransitTotals {
         int total = 0;
         int priced = 0;
         int unknownRoute = 0;
+        int busStopRoute = 0;
         int officialFare = 0;
         int railEstimate = 0;
         int railTable = 0;
@@ -51,6 +52,7 @@ public final class TransitTotals {
                 if (leg.getFareYen() > 0) priced++;
             }
             if ("distance".equals(leg.getSource()) && leg.getFareYen() != null) unknownRoute++;
+            if ("bus-stops".equals(leg.getSource())) busStopRoute++;
             boolean rail = leg.getSource() != null && leg.getSource().startsWith("rail-network");
             if (hasFareBasis(leg)) {
                 // 승차 단계마다 요금의 근거가 적혀 있다
@@ -79,6 +81,9 @@ public final class TransitTotals {
             }
             if (officialFare > 0) {
                 note.append(" 버스 등 ").append(officialFare).append("개 구간의 요금은 운영사가 공개한 요금표(현금 성인) 기준입니다.");
+            }
+            if (busStopRoute > 0) {
+                note.append(" 버스 ").append(busStopRoute).append("개 구간은 국토수치정보 버스 정류장 자료(2022년)로 노선을 찾았고, 시각표가 없어 시간·요금은 거리 기준 추정입니다.");
             }
             if (unknownRoute > 0) {
                 note.append(" ").append(unknownRoute).append("개 구간은 가져온 노선 자료에 맞는 경로가 없어 버스 등으로 보고 거리 기준으로 계산했습니다(노선 미확인).");

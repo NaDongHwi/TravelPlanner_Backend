@@ -21,6 +21,10 @@ public interface PlanRepository extends JpaRepository<Plan, Long> {
     @Query("SELECT DISTINCT p FROM Plan p LEFT JOIN FETCH p.user LEFT JOIN FETCH p.itineraries i LEFT JOIN FETCH i.place WHERE p.id = :id")
     Optional<Plan> findDetailById(@Param("id") Long id);
 
+    // PDF: 그 일정의 숙소 (트랜잭션 밖에서도 읽을 수 있게 따로 불러온다)
+    @Query("SELECT a FROM Accommodation a WHERE a.plan.id = :id ORDER BY a.checkIn")
+    java.util.List<com.travel.planner.entity.Accommodation> findAccommodationsByPlanId(@Param("id") Long id);
+
     @Query("SELECT DISTINCT p FROM Plan p LEFT JOIN FETCH p.user LEFT JOIN FETCH p.itineraries i LEFT JOIN FETCH i.place "
             + "WHERE p.startDate >= :from AND p.startDate <= :to")
     List<Plan> findDetailByStartDateBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);

@@ -109,6 +109,8 @@ public class Plan {
     @Column
     private Boolean excludeCafe;        // 카페 추천 받지 않기
 
+    private Integer adults;             // 어른 인원 (null = 예전 일정, 1명으로 본다). PDF 의 1인 경비 계산에 쓴다
+
     @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("dayNumber ASC, sequence ASC")
     private List<Itinerary> itineraries = new ArrayList<>();

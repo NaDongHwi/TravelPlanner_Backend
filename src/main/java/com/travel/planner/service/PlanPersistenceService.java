@@ -80,6 +80,7 @@ public class PlanPersistenceService {
         plan.setLanguage(request.getLanguage());
         plan.setMealCount(request.getMealCount());
         plan.setExcludeCafe(request.getExcludeCafe());
+        plan.setAdults(request.getAdults());
 
         for (Accommodation accommodation : accommodations) {
             plan.addAccommodation(accommodation);
@@ -214,6 +215,7 @@ public class PlanPersistenceService {
         req.setLanguage(plan.getLanguage());
         req.setMealCount(plan.getMealCount());
         req.setExcludeCafe(plan.getExcludeCafe());
+        req.setAdults(plan.getAdults());
         return req;
     }
 

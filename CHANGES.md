@@ -978,6 +978,11 @@ rakuten:
   referer: "앱에 등록한 애플리케이션 URL (예: https://github.com/계정/저장소)"
 ```
 
+`referer` 는 라쿠텐 앱 설정의 **허용 웹사이트(Allowed websites)** 에 등록한 주소와 같은 도메인이어야 합니다. 서버는 이 값으로 두 머리말을 만들어 보냅니다:
+`Referer: https://github.com/계정/저장소/` (끝에 / 를 붙임), `Origin: https://github.com` (도메인만).
+2026년 개편된 라쿠텐 API 는 이 두 머리말이 허용 웹사이트와 맞지 않으면 `403 REQUEST_CONTEXT_BODY_HTTP_REFERRER_MISSING` 을 돌려줍니다.
+(처음에는 Referer 만 보냈고, Spring 기본 RestTemplate 이 Origin 머리말을 몰래 빼 버려서 이 403 이 났습니다. 지금은 Java 내장 HttpClient 로 두 머리말을 직접 보냅니다.)
+
 세 값(application-id, access-key, referer) 중 하나라도 없으면 숙박비를 조회하지 않고 "숙박비 조회가 설정되지 않았습니다"로 표시합니다. 일정 생성은 그대로 됩니다.
 API 주소는 기본값으로 `https://openapi.rakuten.co.jp/engine/api/Travel/SimpleHotelSearch/20170426`, `…/VacantHotelSearch/20170426` 을 씁니다. 라쿠텐 개발자 사이트의 테스트 화면 주소와 다르면 `rakuten.simple-hotel-url`, `rakuten.vacant-hotel-url` 로 바꿀 수 있습니다.
 
@@ -1097,7 +1102,7 @@ API 주소는 기본값으로 `https://openapi.rakuten.co.jp/engine/api/Travel/S
 12. 요즘 피드(GTFS-JP 3판)의 세부 차이: 검증에 쓴 표본은 2019년 형식입니다. 현행 형식의 `translations.txt` 는 문서의 형식대로 구현하고 가상 데이터로 테스트했지만 실제 요즘 피드로는 읽어 보지 못했습니다. 정류장의 한국어 표기가 비어 나오면(`SELECT name, name_ko FROM transit_stop LIMIT 30`) 알려 주세요.
 13. 도에이 버스처럼 큰 피드(시각 약 200만 줄)의 처리 시간과 메모리: 표본 중 가장 큰 것(시각 약 9만 줄)이 0.7초였습니다. 큰 피드는 수십 초, 메모리 수백 MB 를 쓸 수 있습니다.
 
-19. (4-18) 라쿠텐 API 실제 응답: 문서의 형식대로 읽고, 요청 주소·Referer 머리말·값 인코딩은 로컬 가짜 서버로 확인했지만 실제 라쿠텐 서버로는 호출해 보지 못했습니다(제 환경에서 접속 불가).
+19. (4-18) 라쿠텐 API 실제 응답: 문서의 형식대로 읽고, 요청 주소·Referer·Origin 머리말·값 인코딩·새 오류 형식(`errors.errorMessage`)은 로컬 가짜 서버로 확인했지만 실제 라쿠텐 서버로는 호출해 보지 못했습니다(제 환경에서 접속 불가).
     숙소가 있는 일정을 하나 만든 뒤 응답의 `lodgings` 와 서버 로그의 `[숙박비]` 줄을 확인해 주세요. `HTTP 400 wrong_parameter` 나 `HTTP 403` 이 나오면 그 줄을 그대로 보내 주세요.
 18. (4-17) 날짜 미정 일정을 실제 서버로 만들어 보는 것: 검증·엔진·응답 조립·저장·복원은 각각 테스트했지만, 일정 생성 전체(`POST /api/v1/plans`)를 실제 DB 로 돌려 보지는 못했습니다.
     `{"tripDays": 3, "cities": ["오사카"], "themes": ["맛집"]}` 처럼 보내 일정이 만들어지는지, `SELECT id, start_date, end_date, trip_days FROM plan ORDER BY id DESC LIMIT 3` 에서 `trip_days = 3`, `start_date = 1970-01-01` 로 들어갔는지 확인해 주세요. 그 일정으로 PDF 내려받기와 일정 일부 바꾸기도 한 번씩 눌러 봐 주세요.

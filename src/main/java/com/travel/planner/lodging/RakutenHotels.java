@@ -66,6 +66,9 @@ public final class RakutenHotels {
         try {
             JsonNode root = MAPPER.readTree(json);
             if (root.has("error")) return root.path("error").asText() + ": " + root.path("error_description").asText("");
+            // 2026년 개편 뒤의 형식: {"errors":{"errorCode":403,"errorMessage":"..."}}
+            JsonNode errors = root.path("errors");
+            if (errors.isObject() && errors.has("errorMessage")) return errors.path("errorMessage").asText();
         } catch (Exception ignored) {
         }
         return null;

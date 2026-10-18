@@ -1,15 +1,13 @@
 package com.travel.planner.lodging;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -20,17 +18,21 @@ import java.util.Map;
 /**
  * 라쿠텐 트래블 API 호출기.
  *  - 키는 application-secret.yml 의 rakuten.application-id / access-key / referer 에서 읽는다. 로그에 남기지 않는다.
- *  - 라쿠텐은 요청의 Referer 가 앱에 등록한 웹사이트와 맞아야 받아 준다. 서버에서 부르므로 등록한 주소를 직접 붙인다.
+ *  - 라쿠텐(2026년 개편 이후)은 요청의 Referer·Origin 이 앱에 등록한 "허용 웹사이트"와 맞아야 받아 준다.
+ *    서버에서 부르므로 등록한 주소를 두 머리말에 직접 붙인다. 없으면 403 REQUEST_CONTEXT_BODY_HTTP_REFERRER_MISSING.
+ *  - Spring 의 기본 RestTemplate(HttpURLConnection)은 Origin 머리말을 몰래 빼 버리므로, Java 내장 HttpClient 로 직접 보낸다.
  *  - 짧은 시간에 몰아서 부르면 일정 시간 막히므로, 호출 사이를 최소 1초 띄운다.
  *  - 값은 하나씩 인코딩한다 ("+roomCharge" 의 '+' 가 공백으로 읽히지 않도록).
  */
 @Component
-@RequiredArgsConstructor
 public class RakutenTravelClient implements RakutenTravelApi {
 
     private static final long MIN_GAP_MS = 1_000;
 
-    private final RestTemplate restTemplate;
+    private final HttpClient http = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
 
     @Value("${rakuten.application-id:}")
     private String applicationId;
@@ -103,19 +105,40 @@ public class RakutenTravelClient implements RakutenTravelApi {
     private String call(String url, Map<String, Object> query, String what) {
         if (!configured()) return null;
         waitTurn();
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.REFERER, referer);
         try {
-            return restTemplate.exchange(uri(url, query), HttpMethod.GET, new HttpEntity<Void>(headers), String.class).getBody();
-        } catch (HttpStatusCodeException e) {
-            if (e.getStatusCode().value() == 404) return "{\"hotels\":[]}";    // 찾은 것이 없음 (빈방 없음 포함)
-            String error = RakutenHotels.error(e.getResponseBodyAsString());
-            System.out.println("[숙박비] 라쿠텐 " + what + " 실패: HTTP " + e.getStatusCode().value() + (error != null ? " " + error : ""));
+            HttpRequest request = HttpRequest.newBuilder(uri(url, query))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Referer", refererValue(referer))
+                    .header("Origin", originOf(referer))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            if (status == 200) return response.body();
+            if (status == 404) return "{\"hotels\":[]}";    // 찾은 것이 없음 (빈방 없음 포함)
+            String error = RakutenHotels.error(response.body());
+            System.out.println("[숙박비] 라쿠텐 " + what + " 실패: HTTP " + status + (error != null ? " " + error : ""));
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return null;
         } catch (Exception e) {
             System.out.println("[숙박비] 라쿠텐 " + what + " 실패: " + e.getClass().getSimpleName());
             return null;
         }
+    }
+
+    /** Referer: 등록한 주소 그대로 (끝에 / 가 없으면 붙인다) */
+    static String refererValue(String registered) {
+        String r = registered.trim();
+        return r.endsWith("/") ? r : r + "/";
+    }
+
+    /** Origin: 등록한 주소의 "https://도메인" 부분 (예: https://github.com/계정/저장소 → https://github.com) */
+    static String originOf(String registered) {
+        URI u = URI.create(registered.trim());
+        return u.getScheme() + "://" + u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "");
     }
 
     private synchronized void waitTurn() {

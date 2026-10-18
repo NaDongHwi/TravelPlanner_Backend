@@ -110,8 +110,8 @@ class BusStopTest {
     @Test
     void airportFarFromStopIsReachedWithWiderWalkOnLongTrips() throws Exception {
         BusStopIndex idx = index();
-        // 공항 좌표(지도)에서 정류장까지 0.8km: 먼 구간이므로 1km 까지 넓혀서 찾는다
-        BusStopIndex.Trip trip = idx.find(LAT - 0.16, LNG - 0.2 + 0.0088, LAT, LNG, 0.6);
+        // 공항 좌표(지도)에서 정류장까지 0.9km: 먼 구간이므로 1km 까지 넓혀서 찾는다
+        BusStopIndex.Trip trip = idx.find(LAT - 0.16, LNG - 0.2 + 0.0098, LAT, LNG, BusStopIndex.ACCESS_KM);
         assertNotNull(trip);
         assertEquals("富士山静岡空港静岡線", trip.rides.get(0).line);
         // 먼 노선은 시내 속도로만 계산하지 않는다 (직선 25km 남짓: 1시간 남짓)
@@ -141,5 +141,95 @@ class BusStopTest {
                 LAT + 0.045, LNG + 0.0165, "카페", "도보 및 대중교통", 15, null, null);
         assertEquals("walk", walk.getSource());
         assertTrue(walk.getNote().contains("도보로 안내"));
+    }
+
+    @Test
+    void taxiWhenNoTransitAndTooFarToWalk() throws Exception {
+        BusStopIndex idx = index();
+        // 정류장도 노선도 없는 산간 4km: 택시
+        TransitLegDto leg = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.3, LNG, "산장",
+                LAT + 0.336, LNG, "폭포", "도보 및 대중교통", 20, null, null);
+        assertEquals("taxi", leg.getSource());
+        assertEquals("택시", leg.getMode());
+        assertTrue(leg.getSummary().startsWith("택시 약 "), leg.getSummary());
+        assertEquals(TransitLegPlanner.taxiFare(4.0), leg.getFareYen(), 200);
+        assertTrue(leg.getNote().contains("택시로 안내"));
+        // 택시 요금: 첫 1.1km 500엔, 이후 255m 마다 100엔 (도로 거리 = 직선 × 1.3)
+        assertEquals(500, TransitLegPlanner.taxiFare(0.5));
+        assertEquals(500 + 13 * 100, TransitLegPlanner.taxiFare(4.3 / 1.3));   // 도로 4.3km: (4.3-1.096)/0.255 = 12.6 → 13칸
+    }
+
+    @Test
+    void hikingSpotIsReachedOnFootFromTheNearestStop() throws Exception {
+        BusStopIndex idx = index();
+        // 정상은 안倍線終点 정류장에서 북쪽으로 2km. 역 앞에서 버스로 정류장까지 가서, 거기서부터 걸어서 오른다
+        double summitLat = LAT + 0.045 + 0.018;
+        TransitLegDto up = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                summitLat, LNG, "산 정상", "도보 및 대중교통", 60, null, null, false, true);
+        assertEquals("bus-stops", up.getSource());
+        assertTrue(up.getMode().endsWith("·등산"), up.getMode());
+        assertTrue(up.getSummary().contains("安倍線"), up.getSummary());
+        assertTrue(up.getSummary().contains("安倍線終点 정류장부터 등산로를 걸어 약"), up.getSummary());
+        TransitLegDto.Step last = up.getSteps().get(up.getSteps().size() - 1);
+        assertEquals("등산", last.getCategory());
+        assertEquals("산 정상", last.getTo());
+        assertTrue(up.getNote().contains("등산 시간은 방문 시간에 포함"));
+        int busMinutes = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                LAT + 0.045, LNG + 0.001, "온천", "도보 및 대중교통", 30, null, null).getMinutes();
+        assertTrue(Math.abs(up.getMinutes() - busMinutes) <= 3, "이동 시간에는 등산 시간을 더하지 않는다: " + up.getMinutes());
+
+        // 내려올 때: 정상 → 정류장(하산) → 버스
+        TransitLegDto down = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, summitLat, LNG, "산 정상",
+                LAT + 0.001, LNG, "호텔", "도보 및 대중교통", 60, null, null, true, false);
+        assertEquals("하산", down.getSteps().get(0).getCategory());
+        assertTrue(down.getSummary().startsWith("걸어서 내려와 安倍線終点 정류장까지"), down.getSummary());
+
+        // 렌터카 여행은 그대로 차로
+        TransitLegDto car = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                summitLat, LNG, "산 정상", "차량 렌트", 40, null, null, false, true);
+        assertEquals("자동차", car.getMode());
+    }
+
+    @Test
+    void hikeGateIsStationNearbyThenParkingThenFarStop() throws Exception {
+        BusStopIndex idx = index();
+        // 1) 정상 1km 북쪽에 安倍線終点 정류장: 대중교통으로 가서 걸어 오른다 (다카오산형)
+        double nearLat = LAT + 0.045 + 0.009;
+        TransitLegDto near = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                nearLat, LNG, "산", "도보 및 대중교통", 60, null, null, null, TransitLegPlanner.Summit.hike(null, null, null));
+        assertEquals("bus-stops", near.getSource());
+        assertTrue(near.getSummary().contains("安倍線終点 정류장부터 등산로를 걸어"), near.getSummary());
+
+        // 2) 정류장은 2km 밖이고 정상 200m 옆에 주차장: 주차장까지(대중교통이 없으니 택시) → 걸어서 10분
+        double summitLat = LAT + 0.045 + 0.018;
+        TransitLegPlanner.Summit withParking = TransitLegPlanner.Summit.hike(summitLat - 0.0018, LNG, "산 정상 주차장");
+        TransitLegDto parking = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                summitLat, LNG, "산 정상", "도보 및 대중교통", 60, null, null, null, withParking);
+        assertEquals("taxi", parking.getSource());
+        assertTrue(parking.getSummary().startsWith("택시 약 "), parking.getSummary());
+        assertTrue(parking.getSummary().endsWith("산 정상 주차장부터 등산로를 걸어 약 10분(방문 시간에 포함)"), parking.getSummary());
+
+        // 렌터카면 주차장까지 차로
+        TransitLegDto car = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                summitLat, LNG, "산 정상", "차량 렌트", 40, null, null, null, withParking);
+        assertEquals("자동차", car.getSteps().isEmpty() ? car.getMode() : car.getMode().replace("·등산", ""));
+        assertTrue(car.getSummary().contains("산 정상 주차장부터 등산로"), car.getSummary());
+
+        // 3) 주차장을 모르면 4km 안의 가장 가까운 정류장에서 걸어 오른다 (차로 더 가까이 갈 수 있을 수 있다고 안내)
+        TransitLegDto far = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                summitLat, LNG, "산 정상", "도보 및 대중교통", 60, null, null, null, TransitLegPlanner.Summit.hike(null, null, null));
+        assertTrue(far.getNote().contains("차로 가면 더 가까이"), far.getNote());
+    }
+
+    @Test
+    void mountFujiGoesToTheFifthStation() throws Exception {
+        BusStopIndex idx = index();
+        TransitLegPlanner.Summit fuji = TransitLegPlanner.Summit.fuji(LAT + 0.045, LNG + 0.001, "후지산 테스트 5합목");
+        TransitLegDto leg = TransitLegPlanner.plan(null, idx, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG, "호텔",
+                LAT + 0.09, LNG, "후지산", "도보 및 대중교통", 60, null, null, null, fuji);
+        assertEquals("bus-stops", leg.getSource(), "5합목까지 버스");
+        assertTrue(leg.getSummary().endsWith("후지산 테스트 5합목 도착"), leg.getSummary());
+        assertTrue(leg.getNote().contains("정상 등반은 7월 초~9월 초"), leg.getNote());
+        assertTrue(leg.getSteps().stream().noneMatch(s -> "등산".equals(s.getCategory())), "등산 단계는 없다");
     }
 }

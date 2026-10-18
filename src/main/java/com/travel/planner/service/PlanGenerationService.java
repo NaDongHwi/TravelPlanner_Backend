@@ -51,6 +51,7 @@ public class PlanGenerationService {
     private final RailRouteService railRouteService;
     private final PassAdvisorService passAdvisorService;
     private final LodgingCostService lodgingCostService;
+    private final HikeAccessService hikeAccessService;
 
     public AiRouteResponse createPlan(String email, PlanRequest request) {
         // ------------------------------------------------------------------
@@ -117,6 +118,9 @@ public class PlanGenerationService {
         // ------------------------------------------------------------------
         // Step 6. 일정 엔진
         // ------------------------------------------------------------------
+        // 등산하는 곳마다 대중교통으로 등산 입구(1.5km 안의 역·정류장)까지 갈 수 있는지 적어 둔다 (없으면 대중교통 여행에서 조금 낮춘다)
+        hikeAccessService.markTransitAccess(allPlaces);
+
         PlanService.TripInput input = new PlanService.TripInput();
         input.request = request;
         input.candidates = allPlaces;
@@ -148,6 +152,12 @@ public class PlanGenerationService {
             naming.join();
         } catch (Exception e) {
             System.out.println("[장소 이름] 한국어 이름을 붙이지 못해 원래 이름으로 응답합니다: " + e.getMessage());
+        }
+        // 대중교통 입구가 없는 등산하는 곳은 정상 근처 주차장을 찾아 둔다 (택시로 주차장까지 안내. 한 번 찾으면 DB 에 남는다)
+        try {
+            hikeAccessService.fillParking(shownPlaces);
+        } catch (Exception e) {
+            System.out.println("[등산] 주차장을 찾지 못해 가까운 역·정류장 기준으로 안내합니다: " + e.getMessage());
         }
         // 엔진이 일정을 짜면서 남긴 안내 문장에는 원래 이름이 들어 있다
         warnings.replaceAll(w -> PlaceNames.localize(w, shownPlaces));

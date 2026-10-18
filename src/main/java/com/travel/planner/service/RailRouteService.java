@@ -1,6 +1,7 @@
 package com.travel.planner.service;
 
 import com.travel.planner.dto.TransitLegDto;
+import com.travel.planner.entity.Place;
 import com.travel.planner.entity.TransitFeed;
 import com.travel.planner.entity.TransitLink;
 import com.travel.planner.entity.TransitPattern;
@@ -200,12 +201,34 @@ public class RailRouteService {
      */
     public TransitLegDto leg(double fromLat, double fromLng, String fromName, double toLat, double toLng, String toName,
                              String transportation, int scheduleMinutes, LocalDate date, Integer departMinute) {
+        return leg(fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute, false, false);
+    }
+
+    /** 그 지점에서 withinKm 안에 역(전국 철도망)이나 버스 정류장(GTFS·전국 버스 정류장 자료)이 있는가 */
+    public boolean hasTransitNear(double lat, double lng, double withinKm) {
+        RailGraph g = graph();
+        if (g != null && (g.nearestStation(lat, lng, withinKm) != null || g.hasStopNear(lat, lng, withinKm))) return true;
+        com.travel.planner.transit.BusStopIndex buses = busStops.index();
+        return buses != null && buses.hasStopNear(lat, lng, withinKm);
+    }
+
+    /** fromHike/toHike: 그쪽 끝이 등산하는 곳(산 정상 등)이면 교통편은 등산 입구까지만 찾고 등산로 도보를 붙인다 */
+    public TransitLegDto leg(double fromLat, double fromLng, String fromName, double toLat, double toLng, String toName,
+                             String transportation, int scheduleMinutes, LocalDate date, Integer departMinute,
+                             boolean fromHike, boolean toHike) {
+        return leg(fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute,
+                fromHike ? TransitLegPlanner.Summit.hike(null, null, null) : null, toHike ? TransitLegPlanner.Summit.hike(null, null, null) : null);
+    }
+
+    public TransitLegDto leg(double fromLat, double fromLng, String fromName, double toLat, double toLng, String toName,
+                             String transportation, int scheduleMinutes, LocalDate date, Integer departMinute,
+                             TransitLegPlanner.Summit fromHike, TransitLegPlanner.Summit toHike) {
         try {
             RailGraph network = graph();
             // 요금 자료는 교통망과 따로 바뀌므로(관리자가 요금표를 고치는 등) 쓸 때마다 최신 것을 물린다
             if (network != null) network.setFareBook(fareData.fareBook());
             return TransitLegPlanner.plan(network, busStops.index(), nameLookup, fromLat, fromLng, fromName, toLat, toLng, toName,
-                    transportation == null ? "대중교통" : transportation, scheduleMinutes, date, departMinute);
+                    transportation == null ? "대중교통" : transportation, scheduleMinutes, date, departMinute, fromHike, toHike);
         } catch (Exception e) {
             System.out.println("[교통] 구간 계산 실패(" + fromName + " → " + toName + "): " + e.getMessage());
             return null;
@@ -227,6 +250,7 @@ public class RailRouteService {
         Double lat = null;
         Double lng = null;
         String name = null;
+        Place hikeHere = null;               // 직전 장소가 등산하는 곳·후지산이면 그 장소
         // 위치가 없는 줄(자유 식사 등)로 옮겨 가는 데 쓴 이동 시간. 다음 장소까지의 이동에 더한다.
         // (예: 카페 → "숙소 근처에서 저녁"(45분) → 숙소(0분)이면 숙소 줄의 이동은 카페에서 출발한 45분이다. 이전에는 "약 0분"으로 나왔다)
         int carried = 0;
@@ -239,12 +263,15 @@ public class RailRouteService {
                 if (lat != null) {
                     // 이 장소에 도착하는 시각에서 이동 시간을 뺀 때가 출발 시각이다
                     int depart = carriedDepart != null ? carriedDepart : Math.max(0, item.getStartMin() - item.getTravelMinutes());
+                    Place target = item.getType() == SimulatedItinerary.Type.VISIT ? item.getPlace() : null;
                     leg = leg(lat, lng, name, item.getLatitude(), item.getLongitude(), item.getDisplayName(), transportation,
-                            item.getTravelMinutes() + carried, date, depart);
+                            item.getTravelMinutes() + carried, date, depart, summit(hikeHere, item.getLatitude(), item.getLongitude()),
+                            summit(target, lat, lng));
                 }
                 lat = item.getLatitude();
                 lng = item.getLongitude();
                 name = item.getDisplayName();
+                hikeHere = item.getType() == SimulatedItinerary.Type.VISIT ? item.getPlace() : null;
                 carried = 0;
                 carriedDepart = null;
             } else if (lat != null && item.getTravelMinutes() > 0) {
@@ -254,6 +281,23 @@ public class RailRouteService {
             legs.add(leg);
         }
         return legs;
+    }
+
+    /**
+     * 등산하는 곳이면 등산 입구 정보, 후지산이면 다른 쪽 끝에서 가장 가까운 5합목, 아니면 null.
+     * @param otherLat 이 구간의 다른 쪽 끝 (후지산 5합목을 고르는 데 쓴다)
+     */
+    static TransitLegPlanner.Summit summit(Place place, double otherLat, double otherLng) {
+        if (place == null) return null;
+        if (com.travel.planner.util.Hiking.isFuji(place)) {
+            Object[] station = com.travel.planner.util.Hiking.nearestFifthStation(otherLat, otherLng);
+            return TransitLegPlanner.Summit.fuji((double) station[1], (double) station[2], (String) station[0]);
+        }
+        if (!com.travel.planner.util.Hiking.isHike(place)) return null;
+        boolean parking = place.getTrailheadLat() != null && place.getTrailheadLng() != null
+                && place.getTrailheadName() != null && !HikeAccessService.NO_PARKING.equals(place.getTrailheadName());
+        return parking ? TransitLegPlanner.Summit.hike(place.getTrailheadLat(), place.getTrailheadLng(), place.getTrailheadName())
+                : TransitLegPlanner.Summit.hike(null, null, null);
     }
 
     private static boolean valid(Double lat, Double lng) {

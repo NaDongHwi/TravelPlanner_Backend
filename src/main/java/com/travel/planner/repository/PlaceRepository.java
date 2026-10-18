@@ -56,4 +56,10 @@ public interface PlaceRepository extends JpaRepository<Place, Long> {
     @Transactional
     @Query("UPDATE Place p SET p.nameKo = :nameKo WHERE p.id = :id")
     int updateNameKo(@Param("id") Long id, @Param("nameKo") String nameKo);
+
+    /** 등산하는 곳의 주차장(차로 가는 입구)만 고친다 */
+    @Modifying
+    @Transactional
+    @Query("UPDATE Place p SET p.trailheadLat = :lat, p.trailheadLng = :lng, p.trailheadName = :name WHERE p.id = :id")
+    int updateTrailhead(@Param("id") Long id, @Param("lat") Double lat, @Param("lng") Double lng, @Param("name") String name);
 }

@@ -538,4 +538,31 @@ public class GoogleMapsService {
         }
         return recommendedHotels;
     }
+
+    /**
+     * 그 지점에서 radius(m) 안의 가장 가까운 주차장 {위도, 경도, 이름}. 없으면 빈 배열, 호출 실패면 null.
+     * 등산하는 곳(산 정상)에 차로 갈 수 있는 입구를 찾는 데 쓴다.
+     */
+    public Object[] findNearestParking(double lat, double lng, double radiusMeters) {
+        try {
+            Map<String, Object> center = Map.of("latitude", lat, "longitude", lng);
+            Map<String, Object> body = new HashMap<>();
+            body.put("includedTypes", List.of("parking"));
+            body.put("maxResultCount", 5);
+            body.put("rankPreference", "DISTANCE");
+            body.put("languageCode", "ko");
+            body.put("locationRestriction", Map.of("circle", Map.of("center", center, "radius", radiusMeters)));
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, placesHeaders("places.displayName.text,places.location"));
+            String response = restTemplate.postForObject("https://places.googleapis.com/v1/places:searchNearby", request, String.class);
+            JsonNode places = objectMapper.readTree(response).path("places");
+            if (!places.isArray() || places.isEmpty()) return new Object[0];
+            JsonNode first = places.get(0);
+            if (first.path("location").isMissingNode()) return new Object[0];
+            return new Object[]{first.path("location").path("latitude").asDouble(), first.path("location").path("longitude").asDouble(),
+                    first.path("displayName").path("text").asText("주차장")};
+        } catch (Exception e) {
+            System.out.println("[등산] 주차장 검색 실패: " + e.getMessage());
+            return null;
+        }
+    }
 }

@@ -20,8 +20,8 @@ import java.util.Map;
  */
 public final class BusStopIndex {
 
-    /** 걸어서 타러 가는 정류장의 최대 거리(km) */
-    public static final double ACCESS_KM = 0.6;
+    /** 걸어서 타러 가는 정류장의 최대 거리(km). 정류장까지 걷는 시간은 경로 시간에 들어간다(최대 약 14분) */
+    public static final double ACCESS_KM = 0.8;
     /** 먼 구간(FAR_KM 이상)에서 가까운 정류장이 없을 때 넓혀 보는 거리(km) */
     static final double WIDE_ACCESS_KM = 1.0;
     static final double FAR_KM = 5.0;
@@ -202,6 +202,29 @@ public final class BusStopIndex {
                 + Math.max(0, Math.min(road, 10) - 5) / 25.0 * 60
                 + Math.max(0, road - 10) / 40.0 * 60;
         return Math.max(2, (int) Math.ceil(minutes));
+    }
+
+    /** 이 지점에서 가장 가까운 정류장 {위도, 경도, 거리(km)} 와 이름. 없으면 null */
+    public Object[] nearestStop(double la, double ln, double radiusKm) {
+        int best = -1;
+        double bestKm = radiusKm;
+        int span = (int) Math.ceil(radiusKm / (CELL * 90)) + 1;
+        long cx = (long) Math.floor(la / CELL);
+        long cy = (long) Math.floor(ln / CELL);
+        for (long x = cx - span; x <= cx + span; x++) {
+            for (long y = cy - span; y <= cy + span; y++) {
+                int[] stops = grid.get(key(x, y));
+                if (stops == null) continue;
+                for (int s : stops) {
+                    double d = DistanceUtil.calculateDistance(la, ln, lat[s], lng[s]);
+                    if (d <= bestKm) {
+                        bestKm = d;
+                        best = s;
+                    }
+                }
+            }
+        }
+        return best < 0 ? null : new Object[]{lat[best], lng[best], bestKm, name[best]};
     }
 
     /** 이 지점에서 radiusKm 안에 정류장이 있는가 (버스 자료가 있는 곳인가) */

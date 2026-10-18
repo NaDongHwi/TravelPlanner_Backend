@@ -209,9 +209,11 @@ class RailNetworkTest {
         assertEquals(RailFareModel.unknownLocalFare(unknown.getDistanceKm()), unknown.getFareYen());
         assertEquals(30, unknown.getMinutes(), "노선을 모르면 일정의 이동 시간을 그대로 쓴다");
 
-        // 역이 없는 곳(산 위 전망대 등): 철도 경로가 없으므로 거리 기준
+        // 역이 없는 곳(산 위 전망대 등): 잇는 대중교통이 없고 걷기에 멀면 택시로 안내한다
         TransitLegDto remote = TransitLegPlanner.plan(graph, names, LAT + 0.3, LNG, "산", LAT + 0.35, LNG, "전망대", transit, 30);
-        assertEquals("버스 등", remote.getMode());
+        assertEquals("택시", remote.getMode());
+        assertEquals("taxi", remote.getSource());
+        assertEquals(TransitLegPlanner.taxiFare(remote.getDistanceKm()), remote.getFareYen(), 200);
 
         // 렌터카: 요금을 만들지 않는다
         TransitLegDto car = TransitLegPlanner.plan(graph, names, LAT, LNG, "가", LAT, LNG + STEP * 3, "나", "렌트카", 20);

@@ -456,6 +456,35 @@ public class PlanService {
         return c != null && (c.contains("가족") || c.contains("부모") || c.contains("아이") || c.contains("유아"));
     }
 
+    /** 아이나 어르신이 함께하는 여행인가 (가족·부모님·아이·유아·어린이·노인·어르신·조부모) — 등산하는 곳의 점수를 낮춘다 */
+    static boolean withChildrenOrElderly(PlanRequest request) {
+        String c = request.getCompanion();
+        return isFamily(request) || (c != null && (c.contains("어린이") || c.contains("노인") || c.contains("어르신") || c.contains("조부모")
+                || c.contains("할머니") || c.contains("할아버지")));
+    }
+
+    /** 아이·어르신과 함께할 때 등산하는 곳에서 빼는 점수 (테마가 맞아 받는 가산점 45~60 과 비슷하게: 다른 볼거리가 있으면 그쪽이 먼저) */
+    static final double HIKE_PENALTY = 50.0;
+
+    /**
+     * 등산하는 곳(산 정상·등산로)의 점수 조정. 그대로 추천하되
+     *  - 아이·어르신과 함께면 다른 볼거리를 먼저 고르도록 크게 낮춘다
+     *  - 대중교통 여행인데 정상 1.5km 안에 역·정류장이 없으면(택시·차로 주차장까지 가야 하는 곳) 조금 낮춘다
+     */
+    static double hikeAdjustment(Place p, boolean easyPace, boolean byCar) {
+        if (!com.travel.planner.util.Hiking.isHike(p)) return 0;
+        double delta = 0;
+        if (easyPace) delta -= HIKE_PENALTY;
+        if (!byCar && Boolean.FALSE.equals(p.getHikeTransitGate())) delta -= HIKE_NO_TRANSIT_PENALTY;
+        return delta;
+    }
+
+    /** 대중교통 여행에서, 대중교통으로 등산 입구까지 갈 수 없는 등산하는 곳에서 빼는 점수 */
+    static final double HIKE_NO_TRANSIT_PENALTY = 20.0;
+
+    /** 등산하는 곳의 최소 방문 시간(분): 오르고 내려오는 시간 포함 */
+    static final int HIKE_DWELL_MIN = 180;
+
     public int calculateDwellTime(Place p, PlanRequest request) {
         if (isPseudoCategory(p.getCategory())) return 120;
 
@@ -490,6 +519,10 @@ public class PlanService {
         List<String> themes = ThemeVocabulary.normalizeAll(request.getThemes());
         if (kind != PlaceKind.THEME_PARK && (isFamily(request) || themes.contains("힐링"))) {
             time = (int) (time * 1.2);
+        }
+        // 등산하는 곳: 방문 = 등산로를 걸어 오르내리는 것. 최소 3시간을 잡는다 (교통편은 등산 입구까지만 안내한다)
+        if (kind == PlaceKind.ATTRACTION && com.travel.planner.util.Hiking.isHike(p)) {
+            time = Math.max(time, HIKE_DWELL_MIN);
         }
         // 온천: 온천 테마를 고른 사람은 길게(최대 3시간), 고르지 않았는데 일정에 들어간 경우는 짧게(최대 1시간 30분)
         if (kind == PlaceKind.ATTRACTION && themesOf(p).contains("온천")) {
@@ -555,6 +588,8 @@ public class PlanService {
         Map<String, Integer> themeCounts = new LinkedHashMap<>();
         int buffer;
         boolean family;
+        boolean easyPace;                    // 아이·어르신과 함께: 등산하는 곳의 점수를 낮춘다
+        boolean byCar;                       // 렌터카 여행
         boolean foodLover;
         boolean cafeLover;
         boolean shoppingLover;
@@ -633,6 +668,9 @@ public class PlanService {
         st.themes = ThemeVocabulary.normalizeAll(req.getThemes());
         st.buffer = calculateBufferTime(req);
         st.family = isFamily(req);
+        st.easyPace = withChildrenOrElderly(req);
+        String transport = req.getTransportation() == null ? "" : req.getTransportation();
+        st.byCar = transport.contains("렌트") || transport.contains("자동차") || transport.contains("차량");
         st.foodLover = st.themes.contains("맛집");
         st.cafeLover = st.themes.contains("카페");
         st.shoppingLover = st.themes.contains("쇼핑");
@@ -723,6 +761,7 @@ public class PlanService {
             if (c.kind == PlaceKind.ATTRACTION) score += 15.0;
             if (c.themes.contains("액티비티") && c.kind != PlaceKind.THEME_PARK) score -= 30.0;
         }
+        score += hikeAdjustment(p, st.easyPace, st.byCar);
 
         // 도심에서 먼 곳은 약하게만 감점한다. (자연·온천은 외곽이 정상)
         double allowed = (c.themes.contains("자연") || c.themes.contains("온천")) ? 25.0 : 10.0;

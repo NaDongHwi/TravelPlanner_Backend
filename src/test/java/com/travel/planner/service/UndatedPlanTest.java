@@ -89,7 +89,7 @@ class UndatedPlanTest {
     @Test
     void requestValidationWithoutDates() {
         PlanGenerationService service = new PlanGenerationService(planService, new PlanValidationService(null),
-                null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
 
         // 29박 30일까지
         PlanRequest longest = request(null, null, 30);
@@ -329,7 +329,7 @@ class UndatedPlanTest {
 
         // 날씨: 날짜가 없으면 예보를 조회하지 않는다 (날씨 서비스를 건드리지 않고 빈 결과)
         PlanGenerationService generation = new PlanGenerationService(planService, new PlanValidationService(null),
-                null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
         java.util.Map<String, double[]> centers = new java.util.HashMap<>();
         centers.put("오사카", new double[]{34.67, 135.50});
         assertTrue(generation.forecast(in.request, 3, Arrays.asList("오사카", "오사카", "오사카"), centers, "오사카").isEmpty());

@@ -10,7 +10,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 대중교통(철도망 + GTFS 노선 계산) / 버스(전국 버스 정류장 자료) / 노선 미확인(거리 기준) / 자동차.
+ * 두 지점 사이를 "어떻게 가는지" 정한다: 도보 / 대중교통(철도망 + GTFS 노선 계산) / 버스(전국 버스 정류장 자료) / 택시(잇는 대중교통이 없을 때) /
+ * 노선 미확인(노선 자료를 아직 하나도 가져오지 않았을 때, 거리 기준) / 자동차.
+ * 등산하는 곳이 한쪽 끝이면 교통편은 등산 입구(가장 가까운 역·정류장)까지만 찾고 등산로 도보를 붙인다.
  * DB·스프링과 무관한 순수 계산이다.
  */
 public final class TransitLegPlanner {
@@ -21,8 +23,12 @@ public final class TransitLegPlanner {
     static final double WALK_KM = 1.0;
     /** 타는 곳·내리는 곳까지 걷는 거리가 전체 직선거리에서 차지할 수 있는 최대 비율 */
     static final double MAX_WALK_SHARE = 0.5;
-    /** 걷는 것보다 빠른 경로가 없을 때, 걷는 시간이 이 분 이하이면 걸어가라고 안내한다 (그보다 멀면 거리 기준 추정으로 남긴다) */
-    static final int WALK_INSTEAD_MINUTES = 30;
+    /**
+     * 걷는 것보다 빠른 경로가 없을 때, 걷는 시간이 이 분 이하(직선 약 2km)이면 걸어가라고 안내한다.
+     * 노선 자료가 없는 곳도 마찬가지다: 버스가 있을지 모르는 "노선 미확인"보다 확실히 갈 수 있는 도보가 낫다.
+     * 그보다 멀면 거리 기준 추정(노선 미확인)으로 남긴다.
+     */
+    static final int WALK_INSTEAD_MINUTES = 35;
     /** 이 거리(km) 안에 정류장이 있으면 그곳은 버스 등의 노선 자료가 있는 곳으로 본다 */
     static final double COVERED_KM = 0.6;
     /** 하루 운행이 이 횟수 이하이면 "시간표를 꼭 확인하라"고 알린다 */
@@ -59,6 +65,217 @@ public final class TransitLegPlanner {
                                      double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
                                      LocalDate date, Integer departMinute) {
         return plan(graph, null, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute);
+    }
+
+    /** 등산하는 곳(산 정상 등)에서 등산로 입구로 보는 역·정류장을 찾는 거리(km) */
+    static final double HIKE_ACCESS_KM = 4.0;
+    /** 이 거리(km) 안의 역·정류장이면 "대중교통으로 가서 걸어 오르는 곳"으로 본다 (다카오산형) */
+    static final double HIKE_TRANSIT_GATE_KM = 1.5;
+    /** 등산로를 걷는 시간: 직선 1km 에 이 분 (길이 굽고 오르막이라 평지의 2.5배쯤) */
+    static final int HIKE_MIN_PER_KM = 45;
+
+    /** 구간 한쪽 끝이 등산하는 곳이나 후지산일 때의 정보 */
+    public static final class Summit {
+        final Double parkingLat;
+        final Double parkingLng;
+        final String parkingName;
+        final boolean fuji;
+
+        private Summit(Double parkingLat, Double parkingLng, String parkingName, boolean fuji) {
+            this.parkingLat = parkingLat;
+            this.parkingLng = parkingLng;
+            this.parkingName = parkingName;
+            this.fuji = fuji;
+        }
+
+        /** 등산하는 곳. 정상 근처 주차장을 알면 그 좌표·이름 (모르면 null) */
+        public static Summit hike(Double parkingLat, Double parkingLng, String parkingName) {
+            return new Summit(parkingLat, parkingLng, parkingName, false);
+        }
+
+        /** 후지산: 이 5합목까지 가서 둘러본다 */
+        public static Summit fuji(double stationLat, double stationLng, String stationName) {
+            return new Summit(stationLat, stationLng, stationName, true);
+        }
+    }
+
+    /** 등산 입구 {위도, 경도, 정상까지 거리(km)} 와 이름, 종류("transit"/"parking"/"far") */
+    private static final class Gate {
+        double lat, lng, km;
+        String name;
+        String kind;
+    }
+
+    /** 이전 방식(true 면 주차장 정보 없는 등산하는 곳)과 같은 호출 */
+    public static TransitLegDto plan(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
+                                     LocalDate date, Integer departMinute, boolean fromHike, boolean toHike) {
+        return plan(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute,
+                fromHike ? Summit.hike(null, null, null) : null, toHike ? Summit.hike(null, null, null) : null);
+    }
+
+    /**
+     * 등산하는 곳이 한쪽 끝인 구간. 그곳은 걸어서 오르는 곳이므로, 교통편은 등산 입구까지만 찾고 그다음은 "등산로 도보" 단계로 붙인다.
+     * 등산 입구: 1) 정상 1.5km 안의 역·정류장  2) 정상 근처 주차장(차·택시로 가는 곳)  3) 4km 안의 가장 가까운 역·정류장.
+     * 등산 시간은 방문 시간에 들어 있으므로 이동 시간에 더하지 않는다.
+     * 후지산은 5합목까지의 교통편을 안내한다 (정상 등반은 하루 일정에 넣지 않는다).
+     */
+    public static TransitLegDto plan(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                                     double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
+                                     LocalDate date, Integer departMinute, Summit fromHike, Summit toHike) {
+        String mode = transportation == null ? "" : transportation;
+        boolean car = mode.contains("렌트") || mode.contains("자동차") || mode.toLowerCase().contains("car");
+        if (fromHike == null && toHike == null) {
+            return plan(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute);
+        }
+        // 렌터카: 등산하는 곳은 그대로 차로(주차장이 있으면 주차장까지). 후지산은 5합목까지.
+        Gate fromGate = fromHike == null ? null : gate(graph, buses, names, fromLat, fromLng, fromHike, car);
+        Gate toGate = toHike == null ? null : gate(graph, buses, names, toLat, toLng, toHike, car);
+        if (car && fromGate == null && toGate == null) {
+            return plan(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes, date, departMinute);
+        }
+
+        double aLat = fromGate != null ? fromGate.lat : fromLat;
+        double aLng = fromGate != null ? fromGate.lng : fromLng;
+        double bLat = toGate != null ? toGate.lat : toLat;
+        double bLng = toGate != null ? toGate.lng : toLng;
+        TransitLegDto inner = plan(graph, buses, names, aLat, aLng, fromGate != null ? fromGate.name : fromName,
+                bLat, bLng, toGate != null ? toGate.name : toName, transportation, scheduleMinutes, date, departMinute);
+        TransitLegDto leg = inner;
+        if (leg == null) {
+            leg = new TransitLegDto();
+            leg.setEstimated(true);
+            leg.setMode("도보");
+            leg.setMinutes(0);
+            leg.setFareYen(0);
+            leg.setChildFareYen(0);
+            leg.setSource("walk");
+            leg.setSummary("");
+        }
+        leg.setDistanceKm(Math.round(DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng) * 10.0) / 10.0);
+
+        List<String> parts = new ArrayList<>();
+        StringBuilder note = new StringBuilder(leg.getNote() == null ? "" : leg.getNote());
+        boolean hiking = false;
+        boolean fuji = false;
+        boolean far = false;
+        if (fromGate != null) {
+            if (fromHike.fuji) {
+                fuji = true;
+                parts.add(fromGate.name + "에서 출발");
+            } else {
+                hiking = true;
+                far |= "far".equals(fromGate.kind);
+                int down = hikeMinutes(fromGate.km);
+                leg.getSteps().add(0, hikeStep(fromName, fromGate.name, down, fromGate.km, "하산"));
+                parts.add("걸어서 내려와 " + fromGate.name + "까지 약 " + down + "분(방문 시간에 포함)");
+            }
+        }
+        if (inner != null && inner.getSummary() != null && !inner.getSummary().isBlank()) parts.add(inner.getSummary());
+        if (toGate != null) {
+            if (toHike.fuji) {
+                fuji = true;
+                parts.add(toGate.name + " 도착");
+            } else {
+                hiking = true;
+                far |= "far".equals(toGate.kind);
+                int up = hikeMinutes(toGate.km);
+                leg.getSteps().add(hikeStep(toGate.name, toName, up, toGate.km, "등산"));
+                parts.add(toGate.name + "부터 등산로를 걸어 약 " + up + "분(방문 시간에 포함)");
+            }
+        }
+        leg.setSummary(String.join(" → ", parts));
+        if (note.length() > 0) note.append(' ');
+        if (hiking) {
+            leg.setMode(leg.getMode() + "·등산");
+            boolean noGate = (fromHike != null && !fromHike.fuji && fromGate == null) || (toHike != null && !toHike.fuji && toGate == null);
+            if (noGate) {
+                note.append("등산하는 곳이라 걸어서 오르내립니다. 근처에 역·정류장·주차장을 찾지 못해 산 가까이까지의 이동만 안내했습니다.");
+            } else if (far) {
+                note.append("등산하는 곳이라 가장 가까운 역·정류장에서 걸어서 오르내리는 것으로 안내했습니다. 차로 가면 더 가까이까지 갈 수 있을 수 있습니다.");
+            } else {
+                note.append("등산하는 곳이라 등산 입구(역·정류장 또는 주차장)까지 가서 걸어서 오르내리는 것으로 안내했습니다.");
+            }
+            note.append(" 실제 등산로 입구는 다를 수 있으니 등산 지도를 확인해 주세요. 등산 시간은 방문 시간에 포함되어 있습니다.");
+        }
+        if (fuji) {
+            note.append("후지산은 5합목(등산로 입구)까지 가서 둘러보는 일정으로 안내합니다. 정상 등반은 7월 초~9월 초 개방 기간에 산장 1박이 필요해 하루 일정에 넣지 않았습니다. ")
+                    .append("겨울에는 5합목까지 가는 도로·버스가 닫힐 수 있습니다.");
+        }
+        leg.setNote(note.toString().trim());
+        return leg;
+    }
+
+    /** 등산 입구. 후지산은 정해 둔 5합목. 렌터카는 주차장이 있을 때만(없으면 null: 정상 좌표로 차 안내) */
+    private static Gate gate(RailGraph graph, BusStopIndex buses, Names names, double lat, double lng, Summit summit, boolean car) {
+        if (summit.fuji) {
+            Gate g = new Gate();
+            g.lat = summit.parkingLat;
+            g.lng = summit.parkingLng;
+            g.km = DistanceUtil.calculateDistance(lat, lng, g.lat, g.lng);
+            g.name = summit.parkingName;
+            g.kind = "fuji";
+            return g;
+        }
+        Gate parking = null;
+        if (summit.parkingLat != null && summit.parkingLng != null) {
+            parking = new Gate();
+            parking.lat = summit.parkingLat;
+            parking.lng = summit.parkingLng;
+            parking.km = DistanceUtil.calculateDistance(lat, lng, parking.lat, parking.lng);
+            parking.name = summit.parkingName == null || summit.parkingName.isBlank() ? "주차장" : summit.parkingName;
+            parking.kind = "parking";
+        }
+        if (car) return parking;
+        Gate near = nearestTransit(graph, buses, names, lat, lng, HIKE_ACCESS_KM);
+        if (near != null && near.km <= HIKE_TRANSIT_GATE_KM) {
+            near.kind = "transit";
+            return near;
+        }
+        if (parking != null) return parking;
+        if (near != null) near.kind = "far";
+        return near;
+    }
+
+    /** withinKm 안의 가장 가까운 역이나 버스 정류장 */
+    private static Gate nearestTransit(RailGraph graph, BusStopIndex buses, Names names, double lat, double lng, double withinKm) {
+        Gate best = null;
+        if (graph != null) {
+            RailGraph.Station s = graph.nearestStation(lat, lng, withinKm);
+            if (s != null) {
+                best = new Gate();
+                best.lat = s.latitude;
+                best.lng = s.longitude;
+                best.km = DistanceUtil.calculateDistance(lat, lng, s.latitude, s.longitude);
+                best.name = stationName(names, s.name);
+            }
+        }
+        if (buses != null) {
+            Object[] stop = buses.nearestStop(lat, lng, withinKm);
+            if (stop != null && (best == null || (double) stop[2] < best.km)) {
+                best = new Gate();
+                best.lat = (double) stop[0];
+                best.lng = (double) stop[1];
+                best.km = (double) stop[2];
+                best.name = placeName(names, (String) stop[3], null, true) + " 정류장";
+            }
+        }
+        return best;
+    }
+
+    static int hikeMinutes(double straightKm) {
+        return Math.max(5, (int) Math.round(straightKm * HIKE_MIN_PER_KM / 5.0) * 5);
+    }
+
+    private static TransitLegDto.Step hikeStep(String from, String to, int minutes, double km, String kind) {
+        TransitLegDto.Step step = new TransitLegDto.Step();
+        step.setType("도보");
+        step.setCategory(kind);
+        step.setFrom(from);
+        step.setTo(to);
+        step.setMinutes(minutes);
+        step.setKm(Math.round(km * 10.0) / 10.0);
+        return step;
     }
 
     /**
@@ -116,9 +333,11 @@ public final class TransitLegPlanner {
         boolean covered = graph != null && graph.hasStopNear(fromLat, fromLng, COVERED_KM) && graph.hasStopNear(toLat, toLng, COVERED_KM);
         // 전국 버스 정류장 자료로 보아도 양쪽에 정류장이 있는데 걷는 것보다 빠른 노선이 없으면 마찬가지로 걸어가라고 안내한다
         boolean busCovered = buses != null && buses.hasStopNear(fromLat, fromLng, COVERED_KM) && buses.hasStopNear(toLat, toLng, COVERED_KM);
-        if (walkMinutes <= WALK_INSTEAD_MINUTES && (covered || busCovered)) {
+        if (walkMinutes <= WALK_INSTEAD_MINUTES) {
             walk(leg, fromName, toName, walkMinutes, km);
-            String note = "가져온 노선 자료에는 이 구간을 걷는 것보다 빨리 가는 대중교통이 없어 도보로 안내합니다.";
+            String note = covered || busCovered
+                    ? "가져온 노선 자료에는 이 구간을 걷는 것보다 빨리 가는 대중교통이 없어 도보로 안내합니다."
+                    : "이 구간은 가져온 노선 자료에서 대중교통 경로를 찾지 못했고 걸어갈 만한 거리라 도보로 안내합니다. 택시를 타면 더 빨리 갈 수 있습니다.";
             if (walkMinutes > scheduleMinutes + 10) {
                 note += " 걷는 시간(" + walkMinutes + "분)이 일정의 이동 시간(" + scheduleMinutes + "분)보다 깁니다.";
             }
@@ -126,6 +345,10 @@ public final class TransitLegPlanner {
             return leg;
         }
 
+        // 노선 자료(철도망·GTFS·버스 정류장)가 있는데도 잇는 대중교통이 없고 걷기에도 멀다: 택시로 안내한다
+        if (graph != null || buses != null) return taxi(leg, km, fromName, toName, scheduleMinutes);
+
+        // 노선 자료를 하나도 가져오지 않은 상태: 대중교통이 있는지 알 수 없으므로 예전처럼 거리 기준 추정
         leg.setMode("버스 등");
         leg.setMinutes(scheduleMinutes);
         int fare = RailFareModel.unknownLocalFare(km);
@@ -214,6 +437,50 @@ public final class TransitLegPlanner {
         if (community) note.append(" 커뮤니티 버스는 하루 운행 횟수가 적을 수 있습니다.");
         if (trip.minutes > scheduleMinutes + 10) {
             note.append(" 이 경로의 추정 시간(").append(trip.minutes).append("분)이 일정의 이동 시간(").append(scheduleMinutes).append("분)보다 깁니다.");
+        }
+        leg.setNote(note.toString());
+        return leg;
+    }
+
+    /** 택시 요금: 첫 1.096km 500엔, 이후 255m 마다 100엔 (도쿄 23구 등 2022년 개정 요금. 지역·심야에 따라 다르다) */
+    static int taxiFare(double straightKm) {
+        double road = straightKm * 1.3;
+        if (road <= 1.096) return 500;
+        return 500 + (int) Math.ceil((road - 1.096) / 0.255) * 100;
+    }
+
+    /** 택시 시간: 부르고 타는 데 5분 + 도로 거리(직선×1.3)를 시내 시속 25km(10km 넘는 부분은 40km)로 */
+    static int taxiMinutes(double straightKm) {
+        double road = straightKm * 1.3;
+        double minutes = 5 + Math.min(road, 10) / 25.0 * 60 + Math.max(0, road - 10) / 40.0 * 60;
+        return Math.max(5, (int) Math.ceil(minutes));
+    }
+
+    private static TransitLegDto taxi(TransitLegDto leg, double km, String fromName, String toName, int scheduleMinutes) {
+        int minutes = taxiMinutes(km);
+        int fare = taxiFare(km);
+        leg.setMode("택시");
+        leg.setMinutes(minutes);
+        leg.setFareYen(fare);
+        leg.setChildFareYen(fare);       // 택시는 차 한 대 요금이다
+        leg.setSource("taxi");
+        leg.setFareSource("estimate");
+        leg.setSummary("택시 약 " + minutes + "분 (대중교통 경로 없음)");
+        TransitLegDto.Step step = new TransitLegDto.Step();
+        step.setType("승차");
+        step.setCategory("택시");
+        step.setFrom(fromName);
+        step.setTo(toName);
+        step.setMinutes(minutes);
+        step.setKm(Math.round(km * 1.3 * 10.0) / 10.0);
+        step.setFareYen(fare);
+        step.setFareConfirmed(false);
+        step.setFareBasis(FareBook.Basis.ESTIMATE.code);
+        leg.getSteps().add(step);
+        StringBuilder note = new StringBuilder("가져온 노선 자료(철도·버스)에서 이 구간을 잇는 대중교통을 찾지 못했고 걷기에는 멀어 택시로 안내합니다. ")
+                .append("요금은 일반 택시 요금(첫 약 1.1km 500엔, 이후 약 255m마다 100엔)과 도로 거리로 추정한 차 한 대 요금이며, 지역·시간대에 따라 다릅니다.");
+        if (minutes > scheduleMinutes + 10) {
+            note.append(" 이 경로의 추정 시간(").append(minutes).append("분)이 일정의 이동 시간(").append(scheduleMinutes).append("분)보다 깁니다.");
         }
         leg.setNote(note.toString());
         return leg;

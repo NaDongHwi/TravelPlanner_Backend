@@ -21,7 +21,7 @@ public class TransitLegDto {
     private Integer fareYen;        // 성인 1인 요금(엔). 알 수 없으면 null
     private Integer childFareYen;   // 아동 1인 요금(엔)
     private boolean estimated;      // 소요 시간이 추정값인가 (개별 출발 시각을 쓰지 않으므로 항상 true)
-    private String source;          // "walk" / "rail-network"(전국 철도망) / "gtfs"(운영사 시각표 자료) / "rail-network+gtfs" / "bus-stops"(전국 버스 정류장 자료로 찾은 노선, 시각 미확인) / "distance"(노선 미확인, 거리 기준)
+    private String source;          // "walk" / "rail-network"(전국 철도망) / "gtfs"(운영사 시각표 자료) / "rail-network+gtfs" / "bus-stops"(전국 버스 정류장 자료로 찾은 노선, 시각 미확인) / "taxi"(잇는 대중교통이 없어 택시) / "distance"(노선 자료가 없어 노선 미확인, 거리 기준)
     private String fareSource;      // 요금의 근거. "official"(운영사가 정한 값: 버스 등의 요금표, 등록한 역 쌍 요금) / "table"(운영사 요금표에 계산한 거리를 넣은 값)
                                     // / "estimate"(종류별 대표 요금표나 거리로 추정) / "mixed"(추정이 일부 섞임). 도보·자동차는 null
     private String summary;         // 한 줄 요약: "JR 야마노테선 신주쿠역 → 시부야역 (3정거장)"

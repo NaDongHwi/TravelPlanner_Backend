@@ -98,6 +98,18 @@ public class Place {
     @Column(length = 300)
     private String summary;   // 한 줄 소개: "에도 시대 정원을 재현한 일본식 정원" 등
 
+    // 등산하는 곳(산 정상 등)의 차로 가는 입구: 정상 근처 주차장 (구글에서 한 번 찾아 저장. 찾았는데 없으면 trailheadName = "-")
+    @Column
+    private Double trailheadLat;
+    @Column
+    private Double trailheadLng;
+    @Column(length = 100)
+    private String trailheadName;
+
+    /** 일정을 짜는 동안만 쓰는 값: 등산하는 곳 1.5km 안에 역·정류장이 있는가 (null = 따지지 않음) */
+    @Transient
+    private Boolean hikeTransitGate;
+
     public Integer getRecommendedDuration() { return recommendedDuration; }
     public void setRecommendedDuration(Integer recommendedDuration) { this.recommendedDuration = recommendedDuration; }
 }

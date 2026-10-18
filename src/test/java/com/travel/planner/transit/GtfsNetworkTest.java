@@ -524,21 +524,25 @@ class GtfsNetworkTest {
                 "찻집", "도보 및 대중교통", 15, WEEKDAY, 600);
         assertEquals("도보", tooMuchWalk.getMode());
 
-        // 도착지 근처에 정류장이 없으면(노선 자료가 없는 곳) 단정하지 않는다: 노선 미확인 추정으로 남긴다
+        // 도착지 근처에 정류장이 없어도(노선 자료가 없는 곳) 걸어갈 만한 거리(35분 이내)면 "노선 미확인" 대신 걸어가라고 안내한다
         TransitLegDto notCovered = TransitLegPlanner.plan(graph, TransitLegPlanner.ORIGINAL, LAT + 0.003, LNG + 0.020, "성터", LAT + 0.014, LNG + 0.024,
                 "산장", "도보 및 대중교통", 15, WEEKDAY, 600);
-        assertEquals("버스 등", notCovered.getMode());
-        assertEquals("distance", notCovered.getSource());
+        assertEquals("도보", notCovered.getMode());
+        assertEquals("walk", notCovered.getSource());
+        assertTrue(notCovered.getNote().contains("경로를 찾지 못했고 걸어갈 만한 거리"), notCovered.getNote());
 
         // 걷기에 먼 거리(30분 초과)도 걸으라고 하지 않는다
         TransitLegDto far = TransitLegPlanner.plan(graph, TransitLegPlanner.ORIGINAL, LAT + 0.004, LNG, "북쪽 호텔", LAT + 0.004, LNG + 0.024,
                 "성터 북문", "도보 및 대중교통", 20, LocalDate.of(2026, 10, 13), 23 * 60);
         assertFalse("도보".equals(far.getMode()), far.getMode() + " " + far.getSummary());
 
-        // 교통망을 아직 가져오지 않았으면 예전처럼 거리 기준 추정
+        // 교통망을 아직 가져오지 않았어도 걸어갈 만한 거리면 도보, 먼 곳은 예전처럼 거리 기준 추정
         TransitLegDto noGraph = TransitLegPlanner.plan(null, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG + 0.020, "성터", LAT + 0.001, LNG + 0.036,
                 "찻집", "도보 및 대중교통", 15, WEEKDAY, 600);
-        assertEquals("버스 등", noGraph.getMode());
+        assertEquals("도보", noGraph.getMode());
+        TransitLegDto noGraphFar = TransitLegPlanner.plan(null, TransitLegPlanner.ORIGINAL, LAT + 0.001, LNG + 0.020, "성터", LAT + 0.001, LNG + 0.060,
+                "찻집", "도보 및 대중교통", 25, WEEKDAY, 600);
+        assertEquals("버스 등", noGraphFar.getMode());
     }
 
     // ---------------------------------------------------------------- 가상 피드

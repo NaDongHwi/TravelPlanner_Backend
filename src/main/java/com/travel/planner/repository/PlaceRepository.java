@@ -57,6 +57,10 @@ public interface PlaceRepository extends JpaRepository<Place, Long> {
     @Query("UPDATE Place p SET p.nameKo = :nameKo WHERE p.id = :id")
     int updateNameKo(@Param("id") Long id, @Param("nameKo") String nameKo);
 
+    /** 도시별 장소 수 {도시, 수} (장기 투어에서 장소가 넉넉한 도시를 먼저 더하는 데 쓴다) */
+    @Query("SELECT p.city, COUNT(p) FROM Place p WHERE p.city IS NOT NULL GROUP BY p.city")
+    List<Object[]> countByCity();
+
     /** 등산하는 곳의 주차장(차로 가는 입구)만 고친다 */
     @Modifying
     @Transactional

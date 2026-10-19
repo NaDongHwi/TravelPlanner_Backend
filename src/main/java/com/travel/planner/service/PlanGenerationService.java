@@ -73,7 +73,7 @@ public class PlanGenerationService {
         List<String> addedCities = new ArrayList<>();
         if (style == TripProfile.Style.TOUR) {
             List<String> before = new ArrayList<>(request.getCities());
-            List<String> expanded = JapanCities.expandForTour(before, totalDays, request.getInCity(), request.getOutCity());
+            List<String> expanded = JapanCities.expandForTour(before, totalDays, request.getInCity(), request.getOutCity(), placeCountsByCity());
             for (String c : expanded) if (!before.contains(c)) addedCities.add(c);
             if (!addedCities.isEmpty()) request.setCities(expanded);
         }
@@ -452,6 +452,19 @@ public class PlanGenerationService {
             }
         }
         return best;
+    }
+
+    /** 도시별 장소 수 (실패하면 빈 맵: 거리만 보고 도시를 더한다) */
+    private Map<String, Long> placeCountsByCity() {
+        Map<String, Long> counts = new HashMap<>();
+        try {
+            for (Object[] row : placeRepository.countByCity()) {
+                if (row != null && row.length >= 2 && row[0] != null && row[1] instanceof Number) counts.put(row[0].toString(), ((Number) row[1]).longValue());
+            }
+        } catch (Exception e) {
+            System.out.println("[투어] 도시별 장소 수를 읽지 못해 거리만 보고 도시를 더합니다: " + e.getMessage());
+        }
+        return counts;
     }
 
     /** 날씨 예보를 일정에 반영하는 범위(오늘부터 일수). WeatherService 의 One Call 범위와 같다 */

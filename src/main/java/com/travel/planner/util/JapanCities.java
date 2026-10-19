@@ -7,6 +7,7 @@ import java.util.Map;
 
 /**
  * 장기 투어에서 자동으로 더할 수 있는 주요 관광 도시 (이름은 장소 DB 의 도시 이름과 같은 한국어 표기, 좌표는 도심 대략값).
+ * 더할 때는 장소 DB 에 장소가 넉넉한 도시(RICH_PLACES 곳 이상)를 먼저 고른다. 그런 도시가 근처에 없을 때만 DB 에 없는 도시를 더하고, 그 도시는 일정 생성 때 구글에서 장소를 모은다.
  * 섬 구분: M 본토(혼슈·시코쿠·규슈), H 홋카이도, O 오키나와. 바다를 건너는 도시는 같은 섬을 고른 경우에만 더한다.
  */
 public final class JapanCities {
@@ -61,9 +62,16 @@ public final class JapanCities {
         add("나가사키", 32.750, 129.878, 'M');
         add("구마모토", 32.803, 130.708, 'M');
         add("벳푸", 33.284, 131.491, 'M');
-        add("유후인", 33.264, 131.355, 'M');
+        add("유후시", 33.267, 131.368, 'M');            // 유후인 (DB 도시 이름이 "유후시")
         add("가고시마", 31.597, 130.557, 'M');
         add("니가타", 37.916, 139.036, 'M');
+        // 장소 DB 에 이미 있는 도시 (이름은 DB 의 표기 그대로)
+        add("누마즈", 35.082, 138.860, 'M');
+        add("아타미", 35.097, 139.077, 'M');
+        add("후지노미야", 35.233, 138.608, 'M');
+        add("에노시마", 35.300, 139.480, 'M');
+        add("돗토리", 35.515, 133.921, 'M');
+        add("마쓰에", 35.474, 133.050, 'M');
         add("센다이", 38.268, 140.870, 'M');
         add("아오모리", 40.822, 140.747, 'M');
         add("삿포로", 43.062, 141.354, 'H');
@@ -71,6 +79,8 @@ public final class JapanCities {
         add("하코다테", 41.773, 140.726, 'H');
         add("아사히카와", 43.771, 142.365, 'H');
         add("후라노", 43.342, 142.383, 'H');
+        add("비에이조", 43.588, 142.466, 'H');
+        add("노보리베쓰", 42.494, 141.143, 'H');
         add("오키나와", 26.212, 127.681, 'O');
     }
 
@@ -86,7 +96,7 @@ public final class JapanCities {
     /** 근처 도시를 더할 때 고른 도시에서 이 거리(km) 안의 도시만 본다 */
     public static final double NEARBY_KM = 250;
     /** 투어에서 자동으로 늘릴 수 있는 도시 수의 상한 (고른 도시 포함) */
-    public static final int MAX_TOUR_CITIES = 15;
+    public static final int MAX_TOUR_CITIES = 25;
 
     /**
      * 장기 투어: 일수에 맞게(도시당 약 TripProfile.TOUR_DAYS_PER_CITY 일) 근처 도시를 더하고, 입국 쪽에서 출국 쪽으로 이어지게 순서를 맞춘다.
@@ -94,6 +104,15 @@ public final class JapanCities {
      * @return 새 도시 목록 (더할 것이 없으면 원래 목록 그대로)
      */
     public static List<String> expandForTour(List<String> selected, int totalDays, String inCity, String outCity) {
+        return expandForTour(selected, totalDays, inCity, outCity, java.util.Collections.emptyMap());
+    }
+
+    /** 장소 DB 에 이만큼 이상 장소가 있는 도시를 먼저 더한다 */
+    public static final int RICH_PLACES = 30;
+
+    /** @param placeCounts 도시 이름 → 장소 DB 의 장소 수 (모르면 빈 맵: 거리만 본다) */
+    public static List<String> expandForTour(List<String> selected, int totalDays, String inCity, String outCity,
+                                             Map<String, Long> placeCounts) {
         int target = Math.min(MAX_TOUR_CITIES, (int) Math.ceil(totalDays / (double) TripProfile.TOUR_DAYS_PER_CITY));
         List<String> cities = new ArrayList<>(selected);
         if (cities.size() >= target) return cities;
@@ -105,20 +124,11 @@ public final class JapanCities {
         if (known.isEmpty()) return cities;
 
         List<String> added = new ArrayList<>();
+        boolean anyCounts = placeCounts != null && !placeCounts.isEmpty();
         while (cities.size() < target) {
-            City best = null;
-            double bestKm = Double.MAX_VALUE;
-            for (City cand : CITIES.values()) {
-                if (cities.contains(cand.name)) continue;
-                for (City k : known) {
-                    if (k.island != cand.island) continue;            // 바다 건너는 도시는 같은 섬을 고른 경우에만
-                    double km = DistanceUtil.calculateDistance(k.lat, k.lng, cand.lat, cand.lng);
-                    if (km <= NEARBY_KM && km < bestKm) {
-                        bestKm = km;
-                        best = cand;
-                    }
-                }
-            }
+            // 1차: 장소가 넉넉한 도시 중 가장 가까운 곳, 2차: 그런 곳이 없으면 아무 도시나 가장 가까운 곳
+            City best = nearestCandidate(cities, known, anyCounts ? placeCounts : null);
+            if (best == null && anyCounts) best = nearestCandidate(cities, known, null);
             if (best == null) break;
             cities.add(best.name);
             known.add(best);
@@ -126,6 +136,24 @@ public final class JapanCities {
         }
         if (added.isEmpty()) return cities;
         return orderAsRoute(cities, inCity, outCity);
+    }
+
+    private static City nearestCandidate(List<String> chosen, List<City> known, Map<String, Long> richOnly) {
+        City best = null;
+        double bestKm = Double.MAX_VALUE;
+        for (City cand : CITIES.values()) {
+            if (chosen.contains(cand.name)) continue;
+            if (richOnly != null && richOnly.getOrDefault(cand.name, 0L) < RICH_PLACES) continue;
+            for (City k : known) {
+                if (k.island != cand.island) continue;            // 바다 건너는 도시는 같은 섬을 고른 경우에만
+                double km = DistanceUtil.calculateDistance(k.lat, k.lng, cand.lat, cand.lng);
+                if (km <= NEARBY_KM && km < bestKm) {
+                    bestKm = km;
+                    best = cand;
+                }
+            }
+        }
+        return best;
     }
 
     /** 입국 도시 가까운 곳에서 시작해 가장 가까운 도시로 이어 가고, 출국 도시 가까운 곳을 마지막에 둔다 (표에 없는 도시는 맨 뒤) */

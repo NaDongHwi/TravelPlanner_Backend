@@ -103,6 +103,13 @@ class LongTripTest {
         // 홋카이도를 골랐으면 홋카이도 안에서만
         List<String> hokkaido = JapanCities.expandForTour(List.of("삿포로"), 20, "삿포로", "삿포로");
         assertTrue(hokkaido.stream().allMatch(c -> JapanCities.find(c).island == 'H'), hokkaido.toString());
+        // 장소 DB 에 장소가 넉넉한 도시를 먼저: 시즈오카에서 9일이면 3곳 → 가까운 후지노미야(18곳)보다 누마즈(78곳)·하마마쓰(81곳)
+        java.util.Map<String, Long> counts = java.util.Map.of("시즈오카", 212L, "누마즈", 78L, "하마마쓰", 81L, "후지노미야", 18L);
+        List<String> rich = JapanCities.expandForTour(List.of("시즈오카"), 9, "시즈오카", "시즈오카", counts);
+        assertTrue(rich.containsAll(List.of("누마즈", "하마마쓰")), rich.toString());
+        assertFalse(rich.contains("후지노미야"), rich.toString());
+        // DB 이름 그대로: 유후인은 "유후시"
+        assertTrue(JapanCities.find("유후시") != null);
         // 짧으면 그대로, 표에 없는 도시만 골랐으면 그대로
         assertEquals(List.of("도쿄"), JapanCities.expandForTour(List.of("도쿄"), 4, "도쿄", "도쿄"));
         assertEquals(List.of("어딘가"), JapanCities.expandForTour(List.of("어딘가"), 30, null, null));

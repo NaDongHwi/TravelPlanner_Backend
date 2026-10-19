@@ -32,7 +32,7 @@ public class LodgingCostService {
     /** 구글에서 찾은 숙소와 라쿠텐 숙소를 같은 곳으로 볼 최대 거리 */
     static final double MATCH_METERS = 100;
     /** 일정 하나에서 라쿠텐에 묻는 숙소 수 (호출 사이를 1초씩 띄우므로 너무 많으면 응답이 늦어진다) */
-    static final int MAX_LOOKUPS = 6;
+    static final int MAX_LOOKUPS = 20;   // 장기 투어는 숙소가 도시마다 바뀐다 (라쿠텐 1초 1회 규칙 때문에 한 곳에 1~2초)
 
     private final RakutenTravelApi rakuten;
 

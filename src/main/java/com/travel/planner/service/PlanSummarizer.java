@@ -44,7 +44,9 @@ public final class PlanSummarizer {
         List<AiRouteResponse.DaySummary> out = new ArrayList<>();
         String previousCity = null;
         for (DayPlan day : days) {
-            out.add(summarizeDay(day.getDayNumber(), day.getDate(), day.getCity(), day.getItems(), previousCity, day.getBadWeather()));
+            AiRouteResponse.DaySummary summary = summarizeDay(day.getDayNumber(), day.getDate(), day.getCity(), day.getItems(), previousCity, day.getBadWeather());
+            summary.setPaceNote(day.getPaceNote());
+            out.add(summary);
             if (day.getCity() != null) previousCity = day.getCity();
         }
         return out;

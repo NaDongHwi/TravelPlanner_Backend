@@ -92,7 +92,9 @@ public class PlanRequest {
     @Schema(description = "숙소 역제안 받기 여부 (true: 추천해줘, false: 숙소 없이 동선 짜줘)", example = "true")
     private boolean suggestHotel;
 
-    @Schema(description = "근교 추천 제외 여부 (true: 선택한 도시 내부만 탐색, false: 일정 여유 시 근교 자동 확장)", example = "false")
+    @Schema(description = "근교 추천 제외 여부 (true: 선택한 도시 내부만 탐색, false: 일정 여유 시 근교 자동 확장). "
+            + "장기(15일~) 여행에서는 방식도 정한다: true = 살아보기(한 도시에 머물며 느슨하게, 5일마다 여유일), "
+            + "false = 투어(일수에 맞게 근처 도시를 자동으로 더하고, 7일마다 가벼운 날)", example = "false")
     private boolean excludeSuburbs;
 
     // 하루에 추천받을 식사(식당) 횟수. 맛집 테마를 골랐으면 1~5, 아니면 1~3. 보내지 않으면 2(점심·저녁).

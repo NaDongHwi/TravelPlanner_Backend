@@ -11,6 +11,9 @@ import com.travel.planner.repository.UserRepository;
 import com.travel.planner.util.PlaceNames;
 import com.travel.planner.util.AirportDirectory;
 import com.travel.planner.util.DistanceUtil;
+import com.travel.planner.util.JapanCities;
+import com.travel.planner.util.SeasonNotes;
+import com.travel.planner.util.TripProfile;
 import com.travel.planner.util.ThemeVocabulary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,7 +39,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PlanGenerationService {
 
-    private static final int MAX_TRIP_DAYS = 30;
+    /** 날짜를 정한 일정의 최대 일수 (안전 한도). 날짜 미정 일정은 UNDATED_MAX_DAYS */
+    static final int MAX_TRIP_DAYS = 365;
+    static final int UNDATED_MAX_DAYS = 30;
 
     private final PlanService planService;
     private final PlanValidationService planValidationService;
@@ -62,15 +67,42 @@ public class PlanGenerationService {
                 .orElseThrow(() -> new IllegalArgumentException("회원을 찾을 수 없습니다."));
 
         int totalDays = planService.totalDays(request);
-        List<String> cities = request.getCities();
-        String mainCity = cities.get(0);
         List<String> warnings = new ArrayList<>();
+        // 장기(15일~) 투어: 일수에 맞게 근처 도시를 더하고 입국 쪽에서 출국 쪽으로 순서를 맞춘다
+        TripProfile.Style style = TripProfile.styleOf(totalDays, request.isExcludeSuburbs());
+        List<String> addedCities = new ArrayList<>();
+        if (style == TripProfile.Style.TOUR) {
+            List<String> before = new ArrayList<>(request.getCities());
+            List<String> expanded = JapanCities.expandForTour(before, totalDays, request.getInCity(), request.getOutCity());
+            for (String c : expanded) if (!before.contains(c)) addedCities.add(c);
+            if (!addedCities.isEmpty()) request.setCities(expanded);
+        }
+        List<String> cities = request.getCities();
+        final String mainCity = cities.get(0);
 
         // ------------------------------------------------------------------
         // Step 2. 후보 장소 수집 (DB → 부족하면 구글 긴급 수집)
         // ------------------------------------------------------------------
         List<Place> allPlaces = new ArrayList<>(placeRepository.findByCityIn(cities));
         supplementCandidates(request, totalDays, allPlaces);
+        if (!addedCities.isEmpty()) {
+            // 더한 도시 가운데 장소를 하나도 구하지 못한 곳은 뺀다 (그 도시에 배정된 날이 통째로 비지 않도록)
+            List<String> empty = new ArrayList<>();
+            for (String c : addedCities) {
+                if (allPlaces.stream().noneMatch(p -> c.equals(p.getCity()) && planService.isVisitCandidate(p))) empty.add(c);
+            }
+            if (!empty.isEmpty()) {
+                addedCities.removeAll(empty);
+                List<String> kept = new ArrayList<>(request.getCities());
+                kept.removeAll(empty);
+                request.setCities(kept);
+                cities = kept;
+            }
+            if (!addedCities.isEmpty()) {
+                warnings.add(totalDays + "일 장기 투어라 근처 도시 " + String.join(", ", addedCities) + "을(를) 더해 "
+                        + String.join(" → ", cities) + " 순서로 짰습니다. 한 도시에 머물고 싶으면 '근교 제외'를 켜 주세요(살아보기).");
+            }
+        }
 
         if (allPlaces.stream().noneMatch(planService::isVisitCandidate)) {
             throw new PlanGenerationException("선택한 도시(" + String.join(", ", cities)
@@ -176,13 +208,18 @@ public class PlanGenerationService {
         passAdvisorService.apply(response);
         LodgingCostService.Result lodging;
         try {
-            lodging = lodgingCost.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            // 숙소 한 곳에 라쿠텐 1~2번(1초 간격). 장기 투어는 숙소가 많으므로 그만큼 더 기다린다 (최대 2분)
+            lodging = lodgingCost.get(Math.min(120, 30 + 3L * accommodationEntities.size()), java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
             System.out.println("[숙박비] 시간 안에 숙박비를 다 찾지 못했습니다: " + e.getClass().getSimpleName());
             lodging = new LodgingCostService.Result();
         }
         LodgingCostService.apply(response, lodging, adults);
         response.setTripDays(totalDays);
+        response.setTripLength(TripProfile.lengthOf(totalDays).label);
+        response.setTripStyle(style == null ? null : style.label);
+        response.setAddedCities(addedCities);
+        addSeasonNotes(request, totalDays, dayCities, centers, response, warnings);
         response.setDateUndecided(PlanService.isUndated(request));
         if (PlanService.isUndated(request)) warnings.add(0, UNDATED_NOTICE);
         response.setWarnings(warnings);
@@ -245,8 +282,11 @@ public class PlanGenerationService {
         if (request.getAdults() != null && (request.getAdults() < 1 || request.getAdults() > 10)) {
             throw new IllegalArgumentException("어른 인원(adults)은 1~10명 사이로 입력해주세요.");
         }
-        if (planService.totalDays(request) > MAX_TRIP_DAYS) {
-            throw new IllegalArgumentException("여행 기간은 최대 " + MAX_TRIP_DAYS + "일(" + (MAX_TRIP_DAYS - 1) + "박 " + MAX_TRIP_DAYS + "일)까지 지원합니다.");
+        int maxDays = undated ? UNDATED_MAX_DAYS : MAX_TRIP_DAYS;
+        if (planService.totalDays(request) > maxDays) {
+            throw new IllegalArgumentException(undated
+                    ? "날짜를 정하지 않은 일정은 최대 " + maxDays + "일(" + (maxDays - 1) + "박 " + maxDays + "일)까지 지원합니다. 더 긴 여행은 날짜를 정해 주세요."
+                    : "여행 기간은 최대 " + maxDays + "일까지 지원합니다.");
         }
 
         List<String> cities = request.getCities() == null ? new ArrayList<>()
@@ -353,14 +393,25 @@ public class PlanGenerationService {
 
         // 식당: 관광지처럼 테마로만 세면 "맛집" 테마를 고르지 않은 여행에서 식당이 모자라 식사가 "자유 식사"가 된다.
         // 도시마다 (그 도시에서 보낼 일수 × 하루 식사 수 × 2)곳은 있도록 모자란 도시에서 식당을 더 찾는다.
+        // 장기(15일~): 도시마다 그 도시에서 보낼 일수만큼 볼거리가 있는지 본다 (투어로 더한 도시는 DB 에 장소가 없을 수 있다)
+        if (TripProfile.lengthOf(totalDays) == TripProfile.Length.LONG) {
+            int daysInCity = (int) Math.ceil(totalDays / (double) cities.size());
+            for (String city : cities) {
+                long sights = allPlaces.stream().filter(planService::isVisitCandidate).filter(p -> city.equals(p.getCity()))
+                        .filter(p -> !com.travel.planner.util.PlaceKind.of(p).isFood()).count();
+                if (sights < Math.min(40, daysInCity * 4L)) emergencyCollect(city, "관광 명소", null, allPlaces);
+            }
+        }
+
         int restaurantCalls = 0;
+        int restaurantCallCap = Math.max(MAX_RESTAURANT_CALLS, cities.size());
         for (String city : cities) {
-            if (restaurantCalls >= MAX_RESTAURANT_CALLS) break;
+            if (restaurantCalls >= restaurantCallCap) break;
             int need = restaurantTarget(totalDays, cities.size(), PlanService.mealCount(request));
             if (restaurantCount(allPlaces, city) >= need) continue;
             emergencyCollect(city, "현지 인기 식당", null, allPlaces);
             restaurantCalls++;
-            if (restaurantCount(allPlaces, city) < need && restaurantCalls < MAX_RESTAURANT_CALLS) {
+            if (restaurantCount(allPlaces, city) < need && restaurantCalls < restaurantCallCap) {
                 emergencyCollect(city, "점심 저녁 맛집", null, allPlaces);
                 restaurantCalls++;
             }
@@ -401,6 +452,38 @@ public class PlanGenerationService {
             }
         }
         return best;
+    }
+
+    /** 날씨 예보를 일정에 반영하는 범위(오늘부터 일수). WeatherService 의 One Call 범위와 같다 */
+    static final int FORECAST_DAYS = 16;
+
+    /**
+     * 예보 범위 밖 날짜: 날씨를 반영하지 않았다고 알리고, 장마·태풍·폭설 시기(평년 기준)를 일자별 개요와 안내에 붙인다.
+     * 일정 점수에는 쓰지 않는다 (몇 주 뒤의 하루 날씨는 맞히기 어렵다).
+     */
+    static void addSeasonNotes(PlanRequest request, int totalDays, List<String> dayCities, Map<String, double[]> centers,
+                               AiRouteResponse response, List<String> warnings) {
+        if (PlanService.isUndated(request) || request.getStartDate() == null) return;
+        LocalDate horizon = LocalDate.now(java.time.ZoneId.of("Asia/Tokyo")).plusDays(FORECAST_DAYS);
+        LocalDate end = request.getStartDate().plusDays(totalDays - 1L);
+        if (!end.isAfter(horizon)) return;
+        LocalDate firstOutside = request.getStartDate().isAfter(horizon) ? request.getStartDate() : horizon.plusDays(1);
+        warnings.add(firstOutside.getMonthValue() + "월 " + firstOutside.getDayOfMonth() + "일부터는 날씨 예보 범위(오늘부터 " + FORECAST_DAYS
+                + "일) 밖이라 날씨를 반영하지 않았습니다. 출발이 가까워지면 다시 만들면 예보가 반영됩니다.");
+        java.util.Set<String> tags = new java.util.LinkedHashSet<>();
+        if (response.getDays() == null) return;
+        for (AiRouteResponse.DaySummary day : response.getDays()) {
+            LocalDate date = request.getStartDate().plusDays(day.getDay() - 1L);
+            if (!date.isAfter(horizon)) continue;
+            String city = day.getCity() != null ? day.getCity()
+                    : (dayCities != null && day.getDay() - 1 < dayCities.size() ? dayCities.get(day.getDay() - 1) : null);
+            double[] center = city == null ? null : centers.get(city);
+            if (center == null) continue;
+            List<String> here = SeasonNotes.of(date, center[0], center[1]);
+            day.setSeasonNote(SeasonNotes.dayNote(here));
+            tags.addAll(here);
+        }
+        for (String tag : tags) warnings.add(SeasonNotes.tripWarning(tag));
     }
 
     /** 식당이 모자란 도시에서 식당을 더 찾는 검색 횟수 상한 (일정 하나에) */

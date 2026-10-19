@@ -21,6 +21,10 @@ public class AiRouteResponse {
 
     // 여행 일수 (3박 4일 = 4)
     private Integer tripDays;
+
+    private String tripLength;          // "단기"(1~7일) / "중기"(8~14일) / "장기"(15일~)
+    private String tripStyle;           // 장기일 때 "살아보기"(근교 제외 켬) / "투어"(근교 제외 끔). 그 외 null
+    private List<String> addedCities;   // 장기 투어에서 자동으로 더한 도시 (없으면 빈 목록)
     // 날짜를 정하지 않고 일수만 정한 일정인가. true 면 days[].date·dayOfWeek 가 비어 있고, 날씨·요일별 휴무·계절 일몰이 반영되지 않았다
     private boolean dateUndecided;
     // 일자별 개요 (1일차부터 순서대로, 일수만큼)
@@ -110,5 +114,7 @@ public class AiRouteResponse {
         private String endTime;            // 도착 시각 "HH:mm"
         private Boolean badWeather;        // 비·눈 예보 (true/false, 예보 범위 밖이면 null)
         private Integer transitFareYen;    // 그 날 교통비 추정 합계 (성인 1인, 엔). 알 수 없으면 null
+        private String paceNote;           // 장기 여행의 여유일·가벼운 날 안내. 보통날은 null
+        private String seasonNote;         // 예보 범위 밖 날짜의 계절 주의 (예: "장마철 (평년 기준, 예보 아님)"). 없으면 null
     }
 }

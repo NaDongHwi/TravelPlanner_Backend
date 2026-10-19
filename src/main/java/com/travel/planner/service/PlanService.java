@@ -170,6 +170,8 @@ public class PlanService {
         public List<String> dayCities;
         /** 예보가 있는 날짜만. true = 비/눈 */
         public Map<LocalDate, Boolean> badWeatherByDate = new HashMap<>();
+        /** 장기 여행 여유일 설정 (마이페이지). null 이면 기본값 */
+        public com.travel.planner.util.TripProfile.PaceSettings pace;
     }
 
     public static class TripPlan {
@@ -605,6 +607,10 @@ public class PlanService {
         boolean byCar;                       // 렌터카 여행
         /** 장기 여행의 방식 (살아보기/투어). 단기·중기는 null */
         com.travel.planner.util.TripProfile.Style style;
+        com.travel.planner.util.TripProfile.PaceSettings pace = com.travel.planner.util.TripProfile.PaceSettings.DEFAULT;
+        /** 중기(10일 이상)의 가벼운 날로 정한 일차 (0 이면 없음). 그날에 고정 일정이 있으면 다음 날로 미룬다 */
+        int mediumLightDay;
+        boolean mediumLightPlaced;
         /** 장소별 마지막으로 간 일차 (살아보기에서 단골 식당·카페를 다시 가는 데 쓴다) */
         final Map<String, Integer> lastVisitDay = new HashMap<>();
         boolean foodLover;
@@ -689,6 +695,8 @@ public class PlanService {
         String transport = req.getTransportation() == null ? "" : req.getTransportation();
         st.byCar = transport.contains("렌트") || transport.contains("자동차") || transport.contains("차량");
         st.style = com.travel.planner.util.TripProfile.styleOf(totalDays(req), req.isExcludeSuburbs());
+        st.pace = in.pace != null ? in.pace : com.travel.planner.util.TripProfile.PaceSettings.DEFAULT;
+        st.mediumLightDay = com.travel.planner.util.TripProfile.mediumLightDay(totalDays(req));
         st.foodLover = st.themes.contains("맛집");
         st.cafeLover = st.themes.contains("카페");
         st.shoppingLover = st.themes.contains("쇼핑");
@@ -976,7 +984,7 @@ public class PlanService {
             applyPace(ctx, st, totalDays);
             DayPlan dayPlan = planDay(ctx, st, plan.warnings);
             dayPlan.badWeather = in.badWeatherByDate.get(ctx.date);   // 일자별 개요에 예보 여부를 적기 위해 남긴다
-            dayPlan.paceNote = paceNote(ctx.kind);
+            dayPlan.paceNote = paceNote(ctx.kind, ctx.sightMinutes);
             plan.days.add(dayPlan);
         }
 
@@ -1031,7 +1039,15 @@ public class PlanService {
      * 첫날 착륙 시각과 마지막 날 출국 마감은 그대로 지킨다.
      */
     void applyPace(DayContext ctx, TripState st, int totalDays) {
-        ctx.kind = com.travel.planner.util.TripProfile.dayKind(st.style, ctx.dayNumber, totalDays, !ctx.blocks.isEmpty());
+        ctx.kind = com.travel.planner.util.TripProfile.dayKind(st.style, ctx.dayNumber, totalDays, !ctx.blocks.isEmpty(), st.pace);
+        int lightSight = st.pace.tourLightSightMin;
+        if (st.style == null && st.mediumLightDay > 0 && !st.mediumLightPlaced && ctx.dayNumber >= st.mediumLightDay
+                && ctx.dayNumber < totalDays && ctx.blocks.isEmpty()) {
+            // 중기(10일 이상): 3분의 2 지점에 하루. 그날 고정 일정이 있으면 다음 날로 미룬다 (마지막 날은 넣지 않는다)
+            ctx.kind = com.travel.planner.util.TripProfile.DayKind.TOUR_LIGHT;
+            lightSight = com.travel.planner.util.TripProfile.PaceSettings.DEFAULT_TOUR_LIGHT_SIGHT_MIN;
+            st.mediumLightPlaced = true;
+        }
         boolean gentle = st.themes.contains("힐링") || st.easyPace;
         int cafes = st.noCafe ? 0 : (st.cafeLover ? 3 : 2);
         switch (ctx.kind) {
@@ -1043,13 +1059,13 @@ public class PlanService {
                 break;
             case LIVE_REST:
                 window(ctx, LIVE_REST_START_MIN, LIVE_REST_END_MIN);
-                ctx.sightMinutes = 0;
+                ctx.sightMinutes = st.pace.liveRestSightMin;
                 ctx.maxCafes = cafes;
                 ctx.relaxed = true;
                 break;
             case TOUR_LIGHT:
                 window(ctx, TOUR_LIGHT_START_MIN, TOUR_LIGHT_END_MIN);
-                ctx.sightMinutes = TOUR_LIGHT_SIGHT_MIN;
+                ctx.sightMinutes = lightSight;
                 ctx.relaxed = true;
                 break;
             default:
@@ -1065,11 +1081,29 @@ public class PlanService {
     }
 
     static String paceNote(com.travel.planner.util.TripProfile.DayKind kind) {
+        return paceNote(kind, kind == com.travel.planner.util.TripProfile.DayKind.TOUR_LIGHT ? TOUR_LIGHT_SIGHT_MIN : 0);
+    }
+
+    /** @param sightMinutes 그날 관광 시간 상한(분) */
+    static String paceNote(com.travel.planner.util.TripProfile.DayKind kind, Integer sightMinutes) {
+        int m = sightMinutes == null ? 0 : sightMinutes;
         switch (kind) {
-            case LIVE_REST: return "여유일: 관광지 없이 동네 산책·카페·식사로 쉬어 가는 날";
-            case TOUR_LIGHT: return "가벼운 날: 긴 여행 중 쉬어 가도록 관광지를 줄이고 일찍 마치는 날";
+            case LIVE_REST:
+                return m <= 0 ? "여유일: 관광지 없이 동네 산책·카페·식사로 쉬어 가는 날"
+                        : "여유일: 관광은 " + hoursText(m) + " 안으로 줄이고 동네 산책·카페·식사로 쉬어 가는 날";
+            case TOUR_LIGHT:
+                return m <= 0 ? "가벼운 날: 긴 여행 중 쉬어 가도록 관광지 없이 일찍 마치는 날"
+                        : "가벼운 날: 긴 여행 중 쉬어 가도록 관광을 " + hoursText(m) + " 안으로 줄이고 일찍 마치는 날";
             default: return null;
         }
+    }
+
+    /** 180 → "3시간", 150 → "2시간 30분", 30 → "30분" */
+    static String hoursText(int minutes) {
+        int h = minutes / 60;
+        int mm = minutes % 60;
+        if (h == 0) return mm + "분";
+        return mm == 0 ? h + "시간" : h + "시간 " + mm + "분";
     }
 
     /** 살아보기에서 단골처럼 다시 가도 되는 간격(일): 식당·카페는 일주일이 지나면 다시 넣을 수 있다 */

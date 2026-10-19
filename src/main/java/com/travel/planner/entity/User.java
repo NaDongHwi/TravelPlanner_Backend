@@ -41,4 +41,22 @@ public class User {
     // 소셜 서비스의 고유 식별자 ID
     @Column
     private String providerId;
+
+    // ---- 마이페이지 "장기 일정" 설정 (비어 있으면 기본값: 살아보기 5일마다 관광 없이, 투어 7일마다 관광 3시간) ----
+
+    /** 살아보기 여유일 간격(일). 0 이면 여유일 없음 */
+    @Column
+    private Integer liveRestEveryDays;
+
+    /** 살아보기 여유일의 관광 시간 상한(분) */
+    @Column
+    private Integer liveRestSightMinutes;
+
+    /** 투어 가벼운 날 간격(일). 0 이면 없음 */
+    @Column
+    private Integer tourLightEveryDays;
+
+    /** 투어 가벼운 날의 관광 시간 상한(분) */
+    @Column
+    private Integer tourLightSightMinutes;
 }

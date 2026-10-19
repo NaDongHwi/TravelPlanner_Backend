@@ -161,6 +161,7 @@ public class PlanGenerationService {
         input.lodgingByNight = lodgingByNight;
         input.dayCities = dayCities;
         input.badWeatherByDate = badWeatherByDate;
+        input.pace = UserService.paceOf(user);   // 마이페이지 "장기 일정" 설정 (15일 이상에만 쓰인다)
 
         PlanService.TripPlan tripPlan = planService.planTrip(input);
         // 식사 시간에 갈 식당이 없어 "자유 식사"가 된 자리가 있으면, 그 주변 식당을 찾아 넣고 한 번 더 짠다

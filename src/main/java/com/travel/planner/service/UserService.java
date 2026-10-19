@@ -79,4 +79,71 @@ public class UserService {
         user.setFcmToken(fcmToken == null || fcmToken.isBlank() ? null : fcmToken.trim());
         userRepository.save(user);
     }
+
+    // ---------------------------------------------------------------- 마이페이지 "장기 일정" 설정
+
+    /** 저장된 설정 (빈 칸은 기본값) */
+    public static com.travel.planner.util.TripProfile.PaceSettings paceOf(User user) {
+        if (user == null) return com.travel.planner.util.TripProfile.PaceSettings.DEFAULT;
+        return new com.travel.planner.util.TripProfile.PaceSettings(user.getLiveRestEveryDays(), user.getLiveRestSightMinutes(),
+                user.getTourLightEveryDays(), user.getTourLightSightMinutes());
+    }
+
+    private static boolean usingDefaults(User user) {
+        return user.getLiveRestEveryDays() == null && user.getLiveRestSightMinutes() == null
+                && user.getTourLightEveryDays() == null && user.getTourLightSightMinutes() == null;
+    }
+
+    public com.travel.planner.dto.LongTripSettingsDto getLongTripSettings(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        return com.travel.planner.dto.LongTripSettingsDto.of(paceOf(user), usingDefaults(user));
+    }
+
+    /** 보낸 칸만 바꾼다. 범위를 벗어나면 400 */
+    @org.springframework.transaction.annotation.Transactional
+    public com.travel.planner.dto.LongTripSettingsDto updateLongTripSettings(String email, com.travel.planner.dto.LongTripSettingsDto body) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        if (body != null) {
+            if (body.getLiveRestEveryDays() != null) user.setLiveRestEveryDays(checkEvery("살아보기 여유일 간격", body.getLiveRestEveryDays()));
+            if (body.getLiveRestSightHours() != null) user.setLiveRestSightMinutes(checkHours("살아보기 여유일 관광 시간", body.getLiveRestSightHours()));
+            if (body.getTourLightEveryDays() != null) user.setTourLightEveryDays(checkEvery("투어 가벼운 날 간격", body.getTourLightEveryDays()));
+            if (body.getTourLightSightHours() != null) user.setTourLightSightMinutes(checkHours("투어 가벼운 날 관광 시간", body.getTourLightSightHours()));
+        }
+        userRepository.save(user);
+        return com.travel.planner.dto.LongTripSettingsDto.of(paceOf(user), usingDefaults(user));
+    }
+
+    /** 기본값으로 되돌린다 */
+    @org.springframework.transaction.annotation.Transactional
+    public com.travel.planner.dto.LongTripSettingsDto resetLongTripSettings(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        user.setLiveRestEveryDays(null);
+        user.setLiveRestSightMinutes(null);
+        user.setTourLightEveryDays(null);
+        user.setTourLightSightMinutes(null);
+        userRepository.save(user);
+        return com.travel.planner.dto.LongTripSettingsDto.of(paceOf(user), true);
+    }
+
+    static int checkEvery(String label, int days) {
+        if (!com.travel.planner.util.TripProfile.PaceSettings.validEvery(days)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, label + "은 0(없음) 또는 2~30일이어야 합니다: " + days);
+        }
+        return days;
+    }
+
+    /** 시간 → 분. 0.5시간 단위로 받는다 */
+    static int checkHours(String label, double hours) {
+        if (Double.isNaN(hours) || Math.abs(hours * 2 - Math.rint(hours * 2)) > 1e-9) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, label + "은 0.5시간 단위로 적어 주세요: " + hours);
+        }
+        int minutes = (int) Math.round(hours * 60);
+        if (!com.travel.planner.util.TripProfile.PaceSettings.validSightMinutes(minutes)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, label + "은 0~10시간이어야 합니다: " + hours);
+        }
+        return minutes;
+    }
 }

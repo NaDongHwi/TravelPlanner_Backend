@@ -565,4 +565,50 @@ public class GoogleMapsService {
             return null;
         }
     }
+
+    /**
+     * 그 지점 반경 radius(m) 안의 식당 (가까운 순 최대 20곳). 일정에 "자유 식사"가 생긴 자리 주변을 채우는 데 쓴다.
+     * 도시 이름으로 거르지 않는다(산간·해안처럼 도시 경계 근처의 자리도 채우기 위해). 최소 품질(평점 3.3·리뷰 10건)은 지킨다.
+     */
+    public List<Place> searchRestaurantsNear(double lat, double lng, double radiusMeters, String city) {
+        List<Place> out = new ArrayList<>();
+        try {
+            Map<String, Object> center = Map.of("latitude", lat, "longitude", lng);
+            Map<String, Object> body = new HashMap<>();
+            body.put("includedTypes", List.of("restaurant"));
+            body.put("maxResultCount", 20);
+            body.put("rankPreference", "DISTANCE");
+            body.put("languageCode", "ko");
+            body.put("regionCode", "JP");
+            body.put("locationRestriction", Map.of("circle", Map.of("center", center, "radius", radiusMeters)));
+            String fieldMask = COLLECT_FIELD_MASK.replace(",nextPageToken", "");
+            String response = restTemplate.postForObject("https://places.googleapis.com/v1/places:searchNearby",
+                    new HttpEntity<>(body, placesHeaders(fieldMask)), String.class);
+            for (JsonNode node : objectMapper.readTree(response).path("places")) {
+                if (node.path("location").isMissingNode()) continue;
+                double rating = node.path("rating").asDouble(0.0);
+                int reviews = node.path("userRatingCount").asInt(0);
+                if (rating < 3.3 || reviews < 10) continue;
+                String category = determineCategory(node.path("primaryType").asText(""), node.path("types"));
+                if (!"식음".equals(category)) continue;
+                Place place = new Place();
+                place.setPlaceId(node.path("id").asText());
+                place.setName(node.path("displayName").path("text").asText());
+                place.setCity(city);
+                place.setLatitude(node.path("location").path("latitude").asDouble());
+                place.setLongitude(node.path("location").path("longitude").asDouble());
+                place.setCategory(category);
+                place.setAddress(node.path("formattedAddress").asText(null));
+                place.setPhone(node.path("nationalPhoneNumber").asText(null));
+                place.setRating(rating);
+                place.setUserRatingCount(reviews);
+                applyOpeningHours(node.path("regularOpeningHours"), place);
+                place.setLastUpdated(LocalDateTime.now());
+                out.add(place);
+            }
+        } catch (Exception e) {
+            System.out.println("[식당] 주변 식당 검색 실패: " + e.getMessage());
+        }
+        return out;
+    }
 }

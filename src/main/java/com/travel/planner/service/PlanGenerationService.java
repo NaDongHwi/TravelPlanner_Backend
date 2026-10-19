@@ -131,6 +131,8 @@ public class PlanGenerationService {
         input.badWeatherByDate = badWeatherByDate;
 
         PlanService.TripPlan tripPlan = planService.planTrip(input);
+        // 식사 시간에 갈 식당이 없어 "자유 식사"가 된 자리가 있으면, 그 주변 식당을 찾아 넣고 한 번 더 짠다
+        tripPlan = fillMealGaps(input, tripPlan, dayCities, mainCity);
         warnings.addAll(tripPlan.getWarnings());
 
         boolean anyVisit = tripPlan.getDays().stream().flatMap(d -> d.getItems().stream())
@@ -349,6 +351,21 @@ public class PlanGenerationService {
             calls++;
         }
 
+        // 식당: 관광지처럼 테마로만 세면 "맛집" 테마를 고르지 않은 여행에서 식당이 모자라 식사가 "자유 식사"가 된다.
+        // 도시마다 (그 도시에서 보낼 일수 × 하루 식사 수 × 2)곳은 있도록 모자란 도시에서 식당을 더 찾는다.
+        int restaurantCalls = 0;
+        for (String city : cities) {
+            if (restaurantCalls >= MAX_RESTAURANT_CALLS) break;
+            int need = restaurantTarget(totalDays, cities.size(), PlanService.mealCount(request));
+            if (restaurantCount(allPlaces, city) >= need) continue;
+            emergencyCollect(city, "현지 인기 식당", null, allPlaces);
+            restaurantCalls++;
+            if (restaurantCount(allPlaces, city) < need && restaurantCalls < MAX_RESTAURANT_CALLS) {
+                emergencyCollect(city, "점심 저녁 맛집", null, allPlaces);
+                restaurantCalls++;
+            }
+        }
+
         int targetVolume = (int) (planService.calculateTotalPhysicalMinutes(request, totalDays) * 1.5);
         // 도시 1개당 평균 2일이 필요하다고 보고, 그보다 3일 이상 남으면 근교까지 넓힌다.
         boolean expandToSuburbs = totalDays - cities.size() * 2 >= 3 && !request.isExcludeSuburbs();
@@ -384,6 +401,94 @@ public class PlanGenerationService {
             }
         }
         return best;
+    }
+
+    /** 식당이 모자란 도시에서 식당을 더 찾는 검색 횟수 상한 (일정 하나에) */
+    static final int MAX_RESTAURANT_CALLS = 4;
+    /** "자유 식사" 자리 주변을 찾는 횟수 상한과 반경(m) */
+    static final int MAX_MEAL_GAP_SEARCHES = 4;
+    static final double MEAL_GAP_RADIUS_M = 1500;
+
+    /** 도시 하나에 있어야 할 식당 수: 그 도시에서 보낼 일수 × 하루 식사 수 × 2 (최소 8) */
+    static int restaurantTarget(int totalDays, int cityCount, int mealsPerDay) {
+        int daysInCity = (int) Math.ceil(totalDays / (double) Math.max(1, cityCount));
+        return Math.max(8, daysInCity * Math.max(1, mealsPerDay) * 2);
+    }
+
+    long restaurantCount(List<Place> places, String city) {
+        return places.stream()
+                .filter(planService::isVisitCandidate)
+                .filter(p -> city.equals(p.getCity()))
+                .filter(p -> com.travel.planner.util.PlaceKind.of(p) == com.travel.planner.util.PlaceKind.RESTAURANT)
+                .count();
+    }
+
+    /**
+     * "자유 식사"(갈 식당이 없어 넣은 자리)마다 그 직전에 있던 곳(없으면 직후)의 좌표와 그날 도시.
+     * 1km 안에 겹치는 자리는 하나로 친다. 최대 MAX_MEAL_GAP_SEARCHES 곳.
+     */
+    static List<Object[]> mealGapAnchors(List<PlanService.DayPlan> days, List<String> dayCities, String mainCity) {
+        List<Object[]> anchors = new ArrayList<>();
+        for (PlanService.DayPlan day : days) {
+            List<PlanService.SimulatedItinerary> items = day.getItems();
+            for (int i = 0; i < items.size(); i++) {
+                PlanService.SimulatedItinerary item = items.get(i);
+                if (item.getType() != PlanService.SimulatedItinerary.Type.MEAL || item.getPlace() != null) continue;
+                double[] at = located(items, i, -1);
+                if (at == null) at = located(items, i, +1);
+                if (at == null) continue;
+                boolean dup = false;
+                for (Object[] a : anchors) {
+                    if (DistanceUtil.calculateDistance(at[0], at[1], (double) a[0], (double) a[1]) < 1.0) dup = true;
+                }
+                if (dup) continue;
+                String city = dayCities != null && day.getDayNumber() - 1 < dayCities.size() && dayCities.get(day.getDayNumber() - 1) != null
+                        ? dayCities.get(day.getDayNumber() - 1) : (day.getCity() != null ? day.getCity() : mainCity);
+                anchors.add(new Object[]{at[0], at[1], city});
+                if (anchors.size() >= MAX_MEAL_GAP_SEARCHES) return anchors;
+            }
+        }
+        return anchors;
+    }
+
+    private static double[] located(List<PlanService.SimulatedItinerary> items, int from, int step) {
+        for (int j = from + step; j >= 0 && j < items.size(); j += step) {
+            PlanService.SimulatedItinerary it = items.get(j);
+            if (it.getPlace() == null || it.getLatitude() == null || it.getLongitude() == null) continue;
+            if (it.getLatitude() == 0.0 && it.getLongitude() == 0.0) continue;
+            return new double[]{it.getLatitude(), it.getLongitude()};
+        }
+        return null;
+    }
+
+    static int mealGapCount(PlanService.TripPlan plan) {
+        return (int) plan.getDays().stream().flatMap(d -> d.getItems().stream())
+                .filter(i -> i.getType() == PlanService.SimulatedItinerary.Type.MEAL && i.getPlace() == null).count();
+    }
+
+    /** 자유 식사 자리 주변 식당을 구글에서 찾아 후보에 넣고, 새로 넣은 곳이 있으면 한 번 더 짠다. 더 나아지지 않으면 처음 일정을 쓴다. */
+    PlanService.TripPlan fillMealGaps(PlanService.TripInput input, PlanService.TripPlan plan, List<String> dayCities, String mainCity) {
+        int gaps = mealGapCount(plan);
+        if (gaps == 0) return plan;
+        Set<String> known = input.candidates.stream().map(Place::getPlaceId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        int added = 0;
+        for (Object[] anchor : mealGapAnchors(plan.getDays(), dayCities, mainCity)) {
+            try {
+                for (Place p : googleMapsService.searchRestaurantsNear((double) anchor[0], (double) anchor[1], MEAL_GAP_RADIUS_M, (String) anchor[2])) {
+                    if (p.getPlaceId() == null || !known.add(p.getPlaceId())) continue;
+                    Place saved = planPersistenceService.upsertPlace(p);
+                    input.candidates.add(saved);
+                    added++;
+                }
+            } catch (Exception e) {
+                System.out.println("[식당] 자유 식사 자리 주변 식당을 넣지 못했습니다: " + e.getMessage());
+            }
+        }
+        if (added == 0) return plan;
+        PlanService.TripPlan again = planService.planTrip(input);
+        int after = mealGapCount(again);
+        System.out.println("[식당] 자유 식사 " + gaps + "곳 주변에서 식당 " + added + "곳을 찾아 다시 짰습니다: 자유 식사 " + gaps + " → " + after);
+        return after < gaps ? again : plan;
     }
 
     private void emergencyCollect(String city, String query, String provisionalTheme, List<Place> allPlaces) {

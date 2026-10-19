@@ -291,8 +291,11 @@ public class PlanService {
         boolean badWeather;
         String transportation;
         final List<FixedBlock> blocks = new ArrayList<>();
-        /** 그날 넣을 수 있는 관광지(식당·카페·주점 제외) 수. null = 제한 없음 (장기 살아보기·투어의 가벼운 날) */
-        Integer maxSights;
+        /**
+         * 그날 관광지(식당·카페·주점 제외)에 쓸 수 있는 체류 시간 합(분). null = 제한 없음.
+         * 그날 첫 관광지는 이보다 길어도 넣는다(테마파크·등산처럼 그것 하나로 하루를 쓰는 곳). 0 이면 관광지를 넣지 않는다.
+         */
+        Integer sightMinutes;
         /** 그날 카페 수 상한. null = 기본(카페 테마 2곳, 아니면 1곳) */
         Integer maxCafes;
         /** 일부러 느슨하게 짠 날: 빈 시간을 "장소 부족" 경고로 알리지 않는다 */
@@ -996,6 +999,22 @@ public class PlanService {
     // 장기 여행의 하루 결 (살아보기·투어)
     // =====================================================================================
 
+    /** 살아보기 보통날의 하루 관광 시간 예산(분). 힐링·아이·어르신 동행이면 GENTLE */
+    static final int LIVE_DAY_SIGHT_MIN = 240;
+    static final int LIVE_DAY_SIGHT_MIN_GENTLE = 180;
+    /** 투어 가벼운 날의 하루 관광 시간 예산(분) */
+    static final int TOUR_LIGHT_SIGHT_MIN = 180;
+
+    /**
+     * 관광지를 하나 더 넣어도 예산 안인가. 예산이 0 이면 넣지 않는다.
+     * 그날 첫 관광지는 예산보다 길어도 넣는다(그것 하나로 하루를 쓰는 곳). 이미 간 곳이 있으면 합이 예산을 넘지 않아야 한다.
+     */
+    static boolean fitsSightBudget(int budget, int sightsSoFar, int minutesSoFar, int dwell) {
+        if (budget <= 0) return false;
+        if (sightsSoFar == 0) return true;
+        return minutesSoFar + dwell <= budget;
+    }
+
     static final int LIVE_DAY_START_MIN = 10 * 60;
     static final int LIVE_DAY_END_MIN = 20 * 60 + 30;
     static final int LIVE_REST_START_MIN = 11 * 60;
@@ -1005,9 +1024,10 @@ public class PlanService {
 
     /**
      * 장기 여행이면 그날의 시간 창과 관광지·카페 수를 조정한다 ({@link com.travel.planner.util.TripProfile}).
-     *  - 살아보기 보통날: 10:00~20:30, 관광지 3곳(힐링·아이·어르신이면 2곳), 카페 2곳(카페 테마 3곳)
+     *  - 살아보기 보통날: 10:00~20:30, 관광 시간 4시간(힐링·아이·어르신이면 3시간), 카페 2곳(카페 테마 3곳)
      *  - 살아보기 여유일(5일마다): 11:00~19:00, 관광지 없이 식사·카페·동네 산책
-     *  - 투어 가벼운 날(7일마다): 10:30~19:30, 관광지 2곳 (저녁 식사까지)
+     *  - 투어 가벼운 날(7일마다): 10:30~19:30, 관광 시간 3시간 (저녁 식사까지)
+     * 관광 시간은 관광지(식당·카페·주점 제외) 체류 시간의 합이다. 첫 관광지는 예산보다 길어도 넣는다.
      * 첫날 착륙 시각과 마지막 날 출국 마감은 그대로 지킨다.
      */
     void applyPace(DayContext ctx, TripState st, int totalDays) {
@@ -1017,19 +1037,19 @@ public class PlanService {
         switch (ctx.kind) {
             case LIVE_DAY:
                 window(ctx, LIVE_DAY_START_MIN, LIVE_DAY_END_MIN);
-                ctx.maxSights = gentle ? 2 : 3;
+                ctx.sightMinutes = gentle ? LIVE_DAY_SIGHT_MIN_GENTLE : LIVE_DAY_SIGHT_MIN;
                 ctx.maxCafes = cafes;
                 ctx.relaxed = true;
                 break;
             case LIVE_REST:
                 window(ctx, LIVE_REST_START_MIN, LIVE_REST_END_MIN);
-                ctx.maxSights = 0;
+                ctx.sightMinutes = 0;
                 ctx.maxCafes = cafes;
                 ctx.relaxed = true;
                 break;
             case TOUR_LIGHT:
                 window(ctx, TOUR_LIGHT_START_MIN, TOUR_LIGHT_END_MIN);
-                ctx.maxSights = 2;
+                ctx.sightMinutes = TOUR_LIGHT_SIGHT_MIN;
                 ctx.relaxed = true;
                 break;
             default:
@@ -1106,6 +1126,7 @@ public class PlanService {
         final Map<String, Integer> dayThemeCounts = new HashMap<>();
         int visitCount;
         int sights;
+        int sightMinutes;
         int cafes;
         int lastCafeEnd = -1000;
         int lastMealEnd = -1000;
@@ -1597,7 +1618,7 @@ public class PlanService {
      */
     private Eval evaluate(Cand c, DayContext ctx, DayState ds, TripState st, boolean deferred) {
         // ---- 하루 한도 ----
-        if (ctx.maxSights != null && isSight(c.kind) && ds.sights >= ctx.maxSights) return null;
+        if (ctx.sightMinutes != null && isSight(c.kind) && !fitsSightBudget(ctx.sightMinutes, ds.sights, ds.sightMinutes, c.dwell)) return null;
         switch (c.kind) {
             case THEME_PARK:
                 if (ds.themeParkDone) return null;
@@ -1818,7 +1839,10 @@ public class PlanService {
         ds.locLng = c.lng;
         ds.lastKind = c.kind;
         ds.visitCount++;
-        if (isSight(c.kind)) ds.sights++;
+        if (isSight(c.kind)) {
+            ds.sights++;
+            ds.sightMinutes += Math.max(0, e.end - e.start);
+        }
 
         switch (c.kind) {
             case CAFE: ds.cafes++; ds.lastCafeEnd = e.end; break;

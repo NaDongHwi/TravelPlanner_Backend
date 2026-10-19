@@ -55,8 +55,8 @@ class LongTripTest {
             if (day.getDayNumber() % 5 == 0 && day.getDayNumber() != 30) {
                 assertEquals(0, sights, "여유일 " + day.getDayNumber() + "일차");
                 assertTrue(day.getPaceNote().startsWith("여유일"));
-            } else {
-                assertTrue(sights <= 3, day.getDayNumber() + "일차 관광지 " + sights);
+            } else if (sights > 1) {
+                assertTrue(sightMinutes(day) <= PlanService.LIVE_DAY_SIGHT_MIN, day.getDayNumber() + "일차 관광 " + sightMinutes(day) + "분");
             }
             // 살아보기는 20:30 넘어 방문하지 않는다 (숙소 도착 줄 제외)
             day.getItems().stream().filter(i -> i.getType() == Type.VISIT)
@@ -81,7 +81,7 @@ class LongTripTest {
         assertTrue(tourSights > liveSights, "투어 " + tourSights + " > 살아보기 " + liveSights);
         DayPlan light = tour.getDays().get(13);
         assertTrue(light.getPaceNote().startsWith("가벼운 날"));
-        assertTrue(sights(light) <= 2);
+        assertTrue(sights(light) <= 1 || sightMinutes(light) <= PlanService.TOUR_LIGHT_SIGHT_MIN, "가벼운 날 관광 " + sightMinutes(light) + "분");
     }
 
     @Test
@@ -206,6 +206,23 @@ class LongTripTest {
     }
 
     // ---------------------------------------------------------------- 준비
+
+    private static int sightMinutes(DayPlan day) {
+        return day.getItems().stream().filter(i -> i.getType() == Type.VISIT && i.getPlace() != null)
+                .filter(i -> { PlaceKind k = PlaceKind.of(i.getPlace()); return k == PlaceKind.ATTRACTION || k == PlaceKind.SHOPPING || k == PlaceKind.THEME_PARK; })
+                .mapToInt(i -> i.getEndMin() - i.getStartMin()).sum();
+    }
+
+    @Test
+    void sightBudgetIsTimeNotCount() {
+        // 예산 4시간: 20분짜리는 여러 곳, 2시간짜리는 두 곳, 첫 곳은 예산보다 길어도(테마파크) 넣고 그 뒤로는 막는다
+        assertTrue(PlanService.fitsSightBudget(240, 3, 60, 20), "짧은 곳 네 번째도 들어간다");
+        assertTrue(PlanService.fitsSightBudget(240, 1, 120, 120));
+        assertFalse(PlanService.fitsSightBudget(240, 2, 240, 20), "예산을 다 쓰면 끝");
+        assertTrue(PlanService.fitsSightBudget(240, 0, 0, 480), "첫 관광지는 테마파크라도 넣는다");
+        assertFalse(PlanService.fitsSightBudget(240, 1, 480, 20), "테마파크 뒤로는 관광지를 넣지 않는다");
+        assertFalse(PlanService.fitsSightBudget(0, 0, 0, 20), "여유일은 관광지 없음");
+    }
 
     private static long sights(DayPlan day) {
         return day.getItems().stream().filter(i -> i.getType() == Type.VISIT && i.getPlace() != null)

@@ -32,7 +32,9 @@ public class LodgingCostService {
     /** 구글에서 찾은 숙소와 라쿠텐 숙소를 같은 곳으로 볼 최대 거리 */
     static final double MATCH_METERS = 100;
     /** 일정 하나에서 라쿠텐에 묻는 숙소 수 (호출 사이를 1초씩 띄우므로 너무 많으면 응답이 늦어진다) */
-    static final int MAX_LOOKUPS = 20;   // 장기 투어는 숙소가 도시마다 바뀐다 (라쿠텐 1초 1회 규칙 때문에 한 곳에 1~2초)
+    static final int MAX_LOOKUPS = 20;
+    /** 이보다 긴 숙박은 빈방 조회를 첫날 밤만 한다 */
+    static final int LONG_STAY_NIGHTS = 7;   // 장기 투어는 숙소가 도시마다 바뀐다 (라쿠텐 1초 1회 규칙 때문에 한 곳에 1~2초)
 
     private final RakutenTravelApi rakuten;
 
@@ -123,15 +125,19 @@ public class LodgingCostService {
         dto.setUrl(hotel.url);
 
         if (!undated) {
+            // 긴 숙박(LONG_STAY_NIGHTS 박 초과, 예: 한 달 살아보기)은 첫날 밤만 조회한다. 쓰는 값이 첫날 밤 요금이고,
+            // 한 달 전체를 빈방 조건으로 걸면 라쿠텐이 받지 않거나 빈방이 없다고 답할 수 있다.
+            java.time.LocalDate checkOut = nights > LONG_STAY_NIGHTS ? stay.getCheckIn().plusDays(1) : stay.getCheckOut();
             List<RakutenHotels.Hotel> vacant = RakutenHotels.parse(
-                    rakuten.vacantSearch(hotel.hotelNo, stay.getCheckIn(), stay.getCheckOut(), adults, rooms));
+                    rakuten.vacantSearch(hotel.hotelNo, stay.getCheckIn(), checkOut, adults, rooms));
             Integer night = vacant.stream().filter(h -> h.hotelNo == hotel.hotelNo && h.lowestNightTotal != null)
                     .map(h -> h.lowestNightTotal).min(Integer::compare).orElse(null);
             if (night != null) {
                 setTotal(dto, night * nights, nights);
                 dto.setPerNightYen(night);
                 dto.setSource("rakuten");
-                dto.setBasis("그 날짜에 " + adults + "명이 예약할 수 있는 가장 싼 요금" + (nights > 1 ? " (첫날 밤 요금 × " + nights + "박)" : ""));
+                dto.setBasis("그 날짜에 " + adults + "명이 예약할 수 있는 가장 싼 요금" + (nights > 1 ? " (첫날 밤 요금 × " + nights + "박)" : "")
+                        + (nights > LONG_STAY_NIGHTS ? ". 긴 숙박이라 첫날 밤 빈방만 확인했고, 장기 숙박 할인은 반영하지 않았습니다" : ""));
                 return;
             }
             if (hotel.minCharge != null) {

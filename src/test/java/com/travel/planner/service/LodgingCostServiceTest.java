@@ -102,6 +102,16 @@ class LodgingCostServiceTest {
     }
 
     @Test
+    void longStayAsksOnlyForTheFirstNight() {
+        FakeRakuten api = new FakeRakuten();
+        Accommodation month = stay("호텔 아소시아 시즈오카", BASE, BASE.plusDays(30), 34.97165, 138.38905, "P_ASSOCIA");
+        LodgingCostService.Result r = new LodgingCostService(api).estimate(List.of(month), BASE, false, 1);
+        assertEquals(List.of("simple", "vacant 111 2026-10-17~2026-10-18 1명 1실"), api.calls, "한 달 숙박은 첫날 밤만 조회");
+        assertEquals(19000 * 30, r.lodgings.get(0).getTotalYen());
+        assertTrue(r.lodgings.get(0).getBasis().contains("장기 숙박 할인은 반영하지 않았습니다"));
+    }
+
+    @Test
     void userEnteredPriceWinsAndIsNeverLookedUp() {
         FakeRakuten api = new FakeRakuten();
         Accommodation own = stay("직접 예약한 료칸", BASE, BASE.plusDays(2), 34.97165, 138.38905, "P_OWN");

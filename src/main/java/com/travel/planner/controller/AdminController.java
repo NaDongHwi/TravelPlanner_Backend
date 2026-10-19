@@ -1,19 +1,24 @@
 package com.travel.planner.controller;
 
 import com.travel.planner.entity.Place;
+import com.travel.planner.entity.Region;
 import com.travel.planner.repository.PlaceRepository;
 import com.travel.planner.service.AdminAsyncService;
 import com.travel.planner.service.GoogleMapsService;
+import com.travel.planner.service.RegionCollectService;
+import com.travel.planner.util.CollectRegions;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -24,6 +29,7 @@ public class AdminController {
     private final PlaceRepository placeRepository;
     private final GoogleMapsService googleMapsService;
     private final AdminAsyncService adminAsyncService; // 비동기 서비스 주입
+    private final RegionCollectService regionCollectService;
 
     @PostMapping("/enrich-themes")
     @Operation(summary = "오프라인 AI 테마 자동 분류 및 인리치먼트 구동 (백그라운드 자동화)")
@@ -142,27 +148,51 @@ public class AdminController {
         return String.format("[%s] 대량 자동 수집 완료! -> 신규 명소 등록: %d건 / 기존 중복 패스: %d건", city, totalInserted, totalSkipped);
     }
 
-    /** 기존 장소에 비어 있는 필드만 새 응답 값으로 채운다. 바뀐 것이 있으면 true. */
+    /** 기존 장소에 비어 있는 필드만 새 응답 값으로 채운다. 바뀐 것이 있으면 true. (지역 수집과 같은 규칙) */
     private boolean backfill(Place existing, Place fetched) {
-        boolean changed = false;
-        if ((existing.getCategory() == null || existing.getCategory().isBlank()) && fetched.getCategory() != null) {
-            existing.setCategory(fetched.getCategory());   // 분류가 비어 있던 기존 장소는 구글 유형으로 채운다
-            changed = true;
+        return RegionCollectService.backfill(existing, fetched);
+    }
+
+    @PostMapping("/collect-region")
+    @Operation(summary = "지역별 장소 수집 (기본은 미리보기, dryRun=false 로 실제 실행)",
+            description = "region: KANSAI, KANTO, KYUSHU, HOKKAIDO, OKINAWA, CHUBU, CHUGOKU, SHIKOKU, TOHOKU, ALL (쉼표로 여러 개, 한국어 '간사이'도 됩니다). "
+                    + "dryRun=true(기본)면 구글을 부르지 않고 수집할 도시·건너뛸 도시·예상 호출 수·예상 비용만 보여 줍니다. "
+                    + "dryRun=false 면 백그라운드로 수집하고, 장소 검색 호출이 maxCalls(기본 2000번)에 닿으면 멈춥니다. 다시 실행하면 멈춘 도시부터 이어서 합니다. "
+                    + "장소가 이미 넉넉한 도시(큰 도시 80곳, 작은 도시 25곳 이상)와 전에 지역 수집을 끝낸 도시는 건너뜁니다(force=true 면 다시 돕니다).")
+    public ResponseEntity<?> collectRegion(
+            @RequestParam String region,
+            @RequestParam(defaultValue = "true") boolean dryRun,
+            @RequestParam(defaultValue = "" + RegionCollectService.DEFAULT_MAX_CALLS) int maxCalls,
+            @RequestParam(defaultValue = "false") boolean force
+    ) {
+        List<Region> regions;
+        try {
+            regions = CollectRegions.parse(region);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
-        if (existing.getOpeningPeriods() == null && fetched.getOpeningPeriods() != null) {
-            existing.setOpeningPeriods(fetched.getOpeningPeriods());
-            if (fetched.getOpeningHours() != null) existing.setOpeningHours(fetched.getOpeningHours());
-            changed = true;
+        if (maxCalls < 1) return ResponseEntity.badRequest().body("maxCalls 는 1 이상이어야 합니다.");
+        if (dryRun) return ResponseEntity.ok(regionCollectService.preview(regions, maxCalls, force));
+        if (regionCollectService.isRunning()) {
+            return ResponseEntity.badRequest().body("이미 지역 수집이 실행 중입니다. GET /api/v1/admin/collect-region/status 로 진행 상황을 확인하세요.");
         }
-        if (existing.getAddress() == null && fetched.getAddress() != null) { existing.setAddress(fetched.getAddress()); changed = true; }
-        if (existing.getPhone() == null && fetched.getPhone() != null) { existing.setPhone(fetched.getPhone()); changed = true; }
-        if (existing.getRating() == null && fetched.getRating() != null) { existing.setRating(fetched.getRating()); changed = true; }
-        if (existing.getUserRatingCount() == null && fetched.getUserRatingCount() != null) {
-            existing.setUserRatingCount(fetched.getUserRatingCount());
-            changed = true;
-        }
-        if (changed) existing.setLastUpdated(java.time.LocalDateTime.now());
-        return changed;
+        regionCollectService.run(regions, maxCalls, force);
+        return ResponseEntity.ok("지역 수집을 백그라운드에서 시작했습니다 (한도 " + maxCalls + "번). "
+                + "진행 상황은 GET /api/v1/admin/collect-region/status, 멈추려면 POST /api/v1/admin/collect-region/stop 을 쓰세요.");
+    }
+
+    @GetMapping("/collect-region/status")
+    @Operation(summary = "지역별 장소 수집 진행 상황")
+    public Map<String, Object> collectRegionStatus() {
+        return regionCollectService.status();
+    }
+
+    @PostMapping("/collect-region/stop")
+    @Operation(summary = "실행 중인 지역별 장소 수집 중지 (지금 검색이 끝나면 멈춥니다)")
+    public ResponseEntity<String> stopCollectRegion() {
+        if (!regionCollectService.isRunning()) return ResponseEntity.ok("현재 실행 중인 지역 수집이 없습니다.");
+        regionCollectService.stop();
+        return ResponseEntity.ok("지역 수집 중지 명령을 보냈습니다. 지금 하던 검색이 끝나면 멈춥니다. 다시 실행하면 멈춘 도시부터 이어서 합니다.");
     }
 
     @PostMapping("/cleanse-categories")

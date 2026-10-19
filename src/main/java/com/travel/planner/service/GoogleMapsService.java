@@ -301,8 +301,28 @@ public class GoogleMapsService {
      * (이전에는 페이지마다 2초씩 쉬면서 3페이지를 받아 요청 한 번에 수십 초가 걸렸다)
      */
     public List<Place> searchNewPlacesFromGoogle(String city, String formalizedCity, double lat, double lng, double radius, String searchItem, boolean isEmergency) {
-        List<Place> fetchedPlaces = new ArrayList<>();
-        int maxPages = isEmergency ? 1 : 3;
+        return searchForCollection(city, formalizedCity, lat, lng, radius, searchItem, isEmergency ? 1 : 3, isEmergency, null).places;
+    }
+
+    /** 수집 검색 한 번의 결과: 걸러진 장소 + 실제로 부른 장소 검색(Text Search) 횟수 */
+    public static final class CollectBatch {
+        public final List<Place> places = new ArrayList<>();
+        public int calls;
+        /** 받은 쪽이 대부분 이미 DB 에 있어서 다음 쪽을 받지 않았다 */
+        public boolean stoppedEarly;
+    }
+
+    /** 한 쪽에서 품질 기준을 넘은 장소 중 이 비율 이상이 이미 DB 에 있으면 다음 쪽은 받지 않는다 */
+    static final double KNOWN_STOP_RATIO = 0.8;
+
+    /**
+     * 수집 검색. 한 쪽(최대 20곳)마다 호출 1번이다.
+     * @param isKnown null 이 아니면, 한 쪽을 받을 때마다 품질 기준을 넘은 장소가 하나도 없거나 대부분(80% 이상) 이미 DB 에 있으면 다음 쪽을 받지 않는다 (지역 수집의 호출 절약용)
+     */
+    public CollectBatch searchForCollection(String city, String formalizedCity, double lat, double lng, double radius, String searchItem,
+                                            int maxPages, boolean isEmergency, java.util.function.Predicate<String> isKnown) {
+        CollectBatch batch = new CollectBatch();
+        List<Place> fetchedPlaces = batch.places;
 
         try {
             HttpHeaders headers = placesHeaders(COLLECT_FIELD_MASK);
@@ -332,10 +352,16 @@ public class GoogleMapsService {
                 body.put("textQuery", formalizedCity + " " + text);
             }
 
-            String response = restTemplate.postForObject(TEXT_SEARCH_URL, new HttpEntity<>(body, headers), String.class);
+            batch.calls++;   // 실패한 요청도 센다 (한도를 넉넉하게 지키려고)
+            String response = postTextSearch(body, headers);
             JsonNode root = objectMapper.readTree(response);
 
+            int before = fetchedPlaces.size();
             parsePlacesFromNode(root, fetchedPlaces, city, formalizedCity, isEmergency);
+            if (isKnown != null && mostlyKnown(fetchedPlaces.subList(before, fetchedPlaces.size()), isKnown)) {
+                batch.stoppedEarly = true;
+                return batch;
+            }
 
             String nextToken = root.path("nextPageToken").asText(null);
             int pageCount = 1;
@@ -345,10 +371,16 @@ public class GoogleMapsService {
                 System.out.println("➡️ [" + searchItem + "] 다음 페이지 토큰 발견! " + (pageCount + 1) + "페이지 수집 중...");
 
                 body.put("pageToken", nextToken);
-                String nextResponse = restTemplate.postForObject(TEXT_SEARCH_URL, new HttpEntity<>(body, headers), String.class);
+                batch.calls++;
+                String nextResponse = postTextSearch(body, headers);
                 JsonNode nextRoot = objectMapper.readTree(nextResponse);
 
+                before = fetchedPlaces.size();
                 parsePlacesFromNode(nextRoot, fetchedPlaces, city, formalizedCity, isEmergency);
+                if (isKnown != null && mostlyKnown(fetchedPlaces.subList(before, fetchedPlaces.size()), isKnown)) {
+                    batch.stoppedEarly = true;
+                    break;
+                }
                 nextToken = nextRoot.path("nextPageToken").asText(null);
                 pageCount++;
             }
@@ -358,7 +390,19 @@ public class GoogleMapsService {
         } catch (Exception e) {
             System.out.println("구글 장소 크롤링 실패: " + e.getMessage());
         }
-        return fetchedPlaces;
+        return batch;
+    }
+
+    /** 장소 검색(Text Search) 요청 한 번 (테스트에서 바꿔 끼울 수 있게 따로 뺐다) */
+    protected String postTextSearch(Map<String, Object> body, HttpHeaders headers) {
+        return restTemplate.postForObject(TEXT_SEARCH_URL, new HttpEntity<>(body, headers), String.class);
+    }
+
+    /** 이번 쪽에서 품질 기준을 넘은 장소가 없거나, 그중 대부분이 이미 DB 에 있으면 true */
+    static boolean mostlyKnown(List<Place> passedThisPage, java.util.function.Predicate<String> isKnown) {
+        if (passedThisPage.isEmpty()) return true;
+        long known = passedThisPage.stream().filter(p -> p.getPlaceId() != null && isKnown.test(p.getPlaceId())).count();
+        return known >= Math.ceil(passedThisPage.size() * KNOWN_STOP_RATIO);
     }
 
     // 6. 수질 관리 필터

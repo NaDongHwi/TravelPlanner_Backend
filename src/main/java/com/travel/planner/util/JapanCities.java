@@ -156,8 +156,12 @@ public final class JapanCities {
         return best;
     }
 
-    /** 입국 도시 가까운 곳에서 시작해 가장 가까운 도시로 이어 가고, 출국 도시 가까운 곳을 마지막에 둔다 (표에 없는 도시는 맨 뒤) */
-    static List<String> orderAsRoute(List<String> cities, String inCity, String outCity) {
+    /**
+     * 입국 도시 가까운 곳에서 시작해 가장 가까운 도시로 이어 가고, 출국 도시 가까운 곳을 마지막에 둔다 (표에 없는 도시는 맨 뒤).
+     * 가장 가까운 도시로만 이으면 길에서 벗어난 도시(가나자와 등)가 끝까지 남아 마지막에 크게 되돌아가므로,
+     * 이은 뒤 구간 뒤집기(2-opt)로 엇갈린 구간을 편다. 첫 도시와 마지막 도시는 그대로 둔다.
+     */
+    public static List<String> orderAsRoute(List<String> cities, String inCity, String outCity) {
         List<City> known = new ArrayList<>();
         List<String> unknown = new ArrayList<>();
         for (String s : cities) {
@@ -190,8 +194,46 @@ public final class JapanCities {
             cur = next;
         }
         if (out != null && out != in) route.add(out.name);
+        // 입국·출국 도시가 같으면 마지막에 다시 입국 도시로 돌아오는 길이므로, 돌아오는 구간까지 넣어 편다
+        route = untangle(route, out == null || out == in);
         route.addAll(unknown);
         return route;
+    }
+
+    /**
+     * 2-opt: 두 구간을 바꿔 이으면 전체 거리가 줄어드는 동안 가운데를 뒤집는다.
+     * @param returnsToStart true 면 마지막 도시 뒤에 첫 도시로 돌아오는 구간이 있다고 보고(첫 도시만 고정), false 면 양 끝 고정
+     */
+    static List<String> untangle(List<String> route, boolean returnsToStart) {
+        int size = route.size();
+        if (size < (returnsToStart ? 3 : 4)) return route;
+        int n = returnsToStart ? size + 1 : size;
+        City[] c = new City[n];
+        for (int i = 0; i < size; i++) c[i] = find(route.get(i));
+        if (returnsToStart) c[size] = c[0];   // 돌아오는 자리 (계산용)
+        boolean improved = true;
+        for (int pass = 0; improved && pass < 50; pass++) {
+            improved = false;
+            for (int i = 0; i < n - 3; i++) {
+                for (int j = i + 2; j < n - 1; j++) {
+                    double before = km(c[i], c[i + 1]) + km(c[j], c[j + 1]);
+                    double after = km(c[i], c[j]) + km(c[i + 1], c[j + 1]);
+                    if (after + 1e-6 < before) {
+                        for (int a = i + 1, b = j; a < b; a++, b--) {
+                            City t = c[a]; c[a] = c[b]; c[b] = t;
+                        }
+                        improved = true;
+                    }
+                }
+            }
+        }
+        List<String> out = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) out.add(c[i].name);
+        return out;
+    }
+
+    private static double km(City a, City b) {
+        return DistanceUtil.calculateDistance(a.lat, a.lng, b.lat, b.lng);
     }
 
     private static City nearestTo(List<City> cities, City point) {

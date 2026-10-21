@@ -396,15 +396,20 @@ public final class SeaRoutes {
         String b = landOf(toLat, toLng);
         if (a == null || b == null || a.equals(b)) return null;
         Pref pref = prefOf(transportation);
-        if (isRailLinked(a, b) && pref != Pref.FLIGHT) return null;
+        if (isRailLinked(a, b) && pref == Pref.SHIP) return null;
         String key = a + '|' + b + '|' + transportation + '|' + Math.round(fromLat * 50) + ',' + Math.round(fromLng * 50)
                 + '|' + Math.round(toLat * 50) + ',' + Math.round(toLng * 50);
         Integer cached = MINUTES_CACHE.get(key);
-        if (cached != null) return cached;
-        int minutes = search(a, b, fromLat, fromLng, toLat, toLng, untag(transportation), pref).minutes;
+        if (cached != null) return cached < 0 ? null : cached;
+        Crossing c = search(a, b, fromLat, fromLng, toLat, toLng, untag(transportation), pref);
+        Integer minutes = c.minutes;
+        if (isRailLinked(a, b) && pref == Pref.AUTO
+                && (c.unknown || c.minutes + 60 >= railMinutes(fromLat, fromLng, toLat, toLng, untag(transportation)))) {
+            minutes = -1;   // 철도가 낫다 (아래에서 null 로 돌려준다)
+        }
         if (MINUTES_CACHE.size() > 50_000) MINUTES_CACHE.clear();
         MINUTES_CACHE.put(key, minutes);
-        return minutes;
+        return minutes < 0 ? null : minutes;
     }
 
     /** 고르지 않은 수단을 쓸 때 더하는 벌점(분). 고른 수단으로 갈 수 있으면 그쪽을 쓰게 한다 */
@@ -419,10 +424,22 @@ public final class SeaRoutes {
         String b = landOf(toLat, toLng);
         if (a == null || b == null || a.equals(b)) return null;
         Pref pref = prefOf(transportation);
-        // 본토 ↔ 홋카이도는 철도로 갈 수 있다: 비행기를 고른 경우에만 바다 건너는 길로 본다
-        if (isRailLinked(a, b) && pref != Pref.FLIGHT) return null;
         String ground = untag(transportation);
+        if (isRailLinked(a, b)) {
+            // 본토 ↔ 홋카이도는 철도로 갈 수 있다. 배를 고르면 철도(배편은 표에 없음),
+            // 고르지 않았으면 비행기가 철도보다 1시간 넘게 빠를 때만 비행기 (도쿄 → 삿포로·후라노 등)
+            if (pref == Pref.SHIP) return null;
+            Crossing air = search(a, b, fromLat, fromLng, toLat, toLng, ground, pref);
+            if (pref == Pref.AUTO && (air.unknown || air.minutes + 60 >= railMinutes(fromLat, fromLng, toLat, toLng, ground))) return null;
+            return air;
+        }
         return search(a, b, fromLat, fromLng, toLat, toLng, ground, pref);
+    }
+
+    /** 철도로 갈 때의 대략 시간 (직선거리 추정) */
+    private static int railMinutes(double lat1, double lng1, double lat2, double lng2, String ground) {
+        String mode = ground == null || ground.isBlank() || ground.contains("도보") && !ground.contains("대중교통") ? "대중교통" : ground;
+        return TravelTimeEstimator.minutesForDistance(DistanceUtil.calculateDistance(lat1, lng1, lat2, lng2), mode);
     }
 
     private static boolean isRailLinked(String a, String b) {

@@ -985,6 +985,7 @@ public class PlanService {
             DayPlan dayPlan = planDay(ctx, st, plan.warnings);
             dayPlan.badWeather = in.badWeatherByDate.get(ctx.date);   // 일자별 개요에 예보 여부를 적기 위해 남긴다
             dayPlan.paceNote = paceNote(ctx.kind, ctx.sightMinutes);
+            if (dayPlan.paceNote == null) dayPlan.paceNote = moveDayNote(ctx, start, end, day > 1 ? dayCities.get(day - 2) : null);
             plan.days.add(dayPlan);
         }
 
@@ -1096,6 +1097,18 @@ public class PlanService {
                         : "가벼운 날: 긴 여행 중 쉬어 가도록 관광을 " + hoursText(m) + " 안으로 줄이고 일찍 마치는 날";
             default: return null;
         }
+    }
+
+    /** 도시를 옮기는 이동이 이만큼(분) 이상이면 "이동일"로 안내한다 */
+    static final int LONG_MOVE_MIN = 180;
+
+    /** 전날과 다른 도시로 크게 옮기는 날: "이동일: 나가사키 → 가나자와 (도시 사이 이동 약 5시간 25분)" */
+    private String moveDayNote(DayContext ctx, Place start, Place end, String prevCity) {
+        if (start == null || end == null || prevCity == null || ctx.city == null || prevCity.equals(ctx.city)) return null;
+        if (start.getLatitude() == null || end.getLatitude() == null) return null;
+        int move = travel(ctx, start.getLatitude(), start.getLongitude(), end.getLatitude(), end.getLongitude());
+        if (move < LONG_MOVE_MIN) return null;
+        return "이동일: " + prevCity + " → " + ctx.city + " (도시 사이 이동 약 " + hoursText(move) + ")";
     }
 
     /** 180 → "3시간", 150 → "2시간 30분", 30 → "30분" */
@@ -1227,6 +1240,10 @@ public class PlanService {
             // (a) 고정 일정 시각이 되면 그것부터
             if (enterFixedBlockIfDue(ctx, ds, warnings)) continue;
 
+            // 지금 떠나도 숙소에 일과 종료(+복귀 여유) 안에 못 닿으면 더 넣지 않고 숙소로 간다
+            // (도시를 크게 옮기는 날, 자유 시간·자유 식사를 넣다가 숙소 도착이 자정을 넘던 문제)
+            if (nextBlock(ctx) == null && latestLeave(ctx, ds) != null && ds.cur >= latestLeave(ctx, ds)) break;
+
             Meal pending = pendingMeal(ds);
             boolean mustEat = pending != null && ds.cur >= mustFrom(ds, pending);
 
@@ -1246,7 +1263,8 @@ public class PlanService {
                     skipOptionalMeal(ctx, ds, st, pending);
                     continue;
                 }
-                if (pending == Meal.DINNER && nextBlock == null && isLodging(ctx.endAnchor) && !hasRestaurantNearby(ds, st)) {
+                if (pending == Meal.DINNER && nextBlock == null && isLodging(ctx.endAnchor) && !hasRestaurantNearby(ds, st)
+                        && dinnerNearLodgingFits(ctx, ds)) {
                     dinnerNearLodging(ctx, ds);
                     continue;
                 }
@@ -1283,6 +1301,12 @@ public class PlanService {
                 if (mealAt - ds.cur >= 120 && !ctx.relaxed) {
                     warnings.add(String.format("Day %d: %s~%s 에 넣을 수 있는 장소가 부족해 자유 시간으로 두었습니다.",
                             ctx.dayNumber, TimeUtil.format(ds.cur), TimeUtil.format(mealAt)));
+                }
+                Integer leave = latestLeave(ctx, ds);
+                if (leave != null && mealAt > leave) {
+                    if (leave - ds.cur >= 30) addFree(ds, ds.cur, leave);
+                    ds.cur = Math.max(ds.cur, leave);
+                    break;
                 }
                 addFree(ds, ds.cur, mealAt);
                 ds.cur = mealAt;
@@ -1457,6 +1481,17 @@ public class PlanService {
         ds.lastKind = null;
     }
 
+    /**
+     * 숙소(도착 앵커)로 떠나야 하는 마지막 시각 = 일과 종료 + 복귀 여유 − 지금 위치에서 숙소까지의 이동 시간.
+     * 출국 마감이 있는 날은 다른 규칙(hardDeadlineMin)이 지키므로 null. 도착 앵커나 현재 위치를 모르면 null.
+     */
+    private Integer latestLeave(DayContext ctx, DayState ds) {
+        if (ctx.endAnchor == null || ctx.hardDeadlineMin != null || ds.locLat == null || ds.locLng == null
+                || ctx.endAnchor.getLatitude() == null || ctx.endAnchor.getLongitude() == null) return null;
+        int back = travelFromCurrent(ctx, ds, ctx.endAnchor.getLatitude(), ctx.endAnchor.getLongitude());
+        return ctx.endMin + RETURN_GRACE_MIN - back;
+    }
+
     private boolean addMealPlaceholder(DayContext ctx, DayState ds, Meal meal, FixedBlock nextBlock) {
         int start = ds.cur;
         int end = start + MEAL_PLACEHOLDER_MIN;
@@ -1466,6 +1501,8 @@ public class PlanService {
             int back = travelFromCurrent(ctx, ds, ctx.endAnchor.getLatitude(), ctx.endAnchor.getLongitude());
             if (end + back > ctx.hardDeadlineMin) return false;
         }
+        Integer leave = latestLeave(ctx, ds);
+        if (leave != null && end > leave) return false;   // 먹고 나면 숙소에 제때 못 간다
         ds.items.add(new SimulatedItinerary(SimulatedItinerary.Type.MEAL, null, meal.label + " 식사 (주변 자유 식사)",
                 start, end, 0, ds.locLat, ds.locLng));
         ds.mealsDone.add(meal);
@@ -1491,6 +1528,12 @@ public class PlanService {
      * 저녁 시간인데 주변에 식당이 없는 외진 곳이면, 그 자리에 "자유 식사"를 넣지 않고
      * 숙소로 돌아가 숙소 근처에서 저녁을 먹는다. 그 뒤로는 숙소 주변만 본다.
      */
+    /** 숙소로 가서 저녁을 먹어도 일과 종료(+복귀 여유) 안에 끝나는가 */
+    private boolean dinnerNearLodgingFits(DayContext ctx, DayState ds) {
+        int back = travelFromCurrent(ctx, ds, ctx.endAnchor.getLatitude(), ctx.endAnchor.getLongitude());
+        return ds.cur - ds.bufferPending + back + MEAL_PLACEHOLDER_MIN <= ctx.endMin + RETURN_GRACE_MIN;
+    }
+
     private void dinnerNearLodging(DayContext ctx, DayState ds) {
         Place lodging = ctx.endAnchor;
         int back = travelFromCurrent(ctx, ds, lodging.getLatitude(), lodging.getLongitude());

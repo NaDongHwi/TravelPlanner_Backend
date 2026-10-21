@@ -74,7 +74,9 @@ class SeaRoutesTest {
     @Test
     void sameLandIsNotACrossing() {
         assertNull(cross(TOKYO_STA, HIROSHIMA_STA, "대중교통"));
-        assertNull(cross(TOKYO_STA, SAPPORO, "대중교통"), "본토 ↔ 홋카이도는 철도(세이칸 터널)로 간다");
+        assertNull(cross(new double[]{40.8286, 140.7343}, new double[]{41.7735, 140.7266}, "대중교통"), "아오모리 → 하코다테는 철도(세이칸 터널)");
+        assertNull(cross(TOKYO_STA, SAPPORO, SeaRoutes.tag("대중교통", "배")), "배를 고르면 본토 ↔ 홋카이도는 철도");
+        assertEquals(List.of("비행기"), modes(cross(TOKYO_STA, SAPPORO, "대중교통")), "고르지 않았으면 훨씬 빠른 비행기 (철도 8시간 안팎)");
         assertNull(cross(NAHA_KOKUSAI, CHURAUMI, "대중교통"));
     }
 

@@ -221,6 +221,39 @@ class LongTripTest {
     }
 
     @Test
+    void tourRouteDoesNotDoubleBack() {
+        // 가장 가까운 도시로만 이으면 가나자와가 끝에 남아 규슈 → 가나자와 → 규슈로 되돌아갔다
+        List<String> cities = new ArrayList<>(List.of("도쿄", "나고야", "교토", "오사카", "히로시마", "후쿠오카", "나가사키", "가나자와"));
+        List<String> route = JapanCities.orderAsRoute(cities, "도쿄", "후쿠오카");
+        assertEquals("도쿄", route.get(0));
+        assertEquals("후쿠오카", route.get(route.size() - 1));
+        int kanazawa = route.indexOf("가나자와");
+        assertTrue(kanazawa > 0 && kanazawa < route.indexOf("히로시마"), "가나자와는 규슈로 가기 전에: " + route);
+
+        // 입국·출국이 같은 도시면 돌아오는 길까지 보고 편다: 마지막 도시는 도쿄 가까이
+        List<String> loop = JapanCities.orderAsRoute(new ArrayList<>(List.of("도쿄", "요코하마", "나고야", "오사카", "후쿠오카", "가나자와", "하코네")), "도쿄", "도쿄");
+        String last = loop.get(loop.size() - 1);
+        JapanCities.City tokyo = JapanCities.find("도쿄");
+        JapanCities.City end = JapanCities.find(last);
+        assertTrue(com.travel.planner.util.DistanceUtil.calculateDistance(tokyo.lat, tokyo.lng, end.lat, end.lng) < 300, "마지막 도시 " + last + " " + loop);
+    }
+
+    @Test
+    void farHotelIsReachedBeforeTheDayEnds() {
+        // 2일차 밤 숙소가 약 400km 떨어진 오사카: 자유 시간·자유 식사를 넣다가 숙소 도착이 자정을 넘으면 안 된다
+        TripInput in = tokyoTrip(3, false);
+        in.lodgingByNight.put(1, TestPlaces.place("H1", "도쿄 호텔", "도쿄", 35.68, 139.76, "숙소", null, null));
+        in.lodgingByNight.put(2, TestPlaces.place("H2", "오사카 호텔", "오사카", 34.70, 135.50, "숙소", null, null));
+        in.dayCities = new ArrayList<>(List.of("도쿄", "오사카", "오사카"));
+        TripPlan plan = planService.planTrip(in);
+        DayPlan move = plan.getDays().get(1);
+        SimulatedItinerary end = move.getItems().get(move.getItems().size() - 1);
+        assertEquals(Type.END, end.getType());
+        assertTrue(end.getStartMin() <= 22 * 60 + PlanService.RETURN_GRACE_MIN, "숙소 도착 " + end.getTime());
+        assertTrue(move.getPaceNote() != null && move.getPaceNote().startsWith("이동일"), "긴 이동일 안내: " + move.getPaceNote());
+    }
+
+    @Test
     void sightBudgetIsTimeNotCount() {
         // 예산 4시간: 20분짜리는 여러 곳, 2시간짜리는 두 곳, 첫 곳은 예산보다 길어도(테마파크) 넣고 그 뒤로는 막는다
         assertTrue(PlanService.fitsSightBudget(240, 3, 60, 20), "짧은 곳 네 번째도 들어간다");

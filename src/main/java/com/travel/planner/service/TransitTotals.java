@@ -42,6 +42,8 @@ public final class TransitTotals {
         int unknownRoute = 0;
         int busStopRoute = 0;
         int taxiRoute = 0;
+        int seaRoute = 0;
+        int flightRoute = 0;
         int officialFare = 0;
         int railEstimate = 0;
         int railTable = 0;
@@ -55,6 +57,10 @@ public final class TransitTotals {
             if ("distance".equals(leg.getSource()) && leg.getFareYen() != null) unknownRoute++;
             if ("bus-stops".equals(leg.getSource())) busStopRoute++;
             if ("taxi".equals(leg.getSource())) taxiRoute++;
+            if ("sea".equals(leg.getSource())) {
+                seaRoute++;
+                if (leg.getMode() != null && leg.getMode().contains("비행기")) flightRoute++;
+            }
             boolean rail = leg.getSource() != null && leg.getSource().startsWith("rail-network");
             if (hasFareBasis(leg)) {
                 // 승차 단계마다 요금의 근거가 적혀 있다
@@ -89,6 +95,10 @@ public final class TransitTotals {
             }
             if (taxiRoute > 0) {
                 note.append(" ").append(taxiRoute).append("개 구간은 잇는 대중교통이 없어 택시 요금(차 한 대, 추정)을 넣었습니다.");
+            }
+            if (seaRoute > 0) {
+                note.append(" 섬으로 가는 ").append(seaRoute).append("개 구간은 배·비행기 노선표(운항사 공개 정보, 대략값)로 계산했습니다.");
+                if (flightRoute > 0) note.append(" 항공권 요금은 합계에 넣지 않았습니다.");
             }
             if (unknownRoute > 0) {
                 note.append(" ").append(unknownRoute).append("개 구간은 가져온 노선 자료에 맞는 경로가 없어 버스 등으로 보고 거리 기준으로 계산했습니다(노선 미확인).");

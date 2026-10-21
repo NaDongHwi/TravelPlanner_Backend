@@ -50,6 +50,17 @@ public class PlanRequest {
     @Schema(description = "주요 이동수단 (Step 5)", example = "도보 및 대중교통")
     private String transportation;
 
+    @Schema(description = "섬으로 이동할 때의 수단: \"비행기\" 또는 \"배\" (선택). 비우면 노선표에서 더 빠른 쪽을 고른다. "
+            + "고른 수단으로 갈 수 없는 구간(배편이 없는 이시가키 등, 공항이 없는 미야지마 등)은 다른 수단으로 안내한다", example = "배")
+    @com.fasterxml.jackson.annotation.JsonAlias({"islandTransportation", "islandMove", "interIslandTransport", "seaTransport"})
+    private String islandTransport;
+
+    /** 구간 계산·이동 시간 추정에 넘기는 이동 수단 (섬 이동 수단을 붙인 값) */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public String legTransport() {
+        return com.travel.planner.transit.SeaRoutes.tag(transportation, islandTransport);
+    }
+
     @Schema(description = "고정 일정 리스트 (Step 6)")
     private List<FixedScheduleInput> fixedSchedules;
 

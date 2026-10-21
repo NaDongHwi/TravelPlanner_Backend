@@ -202,7 +202,7 @@ public class PlanGenerationService {
         response.setTitle(PlanSummarizer.tripTitle(request, tripPlan.getDays()));
         response.setReason(PlanSummarizer.tripOverview(request, tripPlan.getDays()));
         response.setDays(PlanSummarizer.summarizeDays(tripPlan.getDays()));
-        response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage(), request.getTransportation()));
+        response.setTimeline(timelineAssembler.toTimeline(tripPlan.getDays(), request.getLanguage(), request.legTransport()));
         // 구간별 교통 정보에서 일자별·전체 교통비를 합산해 개요와 요약에 붙인다
         TransitTotals.apply(response, railRouteService.isNetworkLoaded());
         // 여행 전체의 요금 합계와 견주어 이득인 교통 패스를 고른다

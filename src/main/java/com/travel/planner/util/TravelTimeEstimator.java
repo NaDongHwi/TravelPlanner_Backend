@@ -10,6 +10,9 @@ public final class TravelTimeEstimator {
     private TravelTimeEstimator() {}
 
     public static int minutes(double lat1, double lng1, double lat2, double lng2, String transportation) {
+        // 바다를 건너는 구간(섬·오키나와 등)은 배·비행기 노선표로 잡는다 (직선거리로 보면 너무 짧거나 길게 나온다)
+        Integer sea = com.travel.planner.transit.SeaRoutes.crossingMinutes(lat1, lng1, lat2, lng2, transportation);
+        if (sea != null) return sea;
         double km = DistanceUtil.calculateDistance(lat1, lng1, lat2, lng2);
         return minutesForDistance(km, transportation);
     }

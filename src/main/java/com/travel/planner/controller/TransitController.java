@@ -46,12 +46,13 @@ public class TransitController {
     @Operation(summary = "두 지점 사이의 이동 방법·요금 추정",
             description = "도보 / 대중교통(철도·버스, 환승 포함) / 노선 미확인(거리 기준) 중 하나로 돌려줍니다. 개별 출발 시각이 아니라 평균 소요 시간과 운행 간격으로 계산한 추정값입니다. "
                     + "minutes 를 주면 그 시간을 일정상의 이동 시간으로 보고 판단합니다. date(yyyy-MM-dd)를 주면 그 요일의 버스 운행 횟수와 계절 노선의 운행 기간을, "
-                    + "time(HH:mm)을 주면 첫차·막차 밖인지를 함께 봅니다.")
+                    + "time(HH:mm)을 주면 첫차·막차 밖인지를 함께 봅니다. 섬·오키나와처럼 바다를 건너는 구간은 배·비행기로 안내하며, islandTransport(\"비행기\"/\"배\")로 수단을 고를 수 있습니다.")
     public ResponseEntity<?> route(@RequestParam double fromLat, @RequestParam double fromLng,
                                    @RequestParam double toLat, @RequestParam double toLng,
                                    @RequestParam(defaultValue = "출발지") String fromName,
                                    @RequestParam(defaultValue = "도착지") String toName,
                                    @RequestParam(defaultValue = "도보 및 대중교통") String transportation,
+                                   @RequestParam(required = false) String islandTransport,
                                    @RequestParam(required = false) Integer minutes,
                                    @RequestParam(required = false) String date,
                                    @RequestParam(required = false) String time) {
@@ -66,6 +67,7 @@ public class TransitController {
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", "date 는 yyyy-MM-dd, time 은 HH:mm 형식으로 보내 주세요."));
         }
+        transportation = com.travel.planner.transit.SeaRoutes.tag(transportation, islandTransport);   // 섬 이동: "비행기"/"배"
         int schedule = minutes != null ? minutes
                 : com.travel.planner.util.TravelTimeEstimator.minutes(fromLat, fromLng, toLat, toLng, transportation);
         TransitLegDto leg = railRouteService.leg(fromLat, fromLng, fromName, toLat, toLng, toName, transportation, schedule, day, depart);

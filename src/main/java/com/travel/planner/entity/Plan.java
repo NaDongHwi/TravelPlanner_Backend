@@ -84,6 +84,15 @@ public class Plan {
     @Column
     private String transportation;
 
+    /** 섬 이동 수단 ("비행기"/"배", 비우면 자동) */
+    @Column
+    private String islandTransport;
+
+    /** 구간 계산에 쓰는 이동 수단 (섬 이동 수단을 붙인 값) */
+    public String legTransport() {
+        return com.travel.planner.transit.SeaRoutes.tag(transportation != null ? transportation : "대중교통", islandTransport);
+    }
+
     @Column
     private java.time.LocalTime preferredStartTime;
 

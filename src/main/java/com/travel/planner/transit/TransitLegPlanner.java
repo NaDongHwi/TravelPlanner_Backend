@@ -123,6 +123,9 @@ public final class TransitLegPlanner {
     public static TransitLegDto plan(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
                                      double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
                                      LocalDate date, Integer departMinute, Summit fromHike, Summit toHike) {
+        TransitLegDto sea = sea(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes,
+                date, departMinute, fromHike, toHike);
+        if (sea != null) return sea;
         String mode = transportation == null ? "" : transportation;
         boolean car = mode.contains("렌트") || mode.contains("자동차") || mode.toLowerCase().contains("car");
         if (fromHike == null && toHike == null) {
@@ -286,6 +289,9 @@ public final class TransitLegPlanner {
                                      LocalDate date, Integer departMinute) {
         double km = DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng);
         if (km < 0.05) return null;
+        TransitLegDto sea = sea(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, transportation, scheduleMinutes,
+                date, departMinute, null, null);
+        if (sea != null) return sea;
 
         String mode = transportation == null ? "" : transportation;
         boolean car = mode.contains("렌트") || mode.contains("자동차") || mode.contains("택시") || mode.toLowerCase().contains("car");
@@ -440,6 +446,167 @@ public final class TransitLegPlanner {
         }
         leg.setNote(note.toString());
         return leg;
+    }
+
+    /**
+     * 바다를 건너는 구간(섬·오키나와 등)이면 배·비행기를 넣은 안내, 아니면 null ({@link SeaRoutes}).
+     * 항구·공항까지와 내린 뒤의 이동은 땅 위 구간으로 다시 계산해(철도·버스·도보·택시) 앞뒤에 붙인다.
+     */
+    static TransitLegDto sea(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                             double toLat, double toLng, String toName, String transportation, int scheduleMinutes,
+                             LocalDate date, Integer departMinute, Summit fromHike, Summit toHike) {
+        SeaRoutes.Crossing c = SeaRoutes.crossing(fromLat, fromLng, toLat, toLng, transportation);
+        if (c == null) return null;
+        String ground = SeaRoutes.untag(transportation);
+        double km = DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng);
+        TransitLegDto leg = new TransitLegDto();
+        leg.setEstimated(true);
+        leg.setDistanceKm(Math.round(km * 10.0) / 10.0);
+        leg.setSource("sea");
+        leg.setFareSource("estimate");
+
+        if (c.unknown) {
+            leg.setMode("배 등");
+            leg.setMinutes(c.minutes);
+            leg.setSummary(SeaRoutes.landName(c.fromLand) + " → " + SeaRoutes.landName(c.toLand) + ": 배나 비행기가 필요한 구간 (운항 정보 없음)");
+            leg.setNote("바다를 건너는 구간인데 등록된 배·비행기 노선이 없어 경로를 안내하지 못했습니다. 시간은 배를 탄다고 보고 거리로 어림한 값이며, "
+                    + "요금은 넣지 않았습니다. 운항사에서 배편·항공편을 확인해 주세요.");
+            return leg;
+        }
+
+        int minutes = 0;
+        int fare = 0;
+        int childFare = 0;
+        boolean unknownShipFare = false;
+        int transfers = c.routes.size() - 1;
+        double curLat = fromLat, curLng = fromLng;
+        String curName = fromName;
+        Summit curHike = fromHike;
+        List<String> parts = new ArrayList<>();
+        StringBuilder note = new StringBuilder();
+        for (int i = 0; i < c.routes.size(); i++) {
+            SeaRoutes.Route route = c.routes.get(i);
+            SeaRoutes.Hub start = c.hops.get(i)[0];
+            SeaRoutes.Hub end = c.hops.get(i)[1];
+            Integer depart = departMinute == null ? null : departMinute + minutes;
+            TransitLegDto sub = groundLeg(graph, buses, names, curLat, curLng, curName, start, ground, date, depart, curHike, null);
+            if (sub != null) {
+                minutes += sub.getMinutes();
+                fare += sub.getFareYen() == null ? 0 : sub.getFareYen();
+                childFare += sub.getChildFareYen() == null ? 0 : sub.getChildFareYen();
+                transfers += sub.getTransfers();
+                addSteps(leg, sub, curName, start.name);
+            }
+            TransitLegDto.Step wait = new TransitLegDto.Step();
+            wait.setType("대기");
+            wait.setCategory(route.modeName());
+            wait.setFrom(start.name);
+            wait.setTo(start.name);
+            wait.setMinutes(route.boardMinutes);
+            leg.getSteps().add(wait);
+
+            TransitLegDto.Step ride = new TransitLegDto.Step();
+            ride.setType("승차");
+            ride.setCategory(route.modeName());
+            ride.setOperator(route.operator);
+            ride.setFrom(start.name);
+            ride.setTo(end.name);
+            ride.setMinutes(route.rideMinutes);
+            ride.setKm(Math.round(DistanceUtil.calculateDistance(start.lat, start.lng, end.lat, end.lng) * 10.0) / 10.0);
+            ride.setFareYen(route.fareYen);
+            ride.setFareConfirmed(false);
+            ride.setFareBasis(FareBook.Basis.ESTIMATE.code);
+            leg.getSteps().add(ride);
+            if (route.fareYen != null) {
+                fare += route.fareYen;
+                childFare += (int) (Math.ceil(route.fareYen / 2.0 / 10.0) * 10);   // 배의 아동 요금은 대개 절반
+            } else if (!route.flight) {
+                unknownShipFare = true;
+            }
+
+            TransitLegDto.Step after = new TransitLegDto.Step();
+            after.setType("도보");
+            after.setCategory(route.flight ? "공항 나오기" : "배에서 내리기");
+            after.setFrom(end.name);
+            after.setTo(end.name);
+            after.setMinutes(route.afterMinutes);
+            leg.getSteps().add(after);
+            minutes += route.totalMinutes();
+
+            parts.add(route.modeName() + " " + start.name + " → " + end.name + " (약 " + route.rideMinutes + "분)");
+            if (route.note != null) note.append(route.note).append(' ');
+            curLat = end.lat;
+            curLng = end.lng;
+            curName = end.name;
+            curHike = null;
+        }
+        Integer depart = departMinute == null ? null : departMinute + minutes;
+        TransitLegDto last = groundLeg(graph, buses, names, curLat, curLng, curName, toLat, toLng, toName, ground, date, depart, null, toHike);
+        if (last != null) {
+            minutes += last.getMinutes();
+            fare += last.getFareYen() == null ? 0 : last.getFareYen();
+            childFare += last.getChildFareYen() == null ? 0 : last.getChildFareYen();
+            transfers += last.getTransfers();
+            addSteps(leg, last, curName, toName);
+        }
+
+        leg.setMode(c.anyFlight() && c.anyShip() ? "비행기·배" : c.anyFlight() ? "비행기" : "배");
+        leg.setMinutes(minutes);
+        leg.setFareYen(fare);
+        leg.setChildFareYen(childFare);
+        leg.setTransfers(transfers);
+        leg.setSummary(String.join(" · ", parts) + ", 전체 약 " + minutes + "분");
+        if (c.prefNote != null) note.insert(0, c.prefNote + " ");
+        if (c.anyFlight()) note.append("항공권 요금은 예약 시점에 따라 크게 달라 요금 합계에 넣지 않았습니다. 비행시간은 거리로 어림했고, 공항에는 1시간 전에 도착한다고 보았습니다. ");
+        if (unknownShipFare) note.append("요금을 확인하지 못한 배편이 있어 그 요금은 합계에서 뺐습니다. ");
+        if (ground != null && (ground.contains("렌트") || ground.contains("자동차")) && c.anyFlight()) {
+            note.append("렌터카는 도착한 곳에서 다시 빌린다고 보았습니다. ");
+        }
+        note.append("배·비행기의 시간과 요금은 운항사 공개 정보를 옮긴 대략값(2026년 10월 기준)입니다. 출발 시각은 시각표를 확인해 주세요.");
+        if (minutes > scheduleMinutes + 10) {
+            note.append(" 이 경로의 추정 시간(").append(minutes).append("분)이 일정의 이동 시간(").append(scheduleMinutes).append("분)보다 깁니다.");
+        }
+        leg.setNote(note.toString().trim());
+        return leg;
+    }
+
+    /** 땅 위 구간의 단계를 붙인다. 단계가 없는 추정 구간(노선 자료 없음)은 한 단계로 만들어 붙인다 (단계 시간의 합 = 전체 시간) */
+    private static void addSteps(TransitLegDto leg, TransitLegDto sub, String from, String to) {
+        if (sub.getSteps().isEmpty()) {
+            TransitLegDto.Step step = new TransitLegDto.Step();
+            step.setType("승차");
+            step.setCategory(sub.getMode());
+            step.setFrom(from);
+            step.setTo(to);
+            step.setMinutes(sub.getMinutes());
+            step.setFareYen(sub.getFareYen());
+            step.setFareConfirmed(false);
+            step.setFareBasis(FareBook.Basis.ESTIMATE.code);
+            leg.getSteps().add(step);
+        } else {
+            leg.getSteps().addAll(sub.getSteps());
+        }
+        leg.getFareRides().addAll(sub.getFareRides());
+    }
+
+    private static TransitLegDto groundLeg(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                                           SeaRoutes.Hub hub, String ground, LocalDate date, Integer departMinute, Summit fromHike, Summit toHike) {
+        return groundLeg(graph, buses, names, fromLat, fromLng, fromName, hub.lat, hub.lng, hub.name, ground, date, departMinute, fromHike, toHike);
+    }
+
+    /** 항구·공항까지(또는 내린 뒤) 땅 위 구간. 걸어서만 다니는 여행이라도 2km 넘으면 대중교통으로 찾는다 */
+    private static TransitLegDto groundLeg(RailGraph graph, BusStopIndex buses, Names names, double fromLat, double fromLng, String fromName,
+                                           double toLat, double toLng, String toName, String ground, LocalDate date, Integer departMinute,
+                                           Summit fromHike, Summit toHike) {
+        double km = DistanceUtil.calculateDistance(fromLat, fromLng, toLat, toLng);
+        if (km < 0.05) return null;
+        String mode = ground == null || ground.isBlank() ? "대중교통" : ground;
+        if (mode.contains("도보") && !mode.contains("대중교통") && km > 2.0) mode = "대중교통";
+        int schedule = com.travel.planner.util.TravelTimeEstimator.minutesForDistance(km, mode);
+        if (fromHike != null || toHike != null) {
+            return plan(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, mode, schedule, date, departMinute, fromHike, toHike);
+        }
+        return plan(graph, buses, names, fromLat, fromLng, fromName, toLat, toLng, toName, mode, schedule, date, departMinute);
     }
 
     /** 택시 요금: 첫 1.096km 500엔, 이후 255m 마다 100엔 (도쿄 23구 등 2022년 개정 요금. 지역·심야에 따라 다르다) */

@@ -159,7 +159,7 @@ public class PlanReplaceService {
             PlanService.DayContext ctx = contexts.get(dayNumber);
             if (save) planPersistenceService.replaceDay(plan, dayNumber, entry.getValue());
             List<com.travel.planner.dto.AiRouteResponse.TimelineItem> dayTimeline =
-                    timelineAssembler.toTimeline(dayNumber, ctx.getDate(), entry.getValue(), restored.getLanguage(), restored.getTransportation());
+                    timelineAssembler.toTimeline(dayNumber, ctx.getDate(), entry.getValue(), restored.getLanguage(), restored.legTransport());
             com.travel.planner.dto.AiRouteResponse.DaySummary daySummary =
                     PlanSummarizer.summarizeDay(dayNumber, ctx.getDate(), ctx.getCity(), entry.getValue(), null, null);
             TransitTotals.applyDay(daySummary, dayTimeline);

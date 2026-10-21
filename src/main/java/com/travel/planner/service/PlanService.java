@@ -391,7 +391,7 @@ public class PlanService {
         ctx.endAnchor = endAnchor;
         ctx.startMin = dailyStartMin(request);
         ctx.endMin = dailyEndMin(request);
-        ctx.transportation = request.getTransportation();
+        ctx.transportation = request.legTransport();   // 섬 이동 수단을 붙인 값 (바다 건너는 이동 시간에 쓴다)
 
         if (dayNumber == 1) {
             Integer landing = TimeUtil.parseFlightTime(request.getInTime());

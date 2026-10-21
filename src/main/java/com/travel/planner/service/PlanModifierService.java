@@ -132,7 +132,7 @@ public class PlanModifierService {
                 response.setSuccess(true);
                 response.setRequireConfirmation(false);
                 response.setDroppedPlaces(droppedPlaces);
-                response.setUpdatedTimeline(timelineAssembler.toTimeline(dayNumber, ctx.getDate(), sim.getValidRoute(), restored.getLanguage(), restored.getTransportation()));
+                response.setUpdatedTimeline(timelineAssembler.toTimeline(dayNumber, ctx.getDate(), sim.getValidRoute(), restored.getLanguage(), restored.legTransport()));
                 response.setUpdatedDaySummary(PlanSummarizer.summarizeDay(dayNumber, ctx.getDate(), ctx.getCity(), sim.getValidRoute(), null, null));
                 TransitTotals.applyDay(response.getUpdatedDaySummary(), response.getUpdatedTimeline());
                 response.setMessage(droppedPlaces.isEmpty()

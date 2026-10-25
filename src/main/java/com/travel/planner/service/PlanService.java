@@ -57,8 +57,12 @@ public class PlanService {
     static final int MAX_WAIT_MIN = 45;
     /** 갈 곳이 없을 때 자유 시간을 넣고 기다려 줄 수 있는 최대 시간 */
     static final int MAX_DEFERRED_WAIT_MIN = 150;
-    /** 숙소 복귀는 일과 종료 시각을 이만큼까지 넘겨도 허용 */
-    static final int RETURN_GRACE_MIN = 45;
+    /**
+     * 숙소 복귀가 일과 종료 시각을 넘겨도 되는 여유(분). 0 = 종료 시각 안에 숙소에 도착한다.
+     * (앱의 "일정 종료 시간 · 숙소 도착" 안내와 맞추고, 실제 경로로 다시 검사하는 단계(TimelineConsistency)가
+     *  22:00 을 넘는 날마다 허용 여부를 묻다가 장기 일정이 실패하던 문제 때문에 45분 → 0분)
+     */
+    static final int RETURN_GRACE_MIN = 0;
     static final int MEAL_PLACEHOLDER_MIN = 60;
     static final int MUST_EAT_MAX_TRAVEL_MIN = 30;
 
